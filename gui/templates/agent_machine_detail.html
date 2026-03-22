@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AJ Robotics - {{ machine_name }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e; color: #eee; min-height: 100vh;
+        }
+        .topbar {
+            background: #16213e; padding: 12px 20px;
+            display: flex; align-items: center; justify-content: space-between;
+            border-bottom: 2px solid #0f3460;
+        }
+        .topbar h1 { font-size: 20px; color: #e94560; }
+        .topbar a { color: #4ecca3; text-decoration: none; font-size: 14px; }
+        .topbar a:hover { text-decoration: underline; }
+        .container { padding: 20px; max-width: 1000px; margin: 0 auto; }
+
+        .section { margin-bottom: 24px; }
+        .section-title {
+            color: #4ecca3; font-size: 16px;
+            margin-bottom: 12px; padding-bottom: 8px;
+            border-bottom: 1px solid #0f3460;
+        }
+
+        .info-card {
+            background: #16213e; border: 1px solid #0f3460;
+            border-radius: 10px; padding: 20px;
+        }
+        .info-row {
+            display: flex; justify-content: space-between;
+            padding: 8px 0; border-bottom: 1px solid #0f346033; font-size: 14px;
+        }
+        .info-row .label { color: #888; }
+        .info-row .value { color: #ddd; }
+
+        .resource-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 14px;
+        }
+        .res-card {
+            background: #16213e; border: 1px solid #0f3460;
+            border-radius: 10px; padding: 16px; text-align: center;
+        }
+        .res-card .label { color: #888; font-size: 12px; margin-bottom: 6px; }
+        .res-card .value { font-size: 28px; font-weight: bold; color: #4ecca3; }
+        .res-card .sub { color: #666; font-size: 11px; margin-top: 4px; }
+        .bar-bg { background: #0f3460; border-radius: 4px; height: 6px; margin-top: 8px; }
+        .bar-fill { height: 6px; border-radius: 4px; background: #4ecca3; transition: width 0.5s ease; }
+        .bar-fill.warn { background: #f0a500; }
+        .bar-fill.danger { background: #e94560; }
+
+        .status-badge {
+            display: inline-block; padding: 4px 14px; border-radius: 20px;
+            font-size: 13px; font-weight: bold;
+        }
+        .status-badge.online { background: #0f3460; color: #4ecca3; }
+        .status-badge.offline { background: #333; color: #666; }
+        .status-badge.loading { background: #0f3460; color: #f0a500; }
+
+        .error-box {
+            background: #2d1117; border: 1px solid #e94560;
+            border-radius: 8px; padding: 14px; color: #e94560;
+            font-size: 13px; margin-top: 12px;
+        }
+
+        .footer { text-align: center; padding: 20px; color: #555; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>{{ machine_name }}</h1>
+        <a href="/">&larr; Back to Dashboard</a>
+    </div>
+
+    <div class="container">
+        <!-- Machine Info -->
+        <div class="section">
+            <div class="section-title">
+                Machine Info
+                <span class="status-badge loading" id="status-badge" style="margin-left:12px">Checking...</span>
+            </div>
+            <div class="info-card">
+                <div class="info-row"><span class="label">Name</span><span class="value">{{ machine_name }}</span></div>
+                <div class="info-row"><span class="label">OS</span><span class="value">{{ machine_info.get('os', 'N/A') }}</span></div>
+                <div class="info-row"><span class="label">Host</span><span class="value">{{ machine_info.get('host', 'N/A') }}</span></div>
+                <div class="info-row"><span class="label">Role</span><span class="value">{{ machine_info.get('role', 'N/A') }}</span></div>
+                <div class="info-row"><span class="label">Description</span><span class="value">{{ machine_info.get('description', '') }}</span></div>
+            </div>
+        </div>
+
+        <!-- Live Resources (fetched from remote agent) -->
+        <div class="section" id="resources-section">
+            <div class="section-title">Live Resources</div>
+            <div class="resource-grid" id="resources">
+                <div class="res-card">
+                    <div class="label">CPU</div>
+                    <div class="value" id="cpu">--</div>
+                    <div class="bar-bg"><div class="bar-fill" id="cpu-bar" style="width:0%"></div></div>
+                </div>
+                <div class="res-card">
+                    <div class="label">Memory</div>
+                    <div class="value" id="mem">--</div>
+                    <div class="sub" id="mem-detail"></div>
+                    <div class="bar-bg"><div class="bar-fill" id="mem-bar" style="width:0%"></div></div>
+                </div>
+                <div class="res-card">
+                    <div class="label">Disk</div>
+                    <div class="value" id="disk">--</div>
+                    <div class="sub" id="disk-detail"></div>
+                    <div class="bar-bg"><div class="bar-fill" id="disk-bar" style="width:0%"></div></div>
+                </div>
+                <div class="res-card">
+                    <div class="label">Uptime</div>
+                    <div class="value" id="uptime" style="font-size:20px">--</div>
+                </div>
+            </div>
+            <div class="error-box" id="error-box" style="display:none"></div>
+        </div>
+
+        <!-- Module-specific content slot -->
+        <div id="module-content"></div>
+    </div>
+
+    <div class="footer">AJ Robotics &copy; 2026</div>
+
+    <script>
+        const MACHINE_NAME = "{{ machine_name }}";
+        const LOCAL_MACHINE = "{{ local_machine }}";
+
+        function setBar(id, pct) {
+            const bar = document.getElementById(id);
+            bar.style.width = pct + '%';
+            bar.className = 'bar-fill' + (pct > 90 ? ' danger' : pct > 75 ? ' warn' : '');
+        }
+
+        function fmtUptime(sec) {
+            const d = Math.floor(sec / 86400);
+            const h = Math.floor((sec % 86400) / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            if (d > 0) return d + 'd ' + h + 'h';
+            if (h > 0) return h + 'h ' + m + 'm';
+            return m + 'm';
+        }
+
+        async function fetchInfo() {
+            const badge = document.getElementById('status-badge');
+            const errorBox = document.getElementById('error-box');
+            try {
+                // Use the proxy endpoint on our local agent
+                const r = await fetch('/api/machine/' + MACHINE_NAME + '/info');
+                if (!r.ok) {
+                    const err = await r.json();
+                    throw new Error(err.error || 'HTTP ' + r.status);
+                }
+                const d = await r.json();
+                badge.textContent = 'Online';
+                badge.className = 'status-badge online';
+                errorBox.style.display = 'none';
+
+                document.getElementById('cpu').textContent = d.cpu_percent + '%';
+                setBar('cpu-bar', d.cpu_percent);
+                document.getElementById('mem').textContent = d.memory.percent + '%';
+                document.getElementById('mem-detail').textContent =
+                    d.memory.used_gb + ' / ' + d.memory.total_gb + ' GB';
+                setBar('mem-bar', d.memory.percent);
+                document.getElementById('disk').textContent = d.disk.percent + '%';
+                document.getElementById('disk-detail').textContent =
+                    d.disk.used_gb + ' / ' + d.disk.total_gb + ' GB';
+                setBar('disk-bar', d.disk.percent);
+                if (d.uptime_seconds) {
+                    document.getElementById('uptime').textContent = fmtUptime(d.uptime_seconds);
+                }
+            } catch(e) {
+                badge.textContent = 'Offline';
+                badge.className = 'status-badge offline';
+                errorBox.textContent = 'Could not reach agent: ' + e.message;
+                errorBox.style.display = 'block';
+            }
+        }
+
+        fetchInfo();
+        setInterval(fetchInfo, 10000);
+    </script>
+</body>
+</html>

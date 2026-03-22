@@ -1,0 +1,15 @@
+[Unit]
+Description=AJ Robotics Agent
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/AJMain
+ExecStart=/usr/bin/python3 -m agent.start_agent
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

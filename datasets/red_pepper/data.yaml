@@ -1,0 +1,7 @@
+# Dataset: red_pepper
+path: C:\Users\Dream\My Drive\AJ_Robotics\AJMain\datasets\red_pepper
+train: train/images
+val: val/images
+
+nc: 1
+names: ['red_pepper']

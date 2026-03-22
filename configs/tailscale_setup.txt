@@ -1,0 +1,45 @@
+========================================
+ Tailscale Setup Guide - AJ Robotics
+========================================
+
+Step 1: Install Tailscale on each machine
+-----------------------------------------
+
+[Dreamer - Windows 11]
+  Download from: https://tailscale.com/download/windows
+  Or via PowerShell: winget install Tailscale.Tailscale
+
+[CashCow - Ubuntu]
+  ssh dongchul@192.168.1.91
+  curl -fsSL https://tailscale.com/install.sh | sh
+  sudo tailscale up
+
+[Christy - Ubuntu]
+  ssh ajrobotics@192.168.1.94
+  curl -fsSL https://tailscale.com/install.sh | sh
+  sudo tailscale up
+
+[R1 - Raspberry Pi]
+  ssh dream@192.168.1.82
+  curl -fsSL https://tailscale.com/install.sh | sh
+  sudo tailscale up
+
+[Phone - iOS/Android]
+  Install "Tailscale" from App Store / Play Store
+  Sign in with same account
+
+Step 2: Sign in with the same account on ALL devices
+-----------------------------------------------------
+  Use Google, Microsoft, or GitHub account
+  All devices on the same Tailscale account form a private network
+
+Step 3: Verify connection
+--------------------------
+  Each machine gets a 100.x.x.x Tailscale IP
+  Run: tailscale status (to see all connected devices)
+  Access dashboard from phone: http://<dreamer-tailscale-ip>:5000
+
+Step 4: (Optional) Enable MagicDNS
+------------------------------------
+  In Tailscale admin console, enable MagicDNS
+  Then access via: http://dreamer:5000 (by machine name)

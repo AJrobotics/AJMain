@@ -1,0 +1,55 @@
+{
+    "go2rtc": {
+        "host": "192.168.1.94",
+        "port": 1984,
+        "api_url": "http://192.168.1.94:1984"
+    },
+    "cameras": {
+        "cam_16": {
+            "name": "Camera 16",
+            "ip": "192.168.1.16",
+            "rtsp_url": "rtsp://Kr1VQwQdKnEymAMQ:Ow5ijaX18yuYHe4x@192.168.1.16/live0"
+        },
+        "cam_46": {
+            "name": "Camera 46",
+            "ip": "192.168.1.46",
+            "rtsp_url": "rtsp://Kg0czTT4VrQj:Bi34H1PP4D8T@192.168.1.46/live0"
+        },
+        "cam_54": {
+            "name": "Camera 54",
+            "ip": "192.168.1.54",
+            "rtsp_url": "rtsp://Fn8pCEv2ESZH:Po025QF9rgKX@192.168.1.54/live0"
+        },
+        "cam_14": {
+            "name": "Camera 14",
+            "ip": "192.168.1.14",
+            "rtsp_url": "rtsp://Mo1EfiSPLBZ4VoO0:Xu5G1z0vsffGiH0S@192.168.1.14/live0"
+        },
+        "cam_60": {
+            "name": "Camera 60",
+            "ip": "192.168.1.60",
+            "rtsp_url": "rtsp://Kj0VaI1vN45H0qjL:Xs9nnjf2c4yfu12d@192.168.1.60/live0"
+        },
+        "cam_19": {
+            "name": "Camera 19",
+            "ip": "192.168.1.19",
+            "rtsp_url": "rtsp://Kr77DPruceCDf3y6:Ky3QgWabx96fYsGh@192.168.1.19/live0"
+        },
+        "cam_18": {
+            "name": "Camera 18",
+            "ip": "192.168.1.18",
+            "rtsp_url": "rtsp://Pt20cKYJNRjhuZeR:Gm6YdY58aH4U2Xhs@192.168.1.18/live0"
+        },
+        "cam_74": {
+            "name": "Camera 74",
+            "ip": "192.168.1.74",
+            "rtsp_url": "rtsp://Oe1HFcTcZtiLyX4G:Dq61AYaCOqy6cHtW@192.168.1.74/live0"
+        },
+        "cam_backyard": {
+            "name": "Backyard (Solo S3)",
+            "ip": "192.168.1.35",
+            "event_only": true,
+            "eufy_sn": "T8170T1124320BD9"
+        }
+    }
+}

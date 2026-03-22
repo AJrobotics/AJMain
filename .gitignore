@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Model weights (large binary files)
+*.pt
+*.onnx
+
+# Training artifacts
+runs/*/*.jpg
+runs/*/*.png
+runs/*/*.csv
+runs/*/weights/
+
+# Dataset images (large, not for git)
+datasets/*/train/images/*.jpg
+datasets/*/train/images/*.png
+datasets/*/val/images/*.jpg
+datasets/*/val/images/*.png
+datasets/*/train/A/*.jpg
+datasets/*/train/B/*.jpg
+datasets/*/train/C/*.jpg
+datasets/*/val/A/*.jpg
+datasets/*/val/B/*.jpg
+datasets/*/val/C/*.jpg
+
+# Dataset cache files
+*.cache
+
+# Keep dataset structure/config
+!datasets/*/data.yaml
+!datasets/*/dataset_info.json
+
+# Test artifacts
+test_capture.jpg
+
+# Logs
+*.log

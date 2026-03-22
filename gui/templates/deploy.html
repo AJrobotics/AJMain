@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deploy - AJ Robotics</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0a1929; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
+
+        .topbar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 24px; background: #0d2137; border-bottom: 1px solid #1a3a5c;
+        }
+        .topbar h1 { color: #00e5ff; font-size: 20px; }
+        .topbar a { color: #00e5ff; text-decoration: none; font-size: 14px; }
+        .topbar a:hover { text-decoration: underline; }
+
+        .content { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+        .card {
+            background: #112240; border: 1px solid #1a3a5c;
+            border-radius: 10px; padding: 16px 20px;
+        }
+        .card h3 {
+            color: #00e5ff; font-size: 15px; margin-bottom: 12px;
+            border-bottom: 1px solid #1a3a5c; padding-bottom: 8px;
+        }
+
+        .btn {
+            padding: 10px 20px; border: 1px solid #00e5ff; background: transparent;
+            color: #00e5ff; border-radius: 6px; cursor: pointer; font-size: 13px;
+            margin: 4px; transition: all 0.2s;
+        }
+        .btn:hover { background: #00e5ff22; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn.deploy { background: #00e67633; border-color: #00e676; color: #00e676; font-size: 15px; padding: 12px 28px; }
+        .btn.deploy:hover { background: #00e67655; }
+        .btn.stop { border-color: #e94560; color: #e94560; }
+        .btn.stop:hover { background: #e9456022; }
+
+        .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+
+        .status-box {
+            background: #0a192f; border-radius: 8px; padding: 14px 18px;
+            margin: 10px 0; font-size: 13px;
+        }
+        .status-box .label { color: #888; font-size: 11px; text-transform: uppercase; margin-bottom: 4px; }
+        .status-box .value { color: #e0e0e0; font-family: 'Consolas', monospace; }
+
+        .log-box {
+            background: #0a192f; border-radius: 8px; padding: 14px;
+            font-family: 'Consolas', monospace; font-size: 12px;
+            color: #aaa; max-height: 400px; overflow-y: auto;
+            white-space: pre-wrap; word-break: break-all;
+            line-height: 1.6;
+        }
+        .log-line { padding: 2px 0; border-bottom: 1px solid #0d213711; }
+        .log-line.heartbeat { color: #00e676; }
+        .log-line.reply { color: #00e5ff; }
+        .log-line.error { color: #e94560; }
+        .log-line.status { color: #ffc107; }
+
+        .output-box {
+            background: #0a192f; border-radius: 8px; padding: 14px;
+            font-family: 'Consolas', monospace; font-size: 11px;
+            color: #888; max-height: 300px; overflow-y: auto;
+            white-space: pre-wrap; margin-top: 10px;
+        }
+
+        .info-row {
+            display: flex; justify-content: space-between;
+            padding: 6px 0; border-bottom: 1px solid #0a192f; font-size: 13px;
+        }
+        .info-row .label { color: #888; }
+        .info-row .value { color: #e0e0e0; font-family: 'Consolas', monospace; }
+
+        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .dot.online { background: #00e676; }
+        .dot.offline { background: #e94560; }
+        .dot.unknown { background: #555; }
+
+        @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div>
+            <a href="/">&larr; Dashboard</a>
+            <h1 style="display:inline; margin-left: 16px;">Remote Deploy</h1>
+        </div>
+    </div>
+
+    <div class="content">
+        <!-- Target: Christy -->
+        <div class="grid">
+            <!-- Deploy Controls -->
+            <div class="card">
+                <h3>Deploy to Christy</h3>
+                <div class="info-row">
+                    <span class="label">Target</span>
+                    <span class="value">ajrobotics@192.168.1.94</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Package</span>
+                    <span class="value">robotics/ (XBee Monitor)</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Remote Path</span>
+                    <span class="value">/home/ajrobotics/AJMain/</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Status</span>
+                    <span class="value"><span class="dot unknown" id="monitor-dot"></span><span id="monitor-status">Unknown</span></span>
+                </div>
+
+                <div class="btn-row">
+                    <button class="btn deploy" onclick="deploy('run')" id="btn-deploy">&#9654; Sync &amp; Run</button>
+                    <button class="btn" onclick="deploy('sync')">Sync Only</button>
+                    <button class="btn stop" onclick="deploy('stop')">&#9632; Stop Monitor</button>
+                    <button class="btn" onclick="deploy('status')">Check Status</button>
+                </div>
+
+                <div class="status-box">
+                    <div class="label">Last Action</div>
+                    <div class="value" id="last-action">--</div>
+                </div>
+
+                <div class="output-box" id="deploy-output">Deploy output will appear here...</div>
+            </div>
+
+            <!-- Christy XBee Logs -->
+            <div class="card">
+                <h3>Christy XBee Logs (Live)</h3>
+                <div class="btn-row">
+                    <button class="btn" onclick="fetchLogs()">&#8635; Refresh Logs</button>
+                    <button class="btn" onclick="sshTo('Christy')">SSH Christy</button>
+                    <button class="btn" onclick="vncTo('Christy')">VNC Christy</button>
+                </div>
+                <div class="log-box" id="xbee-logs">Loading logs...</div>
+            </div>
+        </div>
+
+        <!-- Quick Deploy: Other Machines -->
+        <div class="card">
+            <h3>Quick Access</h3>
+            <div class="btn-row">
+                <button class="btn" onclick="sshTo('CashCow')">SSH CashCow</button>
+                <button class="btn" onclick="sshTo('Christy')">SSH Christy</button>
+                <button class="btn" onclick="sshTo('R1')">SSH R1</button>
+                <button class="btn" onclick="vncTo('CashCow')">VNC CashCow</button>
+                <button class="btn" onclick="vncTo('Christy')">VNC Christy</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function deploy(action) {
+            const btn = document.getElementById('btn-deploy');
+            const status = document.getElementById('last-action');
+            const output = document.getElementById('deploy-output');
+
+            status.textContent = action === 'run' ? 'Deploying & starting...' :
+                                 action === 'stop' ? 'Stopping...' :
+                                 action === 'status' ? 'Checking...' : 'Syncing...';
+            output.textContent = 'Working...\n';
+            if (action === 'run') { btn.disabled = true; btn.textContent = 'Deploying...'; }
+
+            fetch('/api/deploy/christy', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: action})
+            })
+            .then(r => r.json())
+            .then(d => {
+                const ts = new Date().toLocaleTimeString();
+                output.textContent = d.output || 'No output';
+                output.scrollTop = output.scrollHeight;
+
+                if (d.ok) {
+                    if (action === 'run') status.textContent = 'Deployed & running (' + ts + ')';
+                    else if (action === 'stop') status.textContent = 'Monitor stopped (' + ts + ')';
+                    else if (action === 'status') status.textContent = 'Status checked (' + ts + ')';
+                    else status.textContent = 'Synced (' + ts + ')';
+                } else {
+                    status.textContent = 'Error (' + ts + ')';
+                }
+
+                btn.disabled = false;
+                btn.innerHTML = '&#9654; Sync & Run';
+                updateMonitorStatus();
+                if (action === 'run') setTimeout(fetchLogs, 3000);
+            })
+            .catch(err => {
+                status.textContent = 'Failed: ' + err;
+                output.textContent = 'Error: ' + err;
+                btn.disabled = false;
+                btn.innerHTML = '&#9654; Sync & Run';
+            });
+        }
+
+        function fetchLogs() {
+            const logBox = document.getElementById('xbee-logs');
+            fetch('/api/deploy/christy/logs?limit=50')
+                .then(r => r.json())
+                .then(d => {
+                    if (d.logs && d.logs.length > 0) {
+                        logBox.innerHTML = d.logs.map(line => {
+                            let cls = '';
+                            if (line.includes('HEARTBEAT SENT')) cls = 'heartbeat';
+                            else if (line.includes('REPLY')) cls = 'reply';
+                            else if (line.includes('ERROR') || line.includes('FATAL')) cls = 'error';
+                            else if (line.includes('STATUS')) cls = 'status';
+                            return '<div class="log-line ' + cls + '">' + escapeHtml(line) + '</div>';
+                        }).join('');
+                        logBox.scrollTop = logBox.scrollHeight;
+                    } else {
+                        logBox.textContent = 'No logs yet. Deploy and run the monitor first.';
+                    }
+                })
+                .catch(err => {
+                    logBox.textContent = 'Error fetching logs: ' + err;
+                });
+        }
+
+        function updateMonitorStatus() {
+            const dot = document.getElementById('monitor-dot');
+            const text = document.getElementById('monitor-status');
+
+            fetch('/api/deploy/christy', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: 'status'})
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.output && d.output.includes('xbee_monitor')) {
+                    dot.className = 'dot online';
+                    text.textContent = 'Running';
+                } else {
+                    dot.className = 'dot offline';
+                    text.textContent = 'Not running';
+                }
+            })
+            .catch(() => {
+                dot.className = 'dot unknown';
+                text.textContent = 'Unknown';
+            });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function sshTo(machine) {
+            fetch('/api/actions/ssh/' + machine, { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { if (d.error) alert(d.error); });
+        }
+
+        function vncTo(machine) {
+            fetch('/api/actions/vnc/' + machine, { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { if (d.error) alert(d.error); });
+        }
+
+        // Initial load
+        fetchLogs();
+        updateMonitorStatus();
+        setInterval(fetchLogs, 15000);
+    </script>
+</body>
+</html>

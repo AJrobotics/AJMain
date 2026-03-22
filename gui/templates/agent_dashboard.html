@@ -1,0 +1,1772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AJ Robotics - {{ local_machine }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+        .topbar {
+            background: #16213e;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 2px solid #0f3460;
+            position: sticky; top: 0; z-index: 100;
+        }
+        .topbar h1 { font-size: 20px; color: #e94560; }
+        .topbar .right { display: flex; align-items: center; gap: 12px; }
+        .summary-badge {
+            background: #0f3460; color: #4ecca3;
+            padding: 4px 14px; border-radius: 20px;
+            font-size: 13px; font-weight: bold;
+        }
+        .container { padding: 20px; max-width: 1400px; margin: 0 auto; }
+
+        /* Section */
+        .section { margin-bottom: 24px; }
+        .section-title {
+            color: #4ecca3; font-size: 16px;
+            margin-bottom: 12px; padding-bottom: 8px;
+            border-bottom: 1px solid #0f3460;
+        }
+
+        /* Resource cards */
+        .resource-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 14px;
+        }
+        .res-card {
+            background: #16213e; border: 1px solid #0f3460;
+            border-radius: 10px; padding: 16px; text-align: center;
+        }
+        .res-card .label { color: #888; font-size: 12px; margin-bottom: 6px; }
+        .res-card .value { font-size: 28px; font-weight: bold; color: #4ecca3; }
+        .res-card .sub { color: #666; font-size: 11px; margin-top: 4px; }
+        .bar-bg {
+            background: #0f3460; border-radius: 4px; height: 6px; margin-top: 8px;
+        }
+        .bar-fill {
+            height: 6px; border-radius: 4px; background: #4ecca3;
+            transition: width 0.5s ease;
+        }
+        .bar-fill.warn { background: #f0a500; }
+        .bar-fill.danger { background: #e94560; }
+
+        /* Machine tiles */
+        .machine-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 10px;
+        }
+        .machine-tile {
+            background: #16213e; border: 1px solid #0f3460;
+            border-radius: 8px; padding: 12px;
+            cursor: pointer; transition: border-color 0.2s;
+            position: relative; text-decoration: none; color: inherit;
+            display: block;
+        }
+        .machine-tile:hover { border-color: #4ecca3; }
+        .machine-tile h3 { color: #e94560; font-size: 14px; margin-bottom: 4px; }
+        .machine-tile .role { color: #888; font-size: 11px; }
+        .machine-tile .status-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            position: absolute; top: 12px; right: 12px;
+        }
+        .status-dot.online { background: #4ecca3; box-shadow: 0 0 8px #4ecca3; }
+        .status-dot.offline { background: #666; }
+        .machine-tile .host { color: #555; font-size: 11px; margin-top: 2px; }
+        .machine-tile .self-badge {
+            display: inline-block; background: #0f3460; color: #f0a500;
+            padding: 1px 6px; border-radius: 10px; font-size: 9px; margin-left: 4px;
+        }
+        .machine-tile .btn-row {
+            display: flex; gap: 6px; margin-top: 8px;
+        }
+        .btn-deploy {
+            background: #0f3460; color: #4ecca3; border: 1px solid #4ecca3;
+            padding: 3px 10px; border-radius: 6px; font-size: 11px;
+            cursor: pointer; transition: all 0.2s;
+        }
+        .btn-deploy:hover { background: #4ecca3; color: #1a1a2e; }
+        .btn-deploy:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-deploy.running { border-color: #f0a500; color: #f0a500; }
+        .btn-deploy.success { border-color: #4ecca3; color: #4ecca3; }
+        .btn-restart {
+            background: #0f3460; color: #e94560; border: 1px solid #e94560;
+            padding: 3px 10px; border-radius: 6px; font-size: 11px;
+            cursor: pointer; transition: all 0.2s;
+        }
+        .btn-restart:hover { background: #e94560; color: #1a1a2e; }
+        .btn-restart:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-restart.running { border-color: #f0a500; color: #f0a500; }
+        .btn-restart.success { border-color: #4ecca3; color: #4ecca3; }
+        .btn-deploy.failed { border-color: #e94560; color: #e94560; }
+
+        /* Deploy modal */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%; background: rgba(0,0,0,0.7);
+            z-index: 200; justify-content: center; align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: #16213e; border: 1px solid #0f3460;
+            border-radius: 12px; padding: 24px; width: 600px; max-width: 90vw;
+            max-height: 80vh; display: flex; flex-direction: column;
+        }
+        .modal h3 { color: #e94560; margin-bottom: 12px; }
+        .modal .modal-status {
+            font-size: 13px; margin-bottom: 10px; padding: 6px 12px;
+            border-radius: 6px; background: #0f3460;
+        }
+        .modal .modal-status.running { color: #f0a500; }
+        .modal .modal-status.success { color: #4ecca3; }
+        .modal .modal-status.failed { color: #e94560; }
+        .modal .modal-log {
+            background: #0d1117; border: 1px solid #0f3460;
+            border-radius: 8px; padding: 12px; flex: 1;
+            overflow-y: auto; font-family: 'Consolas', monospace;
+            font-size: 12px; color: #8b949e; white-space: pre-wrap;
+            min-height: 200px; max-height: 50vh;
+        }
+        .modal .modal-close {
+            margin-top: 12px; align-self: flex-end;
+            background: #0f3460; color: #eee; border: none;
+            padding: 6px 20px; border-radius: 6px; cursor: pointer;
+        }
+        .modal .modal-close:hover { background: #1a3a6e; }
+
+        /* Log */
+        .log-box {
+            background: #0d1117; border: 1px solid #0f3460;
+            border-radius: 8px; padding: 12px;
+            max-height: 250px; overflow-y: auto;
+            font-family: 'Consolas', monospace; font-size: 12px;
+        }
+        .log-entry { padding: 2px 0; color: #8b949e; }
+        .log-entry .ts { color: #555; }
+        .log-entry.error { color: #e94560; }
+
+        .footer { text-align: center; padding: 20px; color: #555; font-size: 12px; }
+
+        /* Trader panel */
+        .trader-panel {
+            background: #16213e; border: 1px solid #0f3460;
+            border-radius: 10px; padding: 20px; margin-bottom: 14px;
+        }
+        .trader-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 14px;
+        }
+        .trader-status {
+            display: inline-block; padding: 4px 14px; border-radius: 20px;
+            font-size: 13px; font-weight: bold;
+        }
+        .trader-status.running { background: #0f3460; color: #4ecca3; }
+        .trader-status.stopped { background: #333; color: #888; }
+        .trader-info-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px; margin-bottom: 14px;
+        }
+        .trader-info-item {
+            background: #1a1a2e; border-radius: 6px; padding: 10px; text-align: center;
+        }
+        .trader-info-item .label { color: #888; font-size: 11px; margin-bottom: 4px; }
+        .trader-info-item .val { color: #4ecca3; font-size: 16px; font-weight: bold; }
+        .trader-info-item .val.off { color: #666; }
+        .trader-log {
+            background: #0d1117; border: 1px solid #0f3460;
+            border-radius: 6px; padding: 10px; max-height: 200px; overflow-y: auto;
+            font-family: 'Consolas', monospace; font-size: 11px; color: #8b949e;
+        }
+        .trader-log .line { padding: 1px 0; white-space: pre-wrap; word-break: break-all; }
+        .trader-picks {
+            margin-top: 12px; font-size: 13px;
+        }
+        .trader-picks table {
+            width: 100%; border-collapse: collapse; margin-top: 6px;
+        }
+        .trader-picks th {
+            text-align: left; color: #888; font-size: 11px; padding: 4px 8px;
+            border-bottom: 1px solid #0f3460;
+        }
+        .trader-picks td {
+            padding: 4px 8px; font-size: 12px; border-bottom: 1px solid #0f346033;
+        }
+        .trader-picks .bullish { color: #4ecca3; }
+        .trader-picks .bearish { color: #e94560; }
+        .trader-btns { display: flex; gap: 8px; }
+        .trader-btns button {
+            background: #0f3460; color: #4ecca3; border: 1px solid #4ecca3;
+            padding: 5px 16px; border-radius: 6px; font-size: 12px; cursor: pointer;
+        }
+        .trader-btns button:hover { background: #4ecca3; color: #1a1a2e; }
+        .trader-btns button.stop { border-color: #e94560; color: #e94560; }
+        .trader-btns button.stop:hover { background: #e94560; color: #fff; }
+
+        /* Radio toggle */
+        .radio-toggle {
+            display: flex; border: 1px solid #0f3460; border-radius: 6px; overflow: hidden;
+        }
+        .radio-opt {
+            cursor: pointer; display: flex; align-items: center;
+        }
+        .radio-opt input { display: none; }
+        .radio-opt span {
+            padding: 5px 16px; font-size: 12px; font-weight: bold;
+            color: #666; background: #1a1a2e; transition: all 0.2s;
+        }
+        .radio-opt input:checked + span {
+            background: #0f3460; color: #4ecca3;
+        }
+        .radio-opt:first-child span { border-right: 1px solid #0f3460; }
+        .radio-opt input[id$="-off"]:checked + span { color: #e94560; }
+
+        /* XBee panel (Christy) */
+        .xbee-panel {
+            background: #16213e; border: 1px solid #0f3460;
+            border-radius: 10px; padding: 20px; margin-bottom: 14px;
+        }
+        .xbee-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 14px;
+        }
+        .xbee-status {
+            display: inline-block; padding: 4px 14px; border-radius: 20px;
+            font-size: 13px; font-weight: bold;
+        }
+        .xbee-status.running { background: #0f3460; color: #4ecca3; }
+        .xbee-status.stopped { background: #333; color: #888; }
+        .xbee-stats {
+            display: flex; gap: 16px; margin-bottom: 14px; flex-wrap: wrap;
+        }
+        .xbee-stat {
+            background: #1a1a2e; border-radius: 6px; padding: 8px 14px; text-align: center;
+        }
+        .xbee-stat .label { color: #888; font-size: 10px; margin-bottom: 2px; }
+        .xbee-stat .val { color: #4ecca3; font-size: 16px; font-weight: bold; }
+        .xbee-stat .val.off { color: #666; }
+        .xbee-messages {
+            background: #0d1117; border: 1px solid #0f3460;
+            border-radius: 6px; padding: 10px; max-height: 300px; overflow-y: auto;
+            font-family: 'Consolas', monospace; font-size: 11px; color: #8b949e;
+        }
+        .xbee-messages .msg { padding: 2px 0; white-space: pre-wrap; word-break: break-all; }
+        .xbee-messages .msg .ts { color: #555; }
+        .xbee-messages .msg .addr { color: #f0a500; }
+        .xbee-messages .msg .heartbeat { color: #4ecca3; }
+        .xbee-messages .msg .data-text { color: #ccc; }
+        .xbee-send-row {
+            display: flex; gap: 8px; margin-top: 10px;
+        }
+        .xbee-send-row input {
+            flex: 1; background: #0d1117; border: 1px solid #0f3460;
+            border-radius: 6px; padding: 6px 10px; color: #eee;
+            font-family: 'Consolas', monospace; font-size: 12px;
+        }
+        .xbee-send-row button {
+            background: #0f3460; color: #4ecca3; border: 1px solid #4ecca3;
+            padding: 6px 16px; border-radius: 6px; font-size: 12px; cursor: pointer;
+        }
+        .xbee-send-row button:hover { background: #4ecca3; color: #1a1a2e; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>AJ Robotics - {{ local_machine }}</h1>
+        <div class="right">
+            {% if local_machine in ['Dreamer', 'Gram', 'R1'] %}
+            <a href="/gamepad" style="color:#4ecca3; text-decoration:none; font-size:13px; background:#0f3460; padding:4px 14px; border-radius:20px;">Gamepad</a>
+            {% endif %}
+            <span class="summary-badge" id="online-badge">--/-- Online</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Trader Panel (CashCow local OR Christy remote monitor) -->
+        {% if local_machine in ['CashCow', 'Christy'] %}
+        <div class="section" id="trader-section">
+            <div class="section-title">Smart Trader {% if local_machine == 'Christy' %}<span style="color:#888; font-size:13px">(CashCow Remote)</span>{% endif %}</div>
+            <div class="trader-panel">
+                <div class="trader-header">
+                    <div>
+                        <span class="trader-status stopped" id="trader-badge">Checking...</span>
+                        <span style="color:#666; font-size:12px; margin-left:10px" id="trader-mode"></span>
+                    </div>
+                    <div class="trader-btns">
+                        <button onclick="traderAction('start')" id="trader-start-btn">Start</button>
+                        <button class="stop" onclick="traderAction('stop')" id="trader-stop-btn">Stop</button>
+                    </div>
+                </div>
+                <div class="trader-info-grid" id="trader-info"></div>
+                <div class="trader-picks" id="trader-picks"></div>
+                <div style="margin-top:12px">
+                    <div class="section-title" style="font-size:13px; margin-bottom:6px">Trader Log</div>
+                    <div class="trader-log" id="trader-log"></div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- XBee Responder (Dreamer / Gram) -->
+        {% if local_machine in ['Dreamer', 'Gram'] %}
+        <div class="section" id="xbee-dreamer-section">
+            <div class="section-title">XBee Heartbeat Responder</div>
+            <div class="xbee-panel">
+                <div class="xbee-header">
+                    <div style="display:flex; align-items:center; gap:16px;">
+                        <div class="radio-toggle">
+                            <label class="radio-opt" id="xbee-d-off-label">
+                                <input type="radio" name="xbee-dreamer" id="xbee-d-off" onchange="dreamerXbeeToggle('stop')" />
+                                <span>OFF</span>
+                            </label>
+                            <label class="radio-opt" id="xbee-d-on-label">
+                                <input type="radio" name="xbee-dreamer" id="xbee-d-on" onchange="dreamerXbeeToggle('start')" />
+                                <span>ON</span>
+                            </label>
+                        </div>
+                        <span class="xbee-status stopped" id="xbee-d-badge">Checking...</span>
+                    </div>
+                    <span style="color:#666; font-size:12px" id="xbee-d-port"></span>
+                </div>
+                <div class="xbee-stats" id="xbee-d-stats">
+                    <div class="xbee-stat">
+                        <div class="label">Heartbeats Recv</div>
+                        <div class="val off" id="xbee-d-hb-recv">0</div>
+                    </div>
+                    <div class="xbee-stat">
+                        <div class="label">Replies Sent</div>
+                        <div class="val off" id="xbee-d-replies">0</div>
+                    </div>
+                    <div class="xbee-stat">
+                        <div class="label">RSSI</div>
+                        <div class="val off" id="xbee-d-rssi">-</div>
+                    </div>
+                </div>
+                <div style="margin-bottom:6px; font-size:13px; color:#888;">Recent Messages</div>
+                <div class="xbee-messages" id="xbee-d-messages">
+                    <div class="msg" style="color:#555">Waiting for XBee data...</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- XBee Panel (Christy only) -->
+        {% if local_machine == 'Christy' %}
+        <div class="section" id="xbee-section">
+            <div class="section-title">XBee Coordinator</div>
+            <div class="xbee-panel">
+                <div class="xbee-header">
+                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                        <span class="xbee-status stopped" id="xbee-badge">Checking...</span>
+                        <span style="color:#666; font-size:12px" id="xbee-port"></span>
+                    </div>
+                    <div class="trader-btns">
+                        <button onclick="xbeeAction('start')" id="xbee-start-btn">Start</button>
+                        <button class="stop" onclick="xbeeAction('stop')" id="xbee-stop-btn">Stop</button>
+                    </div>
+                </div>
+                <!-- Heartbeat controls -->
+                <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px; flex-wrap:wrap;">
+                    <span style="color:#888; font-size:12px;">Heartbeat Interval:</span>
+                    <select id="xbee-interval" style="background:#0d1117; border:1px solid #0f3460; border-radius:6px; padding:4px 8px; color:#4ecca3; font-size:12px; cursor:pointer;">
+                        <option value="5">5 sec</option>
+                        <option value="10" selected>10 sec</option>
+                        <option value="15">15 sec</option>
+                        <option value="30">30 sec</option>
+                        <option value="60">60 sec</option>
+                    </select>
+                    <button onclick="xbeeSetInterval()" style="background:#0f3460; color:#4ecca3; border:1px solid #4ecca3; padding:3px 12px; border-radius:6px; font-size:11px; cursor:pointer;">Apply</button>
+                    <span style="color:#555; font-size:11px" id="xbee-interval-note"></span>
+                </div>
+                <div class="xbee-stats" id="xbee-stats">
+                    <div class="xbee-stat">
+                        <div class="label">Heartbeats Sent</div>
+                        <div class="val off" id="xbee-hb-sent">0</div>
+                    </div>
+                    <div class="xbee-stat">
+                        <div class="label">Responses</div>
+                        <div class="val off" id="xbee-responses">0</div>
+                    </div>
+                    <div class="xbee-stat">
+                        <div class="label">Robots Online</div>
+                        <div class="val off" id="xbee-robots-online">0</div>
+                    </div>
+                    <div class="xbee-stat">
+                        <div class="label">Error</div>
+                        <div class="val off" id="xbee-error" style="font-size:11px">-</div>
+                    </div>
+                </div>
+                <div style="margin-bottom:6px; font-size:13px; color:#888;">Incoming Messages</div>
+                <div class="xbee-messages" id="xbee-messages">
+                    <div class="msg" style="color:#555">Waiting for XBee data...</div>
+                </div>
+                <div class="xbee-send-row">
+                    <input type="text" id="xbee-send-input" placeholder="Send broadcast message..." onkeydown="if(event.key==='Enter') xbeeSend();" />
+                    <button onclick="xbeeSend()">Send</button>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- XBee Responder (R1 / robots) -->
+        {% if local_machine == 'R1' %}
+        <div class="section" id="xbee-r1-section">
+            <div class="section-title">XBee Responder</div>
+            <div class="xbee-panel">
+                <div class="xbee-header">
+                    <div style="display:flex; align-items:center; gap:16px;">
+                        <div class="radio-toggle">
+                            <label class="radio-opt">
+                                <input type="radio" name="xbee-r1" id="xbee-r1-off" onchange="r1XbeeToggle('stop')" />
+                                <span>OFF</span>
+                            </label>
+                            <label class="radio-opt">
+                                <input type="radio" name="xbee-r1" id="xbee-r1-on" onchange="r1XbeeToggle('start')" />
+                                <span>ON</span>
+                            </label>
+                        </div>
+                        <span class="xbee-status stopped" id="xbee-r1-badge">Checking...</span>
+                        <span style="color:#666; font-size:12px" id="xbee-r1-reply"></span>
+                    </div>
+                    <span style="color:#666; font-size:12px" id="xbee-r1-port"></span>
+                </div>
+                <div class="xbee-stats">
+                    <div class="xbee-stat">
+                        <div class="label">Heartbeats Recv</div>
+                        <div class="val off" id="xbee-r1-hb-recv">0</div>
+                    </div>
+                    <div class="xbee-stat">
+                        <div class="label">Replies Sent</div>
+                        <div class="val off" id="xbee-r1-replies">0</div>
+                    </div>
+                    <div class="xbee-stat">
+                        <div class="label">RSSI</div>
+                        <div class="val off" id="xbee-r1-rssi">-</div>
+                    </div>
+                    <div class="xbee-stat">
+                        <div class="label">Gamepad Pkts</div>
+                        <div class="val off" id="xbee-r1-gamepad-count">0</div>
+                    </div>
+                </div>
+
+                <!-- Messages (Chat log) -->
+                <div style="margin-bottom:6px; font-size:13px; color:#888;">Messages</div>
+                <div class="xbee-messages" id="xbee-r1-messages" style="height:100px;">
+                    <div class="msg" style="color:#555">Waiting for XBee data...</div>
+                </div>
+                <div class="xbee-send-row">
+                    <input type="text" id="xbee-r1-send-input" placeholder="Send broadcast message..." onkeydown="if(event.key==='Enter') r1XbeeSend();" />
+                    <button onclick="r1XbeeSend()">Send</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gamepad Monitor -->
+        <div class="section" id="r1-gamepad-section">
+            <div class="section-title">Gamepad Monitor</div>
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                <!-- Oscilloscope -->
+                <div style="flex:1; min-width:400px; background:#0f3460; border-radius:8px; padding:8px; border:1px solid #333;">
+                    <canvas id="r1-scope-canvas" width="600" height="280" style="width:100%; height:280px; display:block;"></canvas>
+                </div>
+                <!-- Stick display -->
+                <div style="width:240px; background:#0f3460; border-radius:8px; padding:8px; border:1px solid #333;">
+                    <canvas id="r1-stick-canvas" width="240" height="280" style="width:100%; height:280px; display:block;"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hardware Status -->
+        <div class="section" id="r1-hardware-section">
+            <div class="section-title">Hardware</div>
+            <div style="display:flex; gap:14px; flex-wrap:wrap;">
+                <!-- xArm -->
+                <div class="xbee-panel" style="flex:2; min-width:400px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+                        <div style="font-size:14px; font-weight:bold; color:#4ecca3;">xArm Robot Arm</div>
+                        <div style="display:flex; gap:12px; align-items:center;">
+                            <span style="font-size:11px; color:#888;">Connection:</span>
+                            <span class="val off" id="r1-xarm-status" style="font-size:13px;">--</span>
+                            <span style="font-size:11px; color:#888; margin-left:8px;">GP→Arm:</span>
+                            <span class="val off" id="r1-xarm-gamepad" style="font-size:13px;">OFF</span>
+                        </div>
+                    </div>
+                    <div id="r1-xarm-servos">
+                        <div style="display:grid; grid-template-columns:40px 1fr 45px; gap:4px 8px; align-items:center; font-size:12px;">
+                            <div style="color:#888;">S1</div>
+                            <div class="servo-track" data-servo="1" style="background:#0f3460; border-radius:3px; height:20px; position:relative; overflow:hidden; cursor:pointer;">
+                                <div id="r1-servo-bar-1" style="height:100%; background:#4ecca3; border-radius:3px; width:50%;"></div>
+                                <div id="r1-servo-marker-1" style="position:absolute; top:0; width:2px; height:100%; background:#fff; left:50%;"></div>
+                            </div>
+                            <div style="color:#aaa; text-align:right; font-family:Consolas,monospace;" id="r1-servo-val-1">500</div>
+
+                            <div style="color:#888;">S2</div>
+                            <div class="servo-track" data-servo="2" style="background:#0f3460; border-radius:3px; height:20px; position:relative; overflow:hidden; cursor:pointer;">
+                                <div id="r1-servo-bar-2" style="height:100%; background:#4ecca3; border-radius:3px; width:50%;"></div>
+                                <div id="r1-servo-marker-2" style="position:absolute; top:0; width:2px; height:100%; background:#fff; left:50%;"></div>
+                            </div>
+                            <div style="color:#aaa; text-align:right; font-family:Consolas,monospace;" id="r1-servo-val-2">500</div>
+
+                            <div style="color:#888;">S3</div>
+                            <div class="servo-track" data-servo="3" style="background:#0f3460; border-radius:3px; height:20px; position:relative; overflow:hidden; cursor:pointer;">
+                                <div id="r1-servo-bar-3" style="height:100%; background:#4ecca3; border-radius:3px; width:50%;"></div>
+                                <div id="r1-servo-marker-3" style="position:absolute; top:0; width:2px; height:100%; background:#fff; left:50%;"></div>
+                            </div>
+                            <div style="color:#aaa; text-align:right; font-family:Consolas,monospace;" id="r1-servo-val-3">500</div>
+
+                            <div style="color:#888;">S4</div>
+                            <div class="servo-track" data-servo="4" style="background:#0f3460; border-radius:3px; height:20px; position:relative; overflow:hidden; cursor:pointer;">
+                                <div id="r1-servo-bar-4" style="height:100%; background:#4ecca3; border-radius:3px; width:50%;"></div>
+                                <div id="r1-servo-marker-4" style="position:absolute; top:0; width:2px; height:100%; background:#fff; left:50%;"></div>
+                            </div>
+                            <div style="color:#aaa; text-align:right; font-family:Consolas,monospace;" id="r1-servo-val-4">500</div>
+
+                            <div style="color:#888;">S5</div>
+                            <div class="servo-track" data-servo="5" style="background:#0f3460; border-radius:3px; height:20px; position:relative; overflow:hidden; cursor:pointer;">
+                                <div id="r1-servo-bar-5" style="height:100%; background:#4ecca3; border-radius:3px; width:50%;"></div>
+                                <div id="r1-servo-marker-5" style="position:absolute; top:0; width:2px; height:100%; background:#fff; left:50%;"></div>
+                            </div>
+                            <div style="color:#aaa; text-align:right; font-family:Consolas,monospace;" id="r1-servo-val-5">500</div>
+
+                            <div style="color:#888;">S6</div>
+                            <div class="servo-track" data-servo="6" style="background:#0f3460; border-radius:3px; height:20px; position:relative; overflow:hidden; cursor:pointer;">
+                                <div id="r1-servo-bar-6" style="height:100%; background:#4ecca3; border-radius:3px; width:50%;"></div>
+                                <div id="r1-servo-marker-6" style="position:absolute; top:0; width:2px; height:100%; background:#fff; left:50%;"></div>
+                            </div>
+                            <div style="color:#aaa; text-align:right; font-family:Consolas,monospace;" id="r1-servo-val-6">500</div>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; font-size:10px; color:#555; margin-top:2px; padding:0 40px 0 48px;">
+                            <span>0</span><span>250</span><span>500</span><span>750</span><span>1000</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- GPIO -->
+                <div class="xbee-panel" style="flex:1; min-width:260px;">
+                    <div style="font-size:14px; font-weight:bold; margin-bottom:8px; color:#4ecca3;">GPIO Pins</div>
+                    <div id="r1-gpio-pins" style="display:flex; gap:10px; flex-wrap:wrap;"></div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Vision Feed (R1 only) -->
+        {% if local_machine == 'R1' %}
+        <div class="section" id="vision-section">
+            <div class="section-title">Vision Feed</div>
+            <div style="display:flex; gap:14px; flex-wrap:wrap;">
+                <!-- Live stream + controls -->
+                <div class="xbee-panel" style="flex:2; min-width:400px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span style="font-size:14px; font-weight:bold; color:#4ecca3;">Camera</span>
+                            <span class="xbee-status stopped" id="vision-christy-badge">Checking...</span>
+                        </div>
+                        <div style="display:flex; gap:8px;">
+                            <button onclick="visionCapture()" style="background:#0f3460; color:#4ecca3; border:1px solid #4ecca3; padding:5px 14px; border-radius:6px; font-size:12px; cursor:pointer;">Capture + YOLO</button>
+                            <button onclick="toggleStream()" id="vision-stream-btn" style="background:#0f3460; color:#f0a500; border:1px solid #f0a500; padding:5px 14px; border-radius:6px; font-size:12px; cursor:pointer;">Start Stream</button>
+                        </div>
+                    </div>
+                    <div style="background:#0d1117; border-radius:8px; overflow:hidden; text-align:center; min-height:240px; display:flex; align-items:center; justify-content:center;">
+                        <img id="vision-stream-img" style="max-width:100%; max-height:480px; display:none;" />
+                        <span id="vision-stream-placeholder" style="color:#555; font-size:13px;">Click "Start Stream" to view live camera feed</span>
+                    </div>
+                    <!-- Latest YOLO result -->
+                    <div id="vision-result" style="margin-top:10px; background:#0d1117; border-radius:6px; padding:10px; font-size:12px; color:#8b949e; display:none;">
+                        <div style="color:#4ecca3; font-weight:bold; margin-bottom:4px;">Latest Analysis</div>
+                        <div id="vision-result-text"></div>
+                        <div id="vision-result-meta" style="color:#555; margin-top:4px;"></div>
+                    </div>
+                </div>
+                <!-- Queue + stats -->
+                <div style="flex:1; min-width:200px; display:flex; flex-direction:column; gap:14px;">
+                    <div class="xbee-panel">
+                        <div style="font-size:14px; font-weight:bold; margin-bottom:8px; color:#4ecca3;">Stats</div>
+                        <div class="xbee-stats" style="flex-direction:column;">
+                            <div class="xbee-stat" style="width:100%;">
+                                <div class="label">Total Captures</div>
+                                <div class="val off" id="vision-total">0</div>
+                            </div>
+                            <div class="xbee-stat" style="width:100%;">
+                                <div class="label">Pending Sync</div>
+                                <div class="val off" id="vision-pending">0</div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Recent captures gallery -->
+                    <div class="xbee-panel" style="flex:1;">
+                        <div style="font-size:14px; font-weight:bold; margin-bottom:8px; color:#4ecca3;">Recent Captures</div>
+                        <div id="vision-gallery" style="display:flex; flex-direction:column; gap:6px; max-height:300px; overflow-y:auto;">
+                            <div style="color:#555; font-size:12px;">No captures yet</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Local Resources -->
+        <div class="section">
+            <div class="section-title">{{ local_machine }} Resources</div>
+            <div class="resource-grid" id="resources">
+                <div class="res-card">
+                    <div class="label">CPU</div>
+                    <div class="value" id="cpu">--</div>
+                    <div class="bar-bg"><div class="bar-fill" id="cpu-bar" style="width:0%"></div></div>
+                </div>
+                <div class="res-card">
+                    <div class="label">Memory</div>
+                    <div class="value" id="mem">--</div>
+                    <div class="sub" id="mem-detail"></div>
+                    <div class="bar-bg"><div class="bar-fill" id="mem-bar" style="width:0%"></div></div>
+                </div>
+                <div class="res-card">
+                    <div class="label">Disk</div>
+                    <div class="value" id="disk">--</div>
+                    <div class="sub" id="disk-detail"></div>
+                    <div class="bar-bg"><div class="bar-fill" id="disk-bar" style="width:0%"></div></div>
+                </div>
+                <div class="res-card">
+                    <div class="label">Uptime</div>
+                    <div class="value" id="uptime" style="font-size:20px">--</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Network Machines -->
+        <div class="section">
+            <div class="section-title">Network Machines</div>
+            <div class="machine-grid" id="machines"></div>
+        </div>
+
+        <!-- Module-specific content injected here by modules -->
+        <div id="module-content"></div>
+
+        <!-- Activity Log -->
+        <div class="section">
+            <div class="section-title">Activity Log</div>
+            <div class="log-box" id="log-box"></div>
+        </div>
+    </div>
+
+    <!-- Deploy Modal -->
+    <div class="modal-overlay" id="deploy-modal">
+        <div class="modal">
+            <h3 id="deploy-modal-title">Deploy to ...</h3>
+            <div class="modal-status running" id="deploy-modal-status">Deploying...</div>
+            <div class="modal-log" id="deploy-modal-log"></div>
+            <button class="modal-close" id="deploy-modal-close" onclick="closeDeployModal()">Close</button>
+        </div>
+    </div>
+
+    <div class="footer">AJ Robotics &copy; 2026</div>
+
+    <script>
+        const LOCAL_MACHINE = "{{ local_machine }}";
+
+        function setBar(id, pct) {
+            const bar = document.getElementById(id);
+            bar.style.width = pct + '%';
+            bar.className = 'bar-fill' + (pct > 90 ? ' danger' : pct > 75 ? ' warn' : '');
+        }
+
+        function fmtUptime(sec) {
+            const d = Math.floor(sec / 86400);
+            const h = Math.floor((sec % 86400) / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            if (d > 0) return d + 'd ' + h + 'h';
+            if (h > 0) return h + 'h ' + m + 'm';
+            return m + 'm';
+        }
+
+        async function refreshResources() {
+            try {
+                const r = await fetch('/api/system/info');
+                const d = await r.json();
+                document.getElementById('cpu').textContent = d.cpu_percent + '%';
+                setBar('cpu-bar', d.cpu_percent);
+                document.getElementById('mem').textContent = d.memory.percent + '%';
+                document.getElementById('mem-detail').textContent =
+                    d.memory.used_gb + ' / ' + d.memory.total_gb + ' GB';
+                setBar('mem-bar', d.memory.percent);
+                document.getElementById('disk').textContent = d.disk.percent + '%';
+                document.getElementById('disk-detail').textContent =
+                    d.disk.used_gb + ' / ' + d.disk.total_gb + ' GB';
+                setBar('disk-bar', d.disk.percent);
+                document.getElementById('uptime').textContent = fmtUptime(d.uptime_seconds);
+            } catch(e) { console.error('Resource fetch failed', e); }
+        }
+
+        // Machines that can be deployed to (remote Linux machines)
+        const DEPLOYABLE = ['CashCow', 'Christy', 'R1'];
+        // Machines whose agent can be restarted via SSH
+        const RESTARTABLE = ['Dreamer', 'Gram', 'CashCow', 'Christy', 'R1'];
+
+        async function refreshMachines() {
+            try {
+                const r = await fetch('/api/network/machines');
+                const machines = await r.json();
+                const grid = document.getElementById('machines');
+                grid.innerHTML = '';
+                let online = 0, total = 0;
+                for (const [name, m] of Object.entries(machines)) {
+                    total++;
+                    if (m.online) online++;
+                    const isSelf = name === LOCAL_MACHINE;
+                    const host = m.host || 'TBD';
+                    const port = m.port || 5000;
+                    const canDeploy = DEPLOYABLE.includes(name) && !isSelf;
+                    const canRestart = RESTARTABLE.includes(name) && !isSelf;
+
+                    const tile = document.createElement('div');
+                    tile.className = 'machine-tile';
+                    // Click tile body to navigate (if online remote machine)
+                    if (m.online && !isSelf) {
+                        tile.onclick = function(e) {
+                            // Don't navigate if clicking a button
+                            if (e.target.closest('.btn-row')) return;
+                            window.open('http://' + host + ':' + port, '_blank');
+                        };
+                    }
+                    tile.innerHTML = `
+                        <div class="status-dot ${m.online ? 'online' : 'offline'}"></div>
+                        <h3>${name}${isSelf ? '<span class="self-badge">THIS</span>' : ''}</h3>
+                        <div class="role">${m.role || m.type || ''}</div>
+                        <div class="host">${host}:${port}${m.latency_ms != null ? ' (' + m.latency_ms + 'ms)' : ''}</div>
+                        <div class="btn-row">
+                            ${canRestart ? `<button class="btn-restart" id="restart-btn-${name}" onclick="event.stopPropagation(); restartAgent('${name}')">Restart</button>` : ''}
+                            ${canDeploy ? `<button class="btn-deploy" id="deploy-btn-${name}" onclick="event.stopPropagation(); startDeploy('${name}')">Deploy</button>` : ''}
+                        </div>
+                    `;
+                    grid.appendChild(tile);
+                }
+                document.getElementById('online-badge').textContent = online + '/' + total + ' Online';
+            } catch(e) { console.error('Machine fetch failed', e); }
+        }
+
+        // --- Deploy functions ---
+        let deployPollTimer = null;
+
+        async function startDeploy(name) {
+            if (!confirm(`Deploy agent to ${name}?`)) return;
+            const btn = document.getElementById('deploy-btn-' + name);
+            if (btn) { btn.disabled = true; btn.textContent = 'Deploying...'; btn.className = 'btn-deploy running'; }
+
+            // Show modal
+            document.getElementById('deploy-modal').classList.add('active');
+            document.getElementById('deploy-modal-title').textContent = 'Deploy to ' + name;
+            document.getElementById('deploy-modal-status').textContent = 'Starting deploy...';
+            document.getElementById('deploy-modal-status').className = 'modal-status running';
+            document.getElementById('deploy-modal-log').textContent = '';
+
+            try {
+                const r = await fetch('/api/deploy/' + name, { method: 'POST' });
+                const d = await r.json();
+                if (!r.ok) {
+                    document.getElementById('deploy-modal-status').textContent = 'Error: ' + (d.error || 'Unknown');
+                    document.getElementById('deploy-modal-status').className = 'modal-status failed';
+                    if (btn) { btn.disabled = false; btn.textContent = 'Deploy'; btn.className = 'btn-deploy failed'; }
+                    return;
+                }
+                // Poll for status
+                pollDeployStatus(name);
+            } catch(e) {
+                document.getElementById('deploy-modal-status').textContent = 'Error: ' + e.message;
+                document.getElementById('deploy-modal-status').className = 'modal-status failed';
+                if (btn) { btn.disabled = false; btn.textContent = 'Deploy'; btn.className = 'btn-deploy'; }
+            }
+        }
+
+        function pollDeployStatus(name) {
+            if (deployPollTimer) clearInterval(deployPollTimer);
+            deployPollTimer = setInterval(async () => {
+                try {
+                    const r = await fetch('/api/deploy/' + name + '/status');
+                    const d = await r.json();
+                    const statusEl = document.getElementById('deploy-modal-status');
+                    const logEl = document.getElementById('deploy-modal-log');
+                    const btn = document.getElementById('deploy-btn-' + name);
+
+                    if (d.output) logEl.textContent = d.output;
+
+                    if (d.status === 'running') {
+                        statusEl.textContent = 'Deploying...';
+                        statusEl.className = 'modal-status running';
+                    } else if (d.status === 'success') {
+                        statusEl.textContent = 'Deploy successful!';
+                        statusEl.className = 'modal-status success';
+                        if (btn) { btn.disabled = false; btn.textContent = 'Deploy'; btn.className = 'btn-deploy success'; }
+                        clearInterval(deployPollTimer);
+                        // Refresh machines to update online status
+                        setTimeout(refreshMachines, 3000);
+                    } else if (d.status === 'failed') {
+                        statusEl.textContent = 'Deploy failed (exit code: ' + (d.returncode || '?') + ')';
+                        statusEl.className = 'modal-status failed';
+                        if (btn) { btn.disabled = false; btn.textContent = 'Deploy'; btn.className = 'btn-deploy failed'; }
+                        clearInterval(deployPollTimer);
+                    }
+                } catch(e) {}
+            }, 2000);
+        }
+
+        function closeDeployModal() {
+            document.getElementById('deploy-modal').classList.remove('active');
+            if (deployPollTimer) { clearInterval(deployPollTimer); deployPollTimer = null; }
+        }
+
+        // --- Agent Restart functions ---
+        async function restartAgent(name) {
+            if (!confirm(`Restart agent on ${name}?`)) return;
+            const btn = document.getElementById('restart-btn-' + name);
+            if (btn) { btn.disabled = true; btn.textContent = 'Restarting...'; btn.className = 'btn-restart running'; }
+
+            try {
+                const r = await fetch('/api/agent/restart/' + name, { method: 'POST' });
+                const d = await r.json();
+                if (!r.ok) {
+                    alert('Restart error: ' + (d.error || 'Unknown'));
+                    if (btn) { btn.disabled = false; btn.textContent = 'Restart'; btn.className = 'btn-restart'; }
+                    return;
+                }
+                // Poll for restart status
+                pollRestartStatus(name);
+            } catch(e) {
+                alert('Restart error: ' + e.message);
+                if (btn) { btn.disabled = false; btn.textContent = 'Restart'; btn.className = 'btn-restart'; }
+            }
+        }
+
+        function pollRestartStatus(name) {
+            const btn = document.getElementById('restart-btn-' + name);
+            const timer = setInterval(async () => {
+                try {
+                    const r = await fetch('/api/agent/restart/' + name + '/status');
+                    const d = await r.json();
+                    if (d.status === 'success') {
+                        if (btn) { btn.disabled = false; btn.textContent = 'Restart'; btn.className = 'btn-restart success'; }
+                        clearInterval(timer);
+                        setTimeout(refreshMachines, 2000);
+                    } else if (d.status === 'started') {
+                        if (btn) { btn.disabled = false; btn.textContent = 'Restart'; btn.className = 'btn-restart running'; }
+                        clearInterval(timer);
+                        setTimeout(refreshMachines, 3000);
+                    } else if (d.status === 'failed') {
+                        alert('Restart failed: ' + (d.error || 'Unknown'));
+                        if (btn) { btn.disabled = false; btn.textContent = 'Restart'; btn.className = 'btn-restart'; }
+                        clearInterval(timer);
+                    }
+                } catch(e) {}
+            }, 2000);
+            // Stop polling after 30s
+            setTimeout(() => {
+                clearInterval(timer);
+                if (btn && btn.disabled) { btn.disabled = false; btn.textContent = 'Restart'; }
+            }, 30000);
+        }
+
+        async function refreshLogs() {
+            try {
+                const r = await fetch('/api/logs/tail?limit=30');
+                const logs = await r.json();
+                const box = document.getElementById('log-box');
+                box.innerHTML = logs.map(l =>
+                    `<div class="log-entry ${l.level === 'error' ? 'error' : ''}">` +
+                    `<span class="ts">${l.timestamp}</span> ${l.message}</div>`
+                ).join('');
+            } catch(e) {}
+        }
+
+        // --- Trader functions (CashCow local or Christy remote) ---
+        const TRADER_API_BASE = LOCAL_MACHINE === 'Christy' ? 'http://192.168.1.91:5000' : '';
+        async function refreshTrader() {
+            if (LOCAL_MACHINE !== 'CashCow' && LOCAL_MACHINE !== 'Christy') return;
+            try {
+                const r = await fetch(TRADER_API_BASE + '/api/trader/status');
+                const d = await r.json();
+                const badge = document.getElementById('trader-badge');
+                const mode = document.getElementById('trader-mode');
+                const startBtn = document.getElementById('trader-start-btn');
+                const stopBtn = document.getElementById('trader-stop-btn');
+
+                if (d.running) {
+                    badge.textContent = 'RUNNING';
+                    badge.className = 'trader-status running';
+                    mode.textContent = 'Mode: ' + (d.mode || 'UNKNOWN') + (d.pid ? ' (PID: ' + d.pid + ')' : '');
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = '';
+                } else {
+                    badge.textContent = 'STOPPED';
+                    badge.className = 'trader-status stopped';
+                    mode.textContent = '';
+                    startBtn.style.display = '';
+                    stopBtn.style.display = 'none';
+                }
+
+                // Daily picks
+                const picksEl = document.getElementById('trader-picks');
+                if (d.daily_picks && d.daily_picks.picks && d.daily_picks.picks.length > 0) {
+                    const picks = d.daily_picks.picks;
+                    let html = '<div class="section-title" style="font-size:13px; margin-bottom:6px">Daily Picks (' + (d.daily_picks.date || '') + ')</div>';
+                    html += '<table><tr><th>Symbol</th><th>Signal</th><th>Score</th><th>Price</th></tr>';
+                    for (const p of picks.slice(0, 10)) {
+                        const cls = (p.signal === 'BUY' || p.direction === 'long') ? 'bullish' : 'bearish';
+                        html += '<tr>';
+                        html += '<td class="' + cls + '">' + (p.symbol || p.ticker || '') + '</td>';
+                        html += '<td>' + (p.signal || p.direction || '') + '</td>';
+                        html += '<td>' + (p.score != null ? p.score : '') + '</td>';
+                        html += '<td>' + (p.price != null ? '$' + p.price : '') + '</td>';
+                        html += '</tr>';
+                    }
+                    html += '</table>';
+                    picksEl.innerHTML = html;
+                } else {
+                    picksEl.innerHTML = '<div style="color:#555; font-size:12px">No daily picks</div>';
+                }
+
+                // Log lines
+                const logEl = document.getElementById('trader-log');
+                if (d.log_lines && d.log_lines.length > 0) {
+                    logEl.innerHTML = d.log_lines.slice(-30).map(l =>
+                        '<div class="line">' + l.replace(/</g,'&lt;') + '</div>'
+                    ).join('');
+                    logEl.scrollTop = logEl.scrollHeight;
+                } else {
+                    logEl.innerHTML = '<div class="line" style="color:#555">No log data</div>';
+                }
+            } catch(e) { console.error('Trader fetch failed', e); }
+        }
+
+        async function traderAction(action) {
+            if (action === 'stop' && !confirm('Stop Smart Trader?')) return;
+            try {
+                const r = await fetch(TRADER_API_BASE + '/api/trader/' + action, { method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({auto: true})
+                });
+                const d = await r.json();
+                setTimeout(refreshTrader, 2000);
+            } catch(e) { alert('Error: ' + e.message); }
+        }
+
+        // --- XBee Responder functions (Dreamer only) ---
+        async function refreshDreamerXbee() {
+            if (LOCAL_MACHINE !== 'Dreamer' && LOCAL_MACHINE !== 'Gram') return;
+            try {
+                const r = await fetch('/api/heartbeat/status');
+                const d = await r.json();
+                const badge = document.getElementById('xbee-d-badge');
+                const onRadio = document.getElementById('xbee-d-on');
+                const offRadio = document.getElementById('xbee-d-off');
+
+                if (d.running || d.is_running) {
+                    badge.textContent = 'RUNNING';
+                    badge.className = 'xbee-status running';
+                    onRadio.checked = true;
+                } else {
+                    badge.textContent = 'STOPPED';
+                    badge.className = 'xbee-status stopped';
+                    offRadio.checked = true;
+                }
+
+                document.getElementById('xbee-d-port').textContent = (d.port || '') + (d.reply ? '  Reply: ' + d.reply : '');
+
+                const recv = d.received_count || 0;
+                const replies = d.replied_count || 0;
+                const rssi = d.last_rssi || null;
+
+                document.getElementById('xbee-d-hb-recv').textContent = recv;
+                document.getElementById('xbee-d-hb-recv').className = 'val' + (recv > 0 ? '' : ' off');
+                document.getElementById('xbee-d-replies').textContent = replies;
+                document.getElementById('xbee-d-replies').className = 'val' + (replies > 0 ? '' : ' off');
+                document.getElementById('xbee-d-rssi').textContent = rssi != null ? rssi + ' dBm' : '-';
+                document.getElementById('xbee-d-rssi').className = 'val' + (rssi ? '' : ' off');
+
+                // History messages
+                const history = d.history || [];
+                const msgBox = document.getElementById('xbee-d-messages');
+                if (history.length > 0) {
+                    msgBox.innerHTML = history.map(h =>
+                        '<div class="msg">' +
+                        '<span class="ts">[' + h.time + ']</span> ' +
+                        '<span class="addr">...' + (h.from || '?') + '</span> ' +
+                        '<span class="data-text">' + (h.msg || '').replace(/</g, '&lt;') + '</span>' +
+                        (h.reply ? ' <span class="heartbeat">-> ' + h.reply + '</span>' : '') +
+                        (h.rssi != null ? ' <span style="color:#666">(' + h.rssi + ' dBm)</span>' : '') +
+                        '</div>'
+                    ).join('');
+                    msgBox.scrollTop = msgBox.scrollHeight;
+                } else if (!d.running) {
+                    msgBox.innerHTML = '<div class="msg" style="color:#555">XBee stopped. Toggle ON to start listening.</div>';
+                }
+            } catch(e) { console.error('Dreamer XBee fetch failed', e); }
+        }
+
+        async function dreamerXbeeToggle(action) {
+            try {
+                const r = await fetch('/api/heartbeat/' + action, { method: 'POST' });
+                const d = await r.json();
+                if (d.success === false && d.error) alert('XBee error: ' + d.error);
+                setTimeout(refreshDreamerXbee, 1000);
+            } catch(e) { alert('Error: ' + e.message); }
+        }
+
+        // --- XBee functions (Christy only) ---
+        let _xbeeIntervalSynced = false;
+
+        async function refreshXbee() {
+            if (LOCAL_MACHINE !== 'Christy') return;
+            try {
+                const r = await fetch('/api/xbee/status');
+                const d = await r.json();
+                const badge = document.getElementById('xbee-badge');
+                const startBtn = document.getElementById('xbee-start-btn');
+                const stopBtn = document.getElementById('xbee-stop-btn');
+
+                if (d.running) {
+                    badge.textContent = 'RUNNING';
+                    badge.className = 'xbee-status running';
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = '';
+                } else {
+                    badge.textContent = 'STOPPED';
+                    badge.className = 'xbee-status stopped';
+                    startBtn.style.display = '';
+                    stopBtn.style.display = 'none';
+                }
+
+                document.getElementById('xbee-port').textContent = d.port || '';
+                document.getElementById('xbee-hb-sent').textContent = d.heartbeats_sent || 0;
+                document.getElementById('xbee-hb-sent').className = 'val' + (d.running ? '' : ' off');
+
+                // Responses count
+                const respCount = d.total_responses || (d.recent_messages || []).length;
+                document.getElementById('xbee-responses').textContent = respCount;
+                document.getElementById('xbee-responses').className = 'val' + (respCount > 0 ? '' : ' off');
+
+                // Count online robots
+                const robots = d.robots || {};
+                const onlineCount = Object.values(robots).filter(r => r.online).length;
+                document.getElementById('xbee-robots-online').textContent = onlineCount;
+                document.getElementById('xbee-robots-online').className = 'val' + (onlineCount > 0 ? '' : ' off');
+
+                // Sync interval dropdown once from server
+                if (!_xbeeIntervalSynced && d.heartbeat_interval) {
+                    const sel = document.getElementById('xbee-interval');
+                    const val = String(d.heartbeat_interval);
+                    for (let opt of sel.options) {
+                        if (opt.value === val) { opt.selected = true; break; }
+                    }
+                    _xbeeIntervalSynced = true;
+                }
+
+                // Error
+                const errEl = document.getElementById('xbee-error');
+                if (d.error) {
+                    errEl.textContent = d.error;
+                    errEl.style.color = '#e94560';
+                } else {
+                    errEl.textContent = '-';
+                    errEl.style.color = '';
+                }
+
+                // Messages
+                const msgs = d.recent_messages || [];
+                const msgBox = document.getElementById('xbee-messages');
+                if (msgs.length > 0) {
+                    msgBox.innerHTML = msgs.map(m =>
+                        '<div class="msg">' +
+                        '<span class="ts">[' + m.time + ']</span> ' +
+                        '<span class="addr">...' + (m.from_short || '?') + '</span> ' +
+                        '<span class="data-text">' + (m.data || '').replace(/</g, '&lt;') + '</span>' +
+                        (m.rssi != null ? ' <span style="color:#666">(' + m.rssi + ' dBm)</span>' : '') +
+                        '</div>'
+                    ).join('');
+                    msgBox.scrollTop = msgBox.scrollHeight;
+                } else if (!d.running) {
+                    msgBox.innerHTML = '<div class="msg" style="color:#555">XBee stopped. Click Start to begin monitoring.</div>';
+                }
+            } catch(e) { console.error('XBee fetch failed', e); }
+        }
+
+        async function xbeeAction(action) {
+            if (action === 'stop' && !confirm('Stop XBee monitor?')) return;
+            try {
+                // When starting, include the selected interval
+                const opts = {};
+                if (action === 'start') {
+                    const interval = parseInt(document.getElementById('xbee-interval').value);
+                    opts.method = 'POST';
+                    opts.headers = {'Content-Type': 'application/json'};
+                    opts.body = JSON.stringify({interval: interval});
+                } else {
+                    opts.method = 'POST';
+                }
+                const r = await fetch('/api/xbee/' + action, opts);
+                const d = await r.json();
+                if (!d.success && d.error) alert('XBee error: ' + d.error);
+                setTimeout(refreshXbee, 1000);
+            } catch(e) { alert('Error: ' + e.message); }
+        }
+
+        async function xbeeSetInterval() {
+            const interval = parseInt(document.getElementById('xbee-interval').value);
+            try {
+                const r = await fetch('/api/xbee/interval', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({interval: interval})
+                });
+                const d = await r.json();
+                if (d.success) {
+                    document.getElementById('xbee-interval-note').textContent = 'Set to ' + interval + 's';
+                    setTimeout(() => { document.getElementById('xbee-interval-note').textContent = ''; }, 3000);
+                } else {
+                    alert('Error: ' + (d.error || 'Unknown'));
+                }
+            } catch(e) { alert('Error: ' + e.message); }
+        }
+
+        async function xbeeSend() {
+            const input = document.getElementById('xbee-send-input');
+            const msg = input.value.trim();
+            if (!msg) return;
+            try {
+                const r = await fetch('/api/xbee/send', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: msg})
+                });
+                const d = await r.json();
+                if (d.error) alert('Send error: ' + d.error);
+                else input.value = '';
+            } catch(e) { alert('Error: ' + e.message); }
+        }
+
+        // --- XBee Responder functions (R1 / robots) ---
+        const SCOPE_COLORS = [
+            '#00e676','#ff9800','#29b6f6','#ff4081','#ffeb3b',
+            '#ab47bc','#26c6da','#ef5350','#66bb6a','#42a5f5',
+            '#ffa726','#ec407a','#8d6e63','#78909c',
+        ];
+
+        async function refreshR1Xbee() {
+            if (LOCAL_MACHINE !== 'R1') return;
+            try {
+                const r = await fetch('/api/xbee/status');
+                const d = await r.json();
+                const badge = document.getElementById('xbee-r1-badge');
+                const onRadio = document.getElementById('xbee-r1-on');
+                const offRadio = document.getElementById('xbee-r1-off');
+
+                if (d.running) {
+                    badge.textContent = 'RUNNING';
+                    badge.className = 'xbee-status running';
+                    onRadio.checked = true;
+                } else {
+                    badge.textContent = 'STOPPED';
+                    badge.className = 'xbee-status stopped';
+                    offRadio.checked = true;
+                }
+
+                document.getElementById('xbee-r1-port').textContent = d.port || '';
+                document.getElementById('xbee-r1-reply').textContent = d.device_reply ? ('Reply: ' + d.device_reply) : '';
+
+                const recv = d.heartbeats_received || 0;
+                const replies = d.replies_sent || 0;
+                const rssi = d.last_rssi;
+                const gpCount = d.gamepad_count || 0;
+
+                document.getElementById('xbee-r1-hb-recv').textContent = recv;
+                document.getElementById('xbee-r1-hb-recv').className = 'val' + (recv > 0 ? '' : ' off');
+                document.getElementById('xbee-r1-replies').textContent = replies;
+                document.getElementById('xbee-r1-replies').className = 'val' + (replies > 0 ? '' : ' off');
+                document.getElementById('xbee-r1-rssi').textContent = rssi != null ? rssi + ' dBm' : '-';
+                document.getElementById('xbee-r1-rssi').className = 'val' + (rssi ? '' : ' off');
+                document.getElementById('xbee-r1-gamepad-count').textContent = gpCount;
+                document.getElementById('xbee-r1-gamepad-count').className = 'val' + (gpCount > 0 ? '' : ' off');
+            } catch(e) { console.error('R1 XBee status failed', e); }
+        }
+
+        async function refreshR1Chat() {
+            if (LOCAL_MACHINE !== 'R1') return;
+            try {
+                const r = await fetch('/api/xbee/chat?limit=30');
+                const msgs = await r.json();
+                const box = document.getElementById('xbee-r1-messages');
+                if (msgs.length > 0) {
+                    box.innerHTML = msgs.map(m =>
+                        '<div class="msg"><span class="ts">[' + m.time + ']</span> ' +
+                        '<span class="data-text">' + (m.text || '').replace(/</g, '&lt;') + '</span></div>'
+                    ).join('');
+                    box.scrollTop = box.scrollHeight;
+                }
+            } catch(e) {}
+        }
+
+        // --- Client-side scope buffer (runs at 5Hz independently) ---
+        const SCOPE_MAX = 80;
+        const _scopeChannels = {};  // channel -> array of SCOPE_MAX values
+        const _scopeChannelOrder = [];
+        let _scopeCursor = 0;
+        let _scopeStarted = false;
+        let _latestGamepad = null;   // latest from server
+        let _lastServerCount = 0;    // track new data from server
+        let _latestSticks = {left:[0,0], right:[0,0]};
+
+        function scopeEnsureChannel(key) {
+            if (!(key in _scopeChannels)) {
+                _scopeChannels[key] = new Array(SCOPE_MAX).fill(null);
+                // Rebuild sorted order
+                const keys = Object.keys(_scopeChannels);
+                keys.sort((a, b) => {
+                    const pA = a[0]==='A'?0:(a[0]==='H'?1:2);
+                    const pB = b[0]==='A'?0:(b[0]==='H'?1:2);
+                    if (pA !== pB) return pA - pB;
+                    const nA = parseInt(a.slice(1)) || 0;
+                    const nB = parseInt(b.slice(1)) || 0;
+                    return nA - nB || a.localeCompare(b);
+                });
+                _scopeChannelOrder.length = 0;
+                keys.forEach(k => _scopeChannelOrder.push(k));
+            }
+        }
+
+        function scopePush(gp) {
+            if (!gp) return;
+            const axes = gp.axes || {};
+            const buttons = gp.buttons || {};
+            const hats = gp.hats || {};
+
+            for (const [k, v] of Object.entries(axes).sort((a,b)=>String(a[0]).localeCompare(String(b[0])))) {
+                const ch = 'A' + k;
+                scopeEnsureChannel(ch);
+                _scopeChannels[ch][_scopeCursor] = parseFloat(v);
+            }
+            for (const [k, v] of Object.entries(hats).sort((a,b)=>String(a[0]).localeCompare(String(b[0])))) {
+                scopeEnsureChannel('H'+k+'x');
+                scopeEnsureChannel('H'+k+'y');
+                if (Array.isArray(v)) {
+                    _scopeChannels['H'+k+'x'][_scopeCursor] = v[0];
+                    _scopeChannels['H'+k+'y'][_scopeCursor] = v[1];
+                } else {
+                    _scopeChannels['H'+k+'x'][_scopeCursor] = parseFloat(v);
+                }
+            }
+            for (const [k, v] of Object.entries(buttons).sort((a,b)=>String(a[0]).localeCompare(String(b[0])))) {
+                const ch = 'B' + k;
+                scopeEnsureChannel(ch);
+                _scopeChannels[ch][_scopeCursor] = parseInt(v);
+            }
+            _scopeCursor = (_scopeCursor + 1) % SCOPE_MAX;
+            _scopeStarted = true;
+        }
+
+        // Poll server for latest gamepad values (every 500ms)
+        async function refreshR1Scope() {
+            if (LOCAL_MACHINE !== 'R1') return;
+            try {
+                const r = await fetch('/api/xbee/scope');
+                const d = await r.json();
+                if (d.gamepad_count > _lastServerCount) {
+                    _latestGamepad = d.latest;
+                    _lastServerCount = d.gamepad_count;
+                }
+                if (d.sticks) _latestSticks = d.sticks;
+            } catch(e) {}
+        }
+
+        // Client-side render loop: push + draw at 5Hz (200ms)
+        function scopeTick() {
+            if (LOCAL_MACHINE !== 'R1') return;
+            if (_latestGamepad) {
+                scopePush(_latestGamepad);
+            }
+            drawScope({
+                channels: _scopeChannels,
+                channel_order: _scopeChannelOrder,
+                cursor: _scopeCursor,
+                started: _scopeStarted,
+            });
+            drawSticks(_latestSticks);
+        }
+
+        async function refreshR1Hardware() {
+            if (LOCAL_MACHINE !== 'R1') return;
+            try {
+                const r = await fetch('/api/xbee/hardware');
+                const d = await r.json();
+
+                // xArm
+                const xarm = d.xarm || {};
+                const statusEl = document.getElementById('r1-xarm-status');
+                const gpEl = document.getElementById('r1-xarm-gamepad');
+                if (!xarm.available) {
+                    statusEl.textContent = 'N/A';
+                    statusEl.className = 'val off';
+                } else {
+                    statusEl.textContent = xarm.connected ? 'Connected' : 'Disconnected';
+                    statusEl.className = 'val' + (xarm.connected ? '' : ' off');
+                }
+                gpEl.textContent = xarm.gamepad_enabled ? 'ON' : 'OFF';
+                gpEl.className = 'val' + (xarm.gamepad_enabled ? '' : ' off');
+
+                // Servo positions (visual bars) — skip update while dragging
+                if (xarm.servos && _servoDragging === null) {
+                    for (let i = 1; i <= 6; i++) {
+                        const pos = xarm.servos[String(i)];
+                        if (pos === undefined) continue;
+                        updateServoUI(i, Math.round(pos));
+                    }
+                }
+
+                // GPIO
+                const gpio = d.gpio || {};
+                const gpioEl = document.getElementById('r1-gpio-pins');
+                const pins = gpio.pins || [];
+                const states = gpio.states || {};
+                gpioEl.innerHTML = pins.map(pin => {
+                    const st = states[String(pin)] || 0;
+                    const color = st ? '#4ecca3' : '#666';
+                    return '<div style="text-align:center;">' +
+                        '<div style="font-size:11px; color:#888;">Pin ' + pin + '</div>' +
+                        '<div style="width:40px; height:40px; border-radius:50%; background:' + color +
+                        '; margin:4px auto; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:12px; color:#fff; font-weight:bold;"' +
+                        ' onclick="r1GpioToggle(' + pin + ',' + (st ? 0 : 1) + ')">' +
+                        (st ? 'ON' : 'OFF') + '</div></div>';
+                }).join('');
+            } catch(e) {}
+        }
+
+        function drawScope(data) {
+            const canvas = document.getElementById('r1-scope-canvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width, h = canvas.height;
+            const channels = data.channels || {};
+            const order = data.channel_order || [];
+            const cursor = data.cursor || 0;
+            const MAX = SCOPE_MAX;
+
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#0f3460';
+            ctx.fillRect(0, 0, w, h);
+
+            if (!data.started || order.length === 0) {
+                ctx.fillStyle = '#888';
+                ctx.font = '13px Consolas';
+                ctx.textAlign = 'center';
+                ctx.fillText('Waiting for gamepad data...', w/2, h/2);
+                return;
+            }
+
+            const ml = 32, mr = 4, mt = 4, mb = 4;
+            const pw = w - ml - mr;
+            const ph = h - mt - mb;
+            const nCh = order.length;
+            const laneH = ph / nCh;
+            const step = pw / (MAX - 1);
+
+            // Border
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(ml, mt, pw, ph);
+
+            for (let li = 0; li < nCh; li++) {
+                const key = order[li];
+                const ch = channels[key];
+                if (!ch) continue;
+                const isDigital = key.startsWith('B');
+                const color = SCOPE_COLORS[li % SCOPE_COLORS.length];
+                const laneTop = mt + li * laneH;
+
+                // Lane separator
+                if (li > 0) {
+                    ctx.strokeStyle = '#333';
+                    ctx.beginPath();
+                    ctx.moveTo(ml, laneTop);
+                    ctx.lineTo(ml + pw, laneTop);
+                    ctx.stroke();
+                }
+
+                // Baseline
+                ctx.strokeStyle = '#333';
+                ctx.setLineDash([2, 4]);
+                const baseY = isDigital ? laneTop + laneH : laneTop + laneH / 2;
+                ctx.beginPath();
+                ctx.moveTo(ml, baseY);
+                ctx.lineTo(ml + pw, baseY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Channel label
+                ctx.fillStyle = color;
+                ctx.font = '9px Consolas';
+                ctx.textAlign = 'left';
+                ctx.fillText(key, 2, laneTop + laneH / 2 + 3);
+
+                // Trace
+                const pad = Math.max(1, laneH * 0.05);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                let started = false;
+                for (let i = 0; i < MAX; i++) {
+                    const val = ch[i];
+                    if (val === null || val === undefined) {
+                        if (started) { ctx.stroke(); ctx.beginPath(); started = false; }
+                        continue;
+                    }
+                    const x = ml + i * step;
+                    let y;
+                    if (isDigital) {
+                        y = laneTop + laneH - pad - val * (laneH - 2 * pad);
+                    } else {
+                        y = laneTop + pad + (1.0 - val) / 2.0 * (laneH - 2 * pad);
+                    }
+                    if (!started) { ctx.moveTo(x, y); started = true; }
+                    else ctx.lineTo(x, y);
+                }
+                if (started) ctx.stroke();
+                ctx.lineWidth = 1;
+            }
+
+            // Sweep cursor
+            const cx = ml + (cursor / (MAX - 1)) * pw;
+            ctx.strokeStyle = '#ffffff';
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(cx, mt);
+            ctx.lineTo(cx, mt + ph);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        function drawSticks(sticks) {
+            const canvas = document.getElementById('r1-stick-canvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width, h = canvas.height;
+            const left = (sticks && sticks.left) || [0, 0];
+            const right = (sticks && sticks.right) || [0, 0];
+
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#0f3460';
+            ctx.fillRect(0, 0, w, h);
+
+            const margin = 24;
+            const size = Math.min(w, h);
+            const area = size - 2 * margin;
+            const ox = (w - area) / 2;
+            const oy = (h - area) / 2 - 10;
+            const cx = ox + area / 2;
+            const cy = oy + area / 2;
+
+            // Grid
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(ox, oy, area, area);
+
+            // Cross-hairs
+            ctx.setLineDash([2, 4]);
+            ctx.beginPath();
+            ctx.moveTo(ox, cy); ctx.lineTo(ox + area, cy);
+            ctx.moveTo(cx, oy); ctx.lineTo(cx, oy + area);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Labels
+            ctx.fillStyle = '#888';
+            ctx.font = '9px Consolas';
+            ctx.textAlign = 'center';
+            ctx.fillText('-1', ox - 12, cy + 3);
+            ctx.fillText('+1', ox + area + 12, cy + 3);
+            ctx.fillText('+1', cx, oy - 6);
+            ctx.fillText('-1', cx, oy + area + 12);
+
+            // Dots
+            function drawDot(xv, yv, color) {
+                const px = ox + (xv + 1) / 2 * area;
+                const py = oy + (-yv + 1) / 2 * area;
+                ctx.beginPath();
+                ctx.arc(px, py, 7, 0, Math.PI * 2);
+                ctx.fillStyle = color;
+                ctx.fill();
+            }
+            drawDot(left[0], -left[1], '#29b6f6');
+            drawDot(right[0], -right[1], '#e94560');
+
+            // Legend
+            ctx.font = '10px Consolas';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#29b6f6';
+            ctx.fillText('L stick', ox, oy + area + 28);
+            ctx.fillStyle = '#e94560';
+            ctx.fillText('R stick', ox + 70, oy + area + 28);
+        }
+
+        async function r1XbeeToggle(action) {
+            try {
+                const r = await fetch('/api/xbee/' + action, { method: 'POST' });
+                const d = await r.json();
+                if (d.success === false && d.error) alert('XBee error: ' + d.error);
+                setTimeout(refreshR1Xbee, 1000);
+            } catch(e) { alert('Error: ' + e.message); }
+        }
+
+        async function r1XbeeSend() {
+            const input = document.getElementById('xbee-r1-send-input');
+            const msg = input.value.trim();
+            if (!msg) return;
+            try {
+                const r = await fetch('/api/xbee/send', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: msg})
+                });
+                const d = await r.json();
+                if (d.error) alert('Send error: ' + d.error);
+                else input.value = '';
+            } catch(e) { alert('Error: ' + e.message); }
+        }
+
+        async function r1GpioToggle(pin, state) {
+            try {
+                await fetch('/api/xbee/gpio', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({pin: pin, state: state})
+                });
+                refreshR1Hardware();
+            } catch(e) { alert('GPIO error: ' + e.message); }
+        }
+
+        // Initial load
+        refreshResources();
+        refreshMachines();
+        refreshLogs();
+        if (LOCAL_MACHINE === 'CashCow' || LOCAL_MACHINE === 'Christy') refreshTrader();
+        if (LOCAL_MACHINE === 'Christy') refreshXbee();
+        if (LOCAL_MACHINE === 'Dreamer' || LOCAL_MACHINE === 'Gram') refreshDreamerXbee();
+        if (LOCAL_MACHINE === 'R1') {
+            refreshR1Xbee();
+            refreshR1Chat();
+            refreshR1Scope();
+            refreshR1Hardware();
+        }
+
+        // --- Servo slider drag (R1) ---
+        let _servoDragging = null;  // servo ID being dragged
+        let _servoThrottle = 0;     // throttle timer
+
+        function servoFromEvent(track, e) {
+            const rect = track.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            return Math.round(pct * 1000);
+        }
+
+        function updateServoUI(sid, pos) {
+            const pct = pos / 10;
+            const bar = document.getElementById('r1-servo-bar-' + sid);
+            const marker = document.getElementById('r1-servo-marker-' + sid);
+            const valEl = document.getElementById('r1-servo-val-' + sid);
+            if (bar) bar.style.width = pct + '%';
+            if (marker) marker.style.left = pct + '%';
+            if (valEl) valEl.textContent = pos;
+        }
+
+        function sendServoMove(sid, pos) {
+            fetch('/api/xbee/xarm-move', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({servo: sid, position: pos, duration: 150})
+            }).catch(() => {});
+        }
+
+        document.querySelectorAll('.servo-track').forEach(track => {
+            const sid = parseInt(track.dataset.servo);
+
+            function onStart(e) {
+                e.preventDefault();
+                _servoDragging = sid;
+                const pos = servoFromEvent(track, e);
+                updateServoUI(sid, pos);
+                sendServoMove(sid, pos);
+            }
+            function onMove(e) {
+                if (_servoDragging !== sid) return;
+                e.preventDefault();
+                const pos = servoFromEvent(track, e);
+                updateServoUI(sid, pos);
+                // Throttle API calls to ~30ms
+                const now = Date.now();
+                if (now - _servoThrottle > 30) {
+                    _servoThrottle = now;
+                    sendServoMove(sid, pos);
+                }
+            }
+            function onEnd() {
+                if (_servoDragging === sid) _servoDragging = null;
+            }
+
+            track.addEventListener('mousedown', onStart);
+            track.addEventListener('touchstart', onStart, {passive: false});
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (_servoDragging === null) return;
+            const track = document.querySelector('.servo-track[data-servo="' + _servoDragging + '"]');
+            if (!track) return;
+            e.preventDefault();
+            const pos = servoFromEvent(track, e);
+            updateServoUI(_servoDragging, pos);
+            const now = Date.now();
+            if (now - _servoThrottle > 30) {
+                _servoThrottle = now;
+                sendServoMove(_servoDragging, pos);
+            }
+        });
+        document.addEventListener('mouseup', () => { _servoDragging = null; });
+
+        document.addEventListener('touchmove', e => {
+            if (_servoDragging === null) return;
+            const track = document.querySelector('.servo-track[data-servo="' + _servoDragging + '"]');
+            if (!track) return;
+            e.preventDefault();
+            const pos = servoFromEvent(track, e);
+            updateServoUI(_servoDragging, pos);
+            const now = Date.now();
+            if (now - _servoThrottle > 30) {
+                _servoThrottle = now;
+                sendServoMove(_servoDragging, pos);
+            }
+        }, {passive: false});
+        document.addEventListener('touchend', () => { _servoDragging = null; });
+
+        // --- Vision functions (R1) ---
+        let visionStreaming = false;
+
+        function toggleStream() {
+            const img = document.getElementById('vision-stream-img');
+            const ph = document.getElementById('vision-stream-placeholder');
+            const btn = document.getElementById('vision-stream-btn');
+            if (visionStreaming) {
+                img.src = '';
+                img.style.display = 'none';
+                ph.style.display = '';
+                btn.textContent = 'Start Stream';
+                btn.style.color = '#f0a500';
+                btn.style.borderColor = '#f0a500';
+                visionStreaming = false;
+            } else {
+                img.src = '/api/vision/stream?' + Date.now();
+                img.style.display = '';
+                ph.style.display = 'none';
+                btn.textContent = 'Stop Stream';
+                btn.style.color = '#e94560';
+                btn.style.borderColor = '#e94560';
+                visionStreaming = true;
+            }
+        }
+
+        async function visionCapture() {
+            try {
+                const r = await fetch('/api/vision/capture', { method: 'POST' });
+                const d = await r.json();
+                const resultDiv = document.getElementById('vision-result');
+                const textEl = document.getElementById('vision-result-text');
+                const metaEl = document.getElementById('vision-result-meta');
+                resultDiv.style.display = '';
+
+                if (d.ok) {
+                    const analysis = d.analysis || 'No analysis';
+                    textEl.textContent = analysis;
+                    metaEl.textContent = `Mode: ${d.mode || '?'} | ID: ${d.image_id || '?'} | ${d.timestamp || ''}`;
+                    if (d.processing_time_ms) metaEl.textContent += ` | ${d.processing_time_ms}ms`;
+                } else {
+                    textEl.textContent = 'Error: ' + (d.error || 'Unknown');
+                    metaEl.textContent = '';
+                }
+                refreshVisionStatus();
+                refreshVisionGallery();
+            } catch(e) {
+                alert('Capture error: ' + e.message);
+            }
+        }
+
+        async function refreshVisionStatus() {
+            if (LOCAL_MACHINE !== 'R1') return;
+            try {
+                const r = await fetch('/api/vision/status');
+                const d = await r.json();
+                const badge = document.getElementById('vision-christy-badge');
+                if (d.christy_online) {
+                    badge.textContent = 'Christy Online';
+                    badge.className = 'xbee-status running';
+                } else {
+                    badge.textContent = 'Christy Offline';
+                    badge.className = 'xbee-status stopped';
+                }
+                document.getElementById('vision-total').textContent = d.total_captures || 0;
+                document.getElementById('vision-total').className = 'val' + ((d.total_captures || 0) > 0 ? '' : ' off');
+                document.getElementById('vision-pending').textContent = d.pending_sync || 0;
+                document.getElementById('vision-pending').className = 'val' + ((d.pending_sync || 0) > 0 ? '' : ' off');
+            } catch(e) {}
+        }
+
+        async function refreshVisionGallery() {
+            if (LOCAL_MACHINE !== 'R1') return;
+            try {
+                const r = await fetch('/api/vision/history?limit=10');
+                const d = await r.json();
+                const gallery = document.getElementById('vision-gallery');
+                if (!d.results || d.results.length === 0) {
+                    gallery.innerHTML = '<div style="color:#555; font-size:12px;">No captures yet</div>';
+                    return;
+                }
+                gallery.innerHTML = d.results.map(item => {
+                    const detText = item.detections && item.detections.length > 0
+                        ? item.detections.map(det => `${det.class} ${Math.round(det.confidence*100)}%`).join(', ')
+                        : (item.analysis || '').substring(0, 60);
+                    const mode = item.mode === 'offline' ? '<span style="color:#f0a500;">[queued]</span>' : '';
+                    return `<div style="display:flex; gap:8px; align-items:center; padding:4px; background:#0d1117; border-radius:4px; cursor:pointer;" onclick="window.open('/api/vision/image/${item.image_id}','_blank')">
+                        <img src="/api/vision/image/${item.image_id}" style="width:48px; height:36px; object-fit:cover; border-radius:3px;" onerror="this.style.display='none'" />
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-size:11px; color:#aaa; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${detText} ${mode}</div>
+                            <div style="font-size:10px; color:#555;">${item.timestamp || ''}</div>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch(e) {}
+        }
+
+        // Auto-refresh
+        setInterval(refreshResources, 5000);
+        setInterval(refreshMachines, 15000);
+        setInterval(refreshLogs, 10000);
+        if (LOCAL_MACHINE === 'CashCow' || LOCAL_MACHINE === 'Christy') setInterval(refreshTrader, 15000);
+        if (LOCAL_MACHINE === 'Christy') setInterval(refreshXbee, 5000);
+        if (LOCAL_MACHINE === 'Dreamer' || LOCAL_MACHINE === 'Gram') setInterval(refreshDreamerXbee, 10000);
+        if (LOCAL_MACHINE === 'R1') {
+            setInterval(refreshR1Xbee, 5000);
+            setInterval(refreshR1Chat, 3000);
+            setInterval(refreshR1Scope, 500);     // poll server for latest values
+            setInterval(scopeTick, 200);           // render at 5Hz (push + draw)
+            setInterval(refreshR1Hardware, 1000);
+            refreshVisionStatus();
+            refreshVisionGallery();
+            setInterval(refreshVisionStatus, 10000);
+            setInterval(refreshVisionGallery, 15000);
+        }
+    </script>
+</body>
+</html>

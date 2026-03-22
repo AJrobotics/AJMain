@@ -1,0 +1,12 @@
+{
+    "check_interval": 60,
+    "offline_threshold": 3,
+    "disk_warn_percent": 90,
+    "memory_warn_percent": 90,
+    "alert_email_to": "",
+    "alert_email_from": "",
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 587,
+    "smtp_user": "",
+    "smtp_pass": ""
+}

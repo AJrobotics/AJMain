@@ -1,0 +1,12 @@
+{
+    "robots": [
+        {
+            "id": 0,
+            "name": "ROSMASTER X3",
+            "mac": "",
+            "type": "wheeled",
+            "status": "arriving",
+            "description": "First robot platform - 4WD wheeled robot with ROS2"
+        }
+    ]
+}

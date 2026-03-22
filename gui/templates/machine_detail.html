@@ -1,0 +1,2777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ machine_name }} - AJ Robotics</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a1929;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', sans-serif;
+            min-height: 100vh;
+        }
+
+        /* Top Bar */
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 24px;
+            background: #0d2137;
+            border-bottom: 1px solid #1a3a5c;
+        }
+        .topbar h1 { color: #00e5ff; font-size: 20px; }
+        .topbar .back { color: #00e5ff; text-decoration: none; font-size: 14px; }
+        .topbar .back:hover { text-decoration: underline; }
+        .topbar .status-badge {
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .status-online { background: #00e676; color: #000; }
+        .status-offline { background: #e94560; color: #fff; }
+
+        /* Content */
+        .content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .header-row h2 { color: #00e5ff; font-size: 24px; }
+        .header-row .meta { color: #888; font-size: 14px; }
+        .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+        .btn {
+            padding: 8px 16px;
+            border: 1px solid #00e5ff;
+            background: transparent;
+            color: #00e5ff;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .btn:hover { background: #00e5ff22; }
+        .btn.primary { background: #e94560; border-color: #e94560; color: #fff; }
+        .btn.primary:hover { background: #c73a52; }
+        .btn.refresh { background: #00e67633; border-color: #00e676; color: #00e676; }
+        .btn.refresh:hover { background: #00e67655; }
+
+        /* Grid */
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .grid-full {
+            grid-column: 1 / -1;
+        }
+
+        /* Cards */
+        .card {
+            background: #112240;
+            border: 1px solid #1a3a5c;
+            border-radius: 10px;
+            padding: 16px 20px;
+        }
+        .card h3 {
+            color: #00e5ff;
+            font-size: 15px;
+            margin-bottom: 12px;
+            border-bottom: 1px solid #1a3a5c;
+            padding-bottom: 8px;
+        }
+
+        /* Info List */
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid #0a192f;
+            font-size: 13px;
+        }
+        .info-row:last-child { border-bottom: none; }
+        .info-row .label { color: #888; }
+        .info-row .value { color: #e0e0e0; font-family: 'Consolas', monospace; }
+
+        /* Resource Bars */
+        .resource-item { margin-bottom: 12px; }
+        .label-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+        .bar-bg {
+            height: 8px;
+            background: #0a192f;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+        .bar-fill.green { background: linear-gradient(90deg, #00e676, #00c853); }
+        .bar-fill.yellow { background: linear-gradient(90deg, #ffc107, #ff9800); }
+        .bar-fill.red { background: linear-gradient(90deg, #e94560, #ff1744); }
+
+        /* Process Table */
+        .proc-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            font-family: 'Consolas', monospace;
+        }
+        .proc-table th {
+            text-align: left;
+            color: #00e5ff;
+            padding: 6px 8px;
+            border-bottom: 1px solid #1a3a5c;
+            font-size: 11px;
+        }
+        .proc-table td {
+            padding: 4px 8px;
+            border-bottom: 1px solid #0a192f;
+            color: #ccc;
+        }
+        .proc-table tr:hover td { background: #1a3a5c33; }
+
+        /* Pre blocks */
+        .pre-block {
+            background: #0a192f;
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            color: #aaa;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        /* External Access */
+        .access-card {
+            background: #0d2137;
+            border: 1px solid #ffc107;
+            border-radius: 10px;
+            padding: 16px 20px;
+        }
+        .access-card h3 {
+            color: #ffc107;
+            font-size: 15px;
+            margin-bottom: 12px;
+            border-bottom: 1px solid #ffc10744;
+            padding-bottom: 8px;
+        }
+        .access-step {
+            padding: 8px 0;
+            border-bottom: 1px solid #0a192f;
+            font-size: 13px;
+        }
+        .access-step:last-child { border-bottom: none; }
+        .access-step .step-num {
+            color: #ffc107;
+            font-weight: 700;
+            margin-right: 8px;
+        }
+        .access-step code {
+            background: #0a192f;
+            padding: 2px 8px;
+            border-radius: 4px;
+            color: #00e676;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            color: #555;
+            padding: 40px;
+            font-size: 14px;
+        }
+        .spinner {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 3px solid #1a3a5c;
+            border-top-color: #00e5ff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 8px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Trader Section */
+        .trader-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .trader-badge {
+            padding: 3px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .trader-badge.running { background: #00e676; color: #000; }
+        .trader-badge.stopped { background: #e94560; color: #fff; }
+        .trader-badge.alert { background: #ffc107; color: #000; }
+        .trader-badge.idle { background: #546e7a; color: #fff; }
+        .trader-badge.trading { background: #00e676; color: #000; }
+
+        .picks-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            font-family: 'Consolas', monospace;
+        }
+        .picks-table th {
+            text-align: left;
+            color: #ffc107;
+            padding: 6px 8px;
+            border-bottom: 1px solid #1a3a5c;
+            font-size: 11px;
+        }
+        .picks-table td {
+            padding: 4px 8px;
+            border-bottom: 1px solid #0a192f;
+            color: #ccc;
+        }
+        .picks-table tr:hover td { background: #1a3a5c33; }
+
+        .signal-buy { color: #00e676; font-weight: 700; }
+        .signal-sell { color: #e94560; font-weight: 700; }
+        .signal-hold { color: #888; }
+
+        .log-box {
+            background: #0a192f;
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+            color: #aaa;
+            max-height: 250px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            line-height: 1.5;
+        }
+        .log-line { padding: 1px 0; }
+        .log-line.buy { color: #00e676; }
+        .log-line.sell { color: #e94560; }
+        .log-line.warn { color: #ffc107; }
+        .log-line.connect { color: #00e5ff; }
+
+        .trader-card {
+            border-color: #ffc107 !important;
+        }
+        .trader-card h3 {
+            color: #ffc107 !important;
+        }
+
+        /* Interval Selector */
+        .interval-select {
+            background: #0a192f;
+            color: #00e5ff;
+            border: 1px solid #1a3a5c;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 13px;
+            font-family: 'Consolas', monospace;
+            cursor: pointer;
+            outline: none;
+        }
+        .interval-select:hover { border-color: #00e5ff; }
+        .interval-select:focus { border-color: #00e5ff; box-shadow: 0 0 4px #00e5ff44; }
+        .interval-select option {
+            background: #0a192f;
+            color: #e0e0e0;
+        }
+
+        /* Responder Tiles */
+        .responder-tile {
+            background: #0a192f;
+            border: 1px solid #1a3a5c;
+            border-radius: 10px;
+            padding: 12px 18px;
+            min-width: 160px;
+            flex: 0 0 auto;
+            text-align: center;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        .responder-tile.online {
+            border-color: #00e676;
+            box-shadow: 0 0 8px #00e67644;
+        }
+        .responder-tile.offline {
+            border-color: #e94560;
+            opacity: 0.6;
+        }
+        .responder-tile .r-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+        .responder-tile .r-dot.on { background: #00e676; box-shadow: 0 0 6px #00e676; }
+        .responder-tile .r-dot.off { background: #e94560; }
+        .responder-tile .r-name {
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .responder-tile .r-mac {
+            font-size: 10px;
+            color: #555;
+            font-family: 'Consolas', monospace;
+            margin-top: 4px;
+        }
+        .responder-tile .r-info {
+            font-size: 11px;
+            color: #888;
+            margin-top: 6px;
+            line-height: 1.5;
+        }
+        .responder-tile .r-status {
+            font-size: 11px;
+            font-weight: 700;
+            margin-top: 6px;
+        }
+        .responder-tile .r-status.on { color: #00e676; }
+        .responder-tile .r-status.off { color: #e94560; }
+
+        /* Toggle Switch */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #334155;
+            border-radius: 24px;
+            transition: 0.3s;
+        }
+        .toggle-slider::before {
+            content: "";
+            position: absolute;
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background: #94a3b8;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+        .toggle-switch input:checked + .toggle-slider {
+            background: #00e676;
+            box-shadow: 0 0 8px #00e67688;
+        }
+        .toggle-switch input:checked + .toggle-slider::before {
+            transform: translateX(24px);
+            background: #fff;
+        }
+
+        /* Christy Dashboard: 2-column layout */
+        .christy-dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .christy-left { display: flex; flex-direction: column; gap: 16px; }
+        .christy-right { display: flex; flex-direction: column; gap: 16px; }
+
+        /* Right-side panel cards */
+        .panel-card {
+            border-radius: 10px;
+            padding: 16px 20px;
+            transition: box-shadow 0.3s;
+        }
+        .panel-card:hover {
+            box-shadow: 0 0 16px rgba(0,0,0,0.3);
+        }
+        .panel-card h3 {
+            font-size: 15px;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .panel-card .panel-icon {
+            font-size: 18px;
+        }
+
+        /* CashCow Panel - green theme */
+        .panel-cashcow {
+            background: linear-gradient(135deg, #0d2a1a 0%, #112240 100%);
+            border: 1px solid #00e676;
+        }
+        .panel-cashcow h3 {
+            color: #00e676;
+            border-bottom: 1px solid #00e67644;
+        }
+        .panel-cashcow .panel-badge {
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 700;
+            margin-left: auto;
+        }
+        .panel-cashcow .badge-ok { background: #00e676; color: #000; }
+        .panel-cashcow .badge-err { background: #e94560; color: #fff; }
+        .panel-cashcow .badge-checking { background: #ffc107; color: #000; }
+        .panel-cashcow .badge-warn { background: #546e7a; color: #fff; }
+
+        .panel-info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #0a192f;
+            font-size: 12px;
+        }
+        .panel-info-row:last-child { border-bottom: none; }
+        .panel-info-row .p-label { color: #888; }
+        .panel-info-row .p-value { color: #e0e0e0; font-family: 'Consolas', monospace; font-size: 11px; }
+        .panel-info-row .p-value.positive { color: #00e676; }
+        .panel-info-row .p-value.negative { color: #e94560; }
+
+        /* Video Surveillance Panel - pink/magenta theme */
+        .panel-video {
+            background: linear-gradient(135deg, #2a0d1f 0%, #112240 100%);
+            border: 1px solid #e91e8c;
+        }
+        .panel-video h3 {
+            color: #e91e8c;
+            border-bottom: 1px solid #e91e8c44;
+        }
+        .panel-video .cam-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 6px;
+        }
+        .panel-video .cam-slot {
+            background: #0a192f;
+            border: 1px solid #e91e8c33;
+            border-radius: 6px;
+            overflow: hidden;
+            cursor: pointer;
+            position: relative;
+            transition: border-color 0.2s;
+        }
+        .panel-video .cam-slot:hover {
+            border-color: #e91e8c;
+        }
+        .panel-video .cam-slot video {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #000;
+            display: block;
+        }
+        .panel-video .cam-slot .cam-label {
+            padding: 4px 8px;
+            font-size: 10px;
+            color: #ccc;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .panel-video .cam-slot .cam-label .cam-dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            display: inline-block;
+        }
+        .panel-video .cam-slot .cam-label .cam-dot.online { background: #00e676; }
+        .panel-video .cam-slot .cam-label .cam-dot.offline { background: #e94560; }
+        .panel-video .cam-slot .cam-label .cam-dot.connecting { background: #ffc107; }
+        .panel-video .cam-slot .cam-placeholder {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #0a0a1a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+            font-size: 11px;
+        }
+        /* Fullscreen modal */
+        .cam-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        .cam-modal-overlay.active { display: flex; }
+        .cam-modal-overlay video {
+            max-width: 95vw;
+            max-height: 90vh;
+        }
+        .cam-modal-title {
+            position: fixed;
+            top: 16px; left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-size: 14px;
+            z-index: 10000;
+        }
+
+        /* Event list modal */
+        .event-modal-content {
+            background: #0f1a2e;
+            border: 1px solid #e91e8c;
+            border-radius: 10px;
+            width: 90vw;
+            max-width: 600px;
+            max-height: 85vh;
+            overflow-y: auto;
+            padding: 16px;
+        }
+        .event-modal-content h3 {
+            color: #e91e8c;
+            margin: 0 0 12px 0;
+            font-size: 14px;
+        }
+        .event-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 8px;
+            border-bottom: 1px solid #ffffff11;
+            font-size: 11px;
+            color: #ccc;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .event-item:hover { background: #ffffff0a; }
+        .event-item:last-child { border-bottom: none; }
+        .event-item .ev-icon { font-size: 16px; flex-shrink: 0; }
+        .event-item .ev-time { color: #888; font-size: 10px; white-space: nowrap; }
+        .event-item .ev-type { color: #ffc107; font-weight: bold; text-transform: uppercase; font-size: 10px; }
+        .event-item .ev-detail { color: #aaa; font-size: 10px; }
+        .event-item img.ev-thumb { width: 80px; height: 45px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+
+        /* Event detail view (expanded) */
+        .event-detail-view {
+            background: #0a1628;
+            border: 1px solid #e91e8c55;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .event-detail-view .ev-back {
+            color: #e91e8c;
+            font-size: 12px;
+            cursor: pointer;
+            margin-bottom: 12px;
+            display: inline-block;
+        }
+        .event-detail-view .ev-back:hover { text-decoration: underline; }
+        .event-detail-view .ev-detail-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .event-detail-view .ev-detail-header .ev-icon { font-size: 24px; }
+        .event-detail-view .ev-detail-header .ev-type { color: #ffc107; font-weight: bold; text-transform: uppercase; font-size: 14px; }
+        .event-detail-view .ev-detail-header .ev-time { color: #888; font-size: 11px; }
+        .event-detail-view .ev-detail-text { color: #ccc; font-size: 12px; margin-bottom: 12px; }
+        .event-detail-view .ev-detail-image {
+            width: 100%;
+            max-height: 400px;
+            object-fit: contain;
+            border-radius: 6px;
+            background: #000;
+        }
+        .event-detail-view .ev-no-media {
+            text-align: center;
+            padding: 40px 20px;
+            color: #555;
+            font-size: 12px;
+        }
+        .event-detail-view video.ev-detail-video {
+            width: 100%;
+            max-height: 400px;
+            border-radius: 6px;
+            background: #000;
+        }
+        /* Cloud events tab */
+        .event-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+        }
+        .event-tab {
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            color: #888;
+            background: #ffffff08;
+            border: 1px solid transparent;
+        }
+        .event-tab.active {
+            color: #e91e8c;
+            border-color: #e91e8c55;
+            background: #e91e8c11;
+        }
+
+        /* Alexa/Home Assistant Panel - blue/purple theme */
+        .panel-alexa {
+            background: linear-gradient(135deg, #0d1a2a 0%, #112240 100%);
+            border: 1px solid #7c4dff;
+        }
+        .panel-alexa h3 {
+            color: #7c4dff;
+            border-bottom: 1px solid #7c4dff44;
+        }
+        .panel-alexa .ha-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #0a192f;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-size: 12px;
+        }
+        .panel-alexa .ha-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #555;
+        }
+        .panel-alexa .ha-dot.connected { background: #00e676; box-shadow: 0 0 6px #00e676; }
+        .panel-alexa .device-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .panel-alexa .device-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 10px;
+            background: #0a192f;
+            border-radius: 6px;
+            font-size: 11px;
+            color: #aaa;
+        }
+        .panel-alexa .device-item .dev-icon { font-size: 16px; margin-right: 8px; }
+        .panel-alexa .device-item .dev-status { font-size: 10px; color: #555; }
+
+        @media (max-width: 1200px) {
+            .christy-dashboard { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 900px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Bar -->
+    <div class="topbar">
+        <div>
+            <a href="/" class="back">&larr; Dashboard</a>
+            <h1 style="display:inline; margin-left: 16px;">{{ machine_name }}</h1>
+        </div>
+        <span class="status-badge status-offline" id="status-badge">Checking...</span>
+    </div>
+
+    <div class="content">
+        <!-- Header -->
+        <div class="header-row">
+            <div>
+                <h2 id="machine-title">{{ machine_name }}</h2>
+                <div class="meta" id="machine-meta">{{ machine_info.get('host', '') }} &bull; {{ machine_info.get('role', '') }} &bull; {{ machine_info.get('os', '') }}</div>
+            </div>
+            <div class="btn-row">
+                <button class="btn refresh" onclick="loadInfo()">&#8635; Refresh</button>
+                <button class="btn" onclick="sshTo('{{ machine_name }}')">SSH</button>
+                <button class="btn" onclick="vncTo('{{ machine_name }}')">VNC</button>
+                {% if machine_name == 'Dreamer' %}
+                <a href="/robotics/gamepad/{{ machine_name }}" class="btn" style="text-decoration:none;background:#4ecca333;border-color:#4ecca3;color:#4ecca3;">&#127918; Gamepad Control</a>
+                {% endif %}
+                {% if machine_name == 'Gram' %}
+                <a id="gram-gamepad-btn" href="/robotics/gamepad/Gram" class="btn" style="display:none;text-decoration:none;background:#4ecca333;border-color:#4ecca3;color:#4ecca3;">&#127918; Gamepad Control</a>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Loading -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div><br>
+            Connecting to {{ machine_name }} via SSH...
+        </div>
+
+        <!-- Main Content (hidden until loaded) -->
+        <div id="main-content" style="display:none;">
+
+            <!-- Gram XBee Remote Control (shown when viewing Gram from another machine) -->
+            <div class="grid" id="gram-remote-section" style="display:none;">
+                <div class="card" style="border-color:#4ecca3;">
+                    <div class="trader-header">
+                        <h3 style="color:#4ecca3;">Gram XBee (Remote Control)</h3>
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <span class="trader-badge stopped" id="gram-xbee-badge">OFF</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="gram-xbee-toggle" onchange="toggleGramXbee()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="info-row"><span class="label">Status</span><span class="value" id="gram-xbee-status">Checking...</span></div>
+                    <div class="info-row"><span class="label">XBee Port</span><span class="value" id="gram-xbee-port">COM20</span></div>
+                    <div class="info-row"><span class="label">Reply</span><span class="value" id="gram-xbee-reply">R3!</span></div>
+                    <div class="info-row"><span class="label">Heartbeats</span><span class="value" id="gram-xbee-received">0</span></div>
+                    <div class="info-row"><span class="label">RSSI</span><span class="value" id="gram-xbee-rssi">--</span></div>
+                    <div class="info-row"><span class="label">Last Time</span><span class="value" id="gram-xbee-time">--</span></div>
+                    <div id="gram-xbee-error" style="color:#e94560;font-size:12px;margin-top:8px;display:none;"></div>
+                </div>
+            </div>
+
+            <!-- Row 0: Heartbeat Responder (Dreamer & Gram) -->
+            <div class="grid" id="heartbeat-section" style="display:none;">
+                <div class="card" style="border-color:#4ecca3;">
+                    <div class="trader-header">
+                        <h3 style="color:#4ecca3;">Heartbeat Responder (XBee)</h3>
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <span class="trader-badge stopped" id="hb-badge">OFF</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="hb-toggle" onchange="toggleHeartbeat()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="info-row"><span class="label">Status</span><span class="value" id="hb-status">Off</span></div>
+                    <div class="info-row"><span class="label">XBee Port</span><span class="value" id="hb-port">COM18</span></div>
+                    <div class="info-row"><span class="label">Received</span><span class="value" id="hb-received">0</span></div>
+                    <div class="info-row"><span class="label">Replied</span><span class="value" id="hb-replied">0</span></div>
+                    <div class="info-row"><span class="label">Last From</span><span class="value" id="hb-from">--</span></div>
+                    <div class="info-row"><span class="label">RSSI</span><span class="value" id="hb-rssi">--</span></div>
+                    <div class="info-row"><span class="label">Last Time</span><span class="value" id="hb-time">--</span></div>
+                    <div id="hb-error" style="color:#e94560;font-size:12px;margin-top:8px;display:none;"></div>
+                </div>
+
+                <div class="card" style="border-color:#4ecca3;">
+                    <h3 style="color:#4ecca3;">Heartbeat Log</h3>
+                    <div class="log-box" id="hb-log-box" style="max-height:300px;">
+                        Waiting for heartbeat events...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Christy Dashboard: XBee (left) + Monitoring Panels (right) -->
+            <div class="christy-dashboard" id="christy-dashboard" style="display:none;">
+
+                <!-- LEFT COLUMN: XBee Panels -->
+                <div class="christy-left">
+                    <!-- XBee Monitor Status -->
+                    <div id="xbee-section" style="display:none;">
+                        <div class="card" style="border-color:#00e5ff;">
+                            <div class="trader-header">
+                                <h3 style="color:#00e5ff;">XBee Monitor Status</h3>
+                                <span class="trader-badge stopped" id="xbee-badge">Checking...</span>
+                            </div>
+                            <div class="info-row"><span class="label">Process</span><span class="value" id="xbee-process">--</span></div>
+                            <div class="info-row"><span class="label">XBee Port</span><span class="value" id="xbee-port">/dev/ttyUSB0</span></div>
+                            <div class="info-row">
+                                <span class="label">Heartbeat Interval</span>
+                                <span class="value">
+                                    <select id="xbee-interval-select" class="interval-select" onchange="changeInterval()">
+                                        <option value="2">2 sec</option>
+                                        <option value="10" selected>10 sec</option>
+                                        <option value="30">30 sec</option>
+                                        <option value="600">10 min</option>
+                                        <option value="1800">30 min</option>
+                                        <option value="21600">6 hours</option>
+                                    </select>
+                                </span>
+                            </div>
+                            <div style="margin-top:12px;">
+                                <button class="btn refresh" onclick="loadXbeeStatus()">&#8635; Refresh</button>
+                                <button class="btn" onclick="deployXbee('run')" style="background:#00e67633;border-color:#00e676;color:#00e676;">&#9654; Deploy &amp; Run</button>
+                                <button class="btn" onclick="deployXbee('stop')" style="border-color:#e94560;color:#e94560;">&#9632; Stop</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- XBee Event Log (below Monitor Status) -->
+                    <div id="xbee-log-section" style="display:none;">
+                        <div class="card" style="border-color:#00e5ff;">
+                            <h3 style="color:#00e5ff;">XBee Event Log (Live)</h3>
+                            <div class="log-box" id="xbee-log-box" style="max-height:300px;">Loading XBee logs...</div>
+                        </div>
+                    </div>
+
+                    <!-- Responding Devices -->
+                    <div id="responders-section" style="display:none;">
+                        <div class="card" style="border-color:#00e5ff;">
+                            <div class="trader-header">
+                                <h3 style="color:#00e5ff;">Responding Devices</h3>
+                                <button class="btn refresh" onclick="loadResponders()" style="font-size:11px;">&#8635; Refresh</button>
+                            </div>
+                            <div id="responders-grid" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;">
+                                <span style="color:#555;font-size:13px;">Scanning...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Log Viewer -->
+                    <div id="log-viewer-section" style="display:none;">
+                        <div class="card" style="border-color:#00e5ff;">
+                            <div class="trader-header">
+                                <h3 style="color:#00e5ff;">Log Viewer</h3>
+                                <div style="display:flex;gap:8px;align-items:center;">
+                                    <select id="log-file-select" class="interval-select" onchange="loadLogFile()">
+                                        <option value="xbee_events.log">Events (All)</option>
+                                        <option value="xbee_heartbeat.log">Heartbeat Only</option>
+                                        <option value="xbee_errors.log">Errors Only</option>
+                                        <option value="xbee_events.jsonl">JSON (Raw)</option>
+                                        <option value="monitor_stdout.log">Monitor Stdout</option>
+                                    </select>
+                                    <select id="log-lines-select" class="interval-select" onchange="loadLogFile()">
+                                        <option value="50">Last 50 lines</option>
+                                        <option value="100" selected>Last 100 lines</option>
+                                        <option value="300">Last 300 lines</option>
+                                        <option value="1000">Last 1000 lines</option>
+                                    </select>
+                                    <button class="btn refresh" onclick="loadLogFile()" style="font-size:11px;">&#8635; Refresh</button>
+                                    <button class="btn" onclick="downloadLog()" style="font-size:11px;">&#8681; Download</button>
+                                </div>
+                            </div>
+                            <div id="log-viewer-info" style="color:#555;font-size:11px;margin:8px 0;">Select a log file to view</div>
+                            <div class="log-box" id="log-viewer-box" style="max-height:400px;font-size:11px;">
+                                Select a log file above and click Refresh to load.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RIGHT COLUMN: Monitoring Panels -->
+                <div class="christy-right">
+
+                    <!-- Panel 1: CashCow (IB Trading) -->
+                    <div class="panel-card panel-cashcow" id="panel-cashcow">
+                        <h3>
+                            <span class="panel-icon">&#128176;</span>
+                            CashCow — IB Trading
+                            <span class="panel-badge badge-checking" id="cc-badge">Checking...</span>
+                        </h3>
+                        <div class="panel-info-row">
+                            <span class="p-label">IB Gateway</span>
+                            <span class="p-value" id="cc-gateway">--</span>
+                        </div>
+                        <div class="panel-info-row">
+                            <span class="p-label">Smart Trader</span>
+                            <span class="p-value" id="cc-trader">--</span>
+                        </div>
+                        <div class="panel-info-row">
+                            <span class="p-label">Open Positions</span>
+                            <span class="p-value" id="cc-positions">--</span>
+                        </div>
+                        <div class="panel-info-row">
+                            <span class="p-label">Portfolio Value</span>
+                            <span class="p-value" id="cc-portfolio">--</span>
+                        </div>
+                        <div class="panel-info-row">
+                            <span class="p-label">Daily P&L</span>
+                            <span class="p-value" id="cc-pnl">--</span>
+                        </div>
+                        <div class="panel-info-row">
+                            <span class="p-label">Top Holding</span>
+                            <span class="p-value" id="cc-top-hold">--</span>
+                        </div>
+                        <div class="panel-info-row">
+                            <span class="p-label">Last Check</span>
+                            <span class="p-value" id="cc-last-check">--</span>
+                        </div>
+                        <div style="margin-top:10px;text-align:center;">
+                            <a href="/machine/CashCow" class="btn" style="font-size:11px;text-decoration:none;">Open CashCow Dashboard &rarr;</a>
+                        </div>
+                    </div>
+
+                    <!-- Panel 2: Video Surveillance (go2rtc WebRTC) -->
+                    <div class="panel-card panel-video" id="panel-video">
+                        <h3>
+                            <span class="panel-icon">&#127909;</span>
+                            Video Surveillance
+                            <span class="panel-badge" id="go2rtc-badge" style="background:#555;">checking</span>
+                        </h3>
+                        <div class="cam-grid" id="cam-grid">
+                            <!-- Camera slots populated by JS -->
+                        </div>
+                        <div style="margin-top:8px;text-align:center;font-size:10px;color:#555;" id="cam-footer">
+                            Loading camera config...
+                        </div>
+                    </div>
+                    <!-- Camera fullscreen modal -->
+                    <div class="cam-modal-overlay" id="cam-modal" onclick="closeCamModal()">
+                        <div class="cam-modal-title" id="cam-modal-title"></div>
+                        <video id="cam-modal-video" autoplay playsinline muted></video>
+                    </div>
+                    <!-- Event list modal -->
+                    <div class="cam-modal-overlay" id="event-modal" onclick="if(event.target===this)closeEventModal()">
+                        <div class="event-modal-content" onclick="event.stopPropagation()">
+                            <h3 id="event-modal-title">Events</h3>
+                            <div class="event-tabs" id="event-tabs">
+                                <span class="event-tab active" data-tab="push" onclick="switchEventTab('push')">Live Events</span>
+                                <span class="event-tab" data-tab="cloud" onclick="switchEventTab('cloud')">Cloud History</span>
+                            </div>
+                            <div id="event-modal-list">Loading...</div>
+                            <div id="event-detail-container" style="display:none;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Panel 3: Alexa Devices (Home Assistant) -->
+                    <div class="panel-card panel-alexa" id="panel-alexa">
+                        <h3>
+                            <span class="panel-icon">&#128266;</span>
+                            Alexa Devices
+                        </h3>
+                        <div class="ha-status">
+                            <span class="ha-dot" id="ha-dot"></span>
+                            <span style="color:#aaa;" id="ha-status-text">Home Assistant — Not Configured</span>
+                        </div>
+                        <div class="device-list">
+                            <div class="device-item">
+                                <span><span class="dev-icon">&#128266;</span>Living Room Echo</span>
+                                <span class="dev-status">Pending Setup</span>
+                            </div>
+                            <div class="device-item">
+                                <span><span class="dev-icon">&#128266;</span>Bedroom Echo Dot</span>
+                                <span class="dev-status">Pending Setup</span>
+                            </div>
+                            <div class="device-item">
+                                <span><span class="dev-icon">&#128161;</span>Smart Lights</span>
+                                <span class="dev-status">Pending Setup</span>
+                            </div>
+                            <div class="device-item">
+                                <span><span class="dev-icon">&#127777;</span>Thermostat</span>
+                                <span class="dev-status">Pending Setup</span>
+                            </div>
+                        </div>
+                        <div style="margin-top:10px;text-align:center;font-size:11px;color:#555;">
+                            Home Assistant integration coming soon
+                        </div>
+                    </div>
+
+                    <!-- Panel 4: Remote Reboot -->
+                    <div class="panel-card" id="panel-reboot" style="border-left:3px solid #e94560;">
+                        <h3>
+                            <span class="panel-icon">&#9889;</span>
+                            Remote Reboot
+                        </h3>
+                        <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#1a2332;border-radius:6px;">
+                                <span style="font-size:14px;">&#128187; CashCow</span>
+                                <button class="btn" onclick="rebootMachine('CashCow')" style="background:#e94560;font-size:11px;padding:5px 14px;" id="reboot-btn-CashCow">Reboot</button>
+                            </div>
+                            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#1a2332;border-radius:6px;">
+                                <span style="font-size:14px;">&#129302; R1</span>
+                                <button class="btn" onclick="rebootMachine('R1')" style="background:#e94560;font-size:11px;padding:5px 14px;" id="reboot-btn-R1">Reboot</button>
+                            </div>
+                            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#1a2332;border-radius:6px;">
+                                <span style="font-size:14px;">&#128421; Christy</span>
+                                <button class="btn" onclick="rebootMachine('Christy')" style="background:#e94560;font-size:11px;padding:5px 14px;" id="reboot-btn-Christy">Reboot</button>
+                            </div>
+                        </div>
+                        <div id="reboot-result" style="margin-top:10px;font-size:12px;color:#aaa;text-align:center;display:none;"></div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- CashCow: Smart Trader + Trading Log (left) | Daily Picks (right) -->
+            <div id="trader-section" style="display:none;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
+                    <!-- Left: Smart Trader Status + Trading Log stacked -->
+                    <div style="display:flex;flex-direction:column;gap:16px;">
+                        <div class="card trader-card">
+                            <div class="trader-header">
+                                <h3>Smart Trader Status</h3>
+                                <span class="trader-badge stopped" id="trader-badge">Checking...</span>
+                            </div>
+
+                            <!-- IB Gateway Status -->
+                            <div class="info-row" style="border-bottom:1px solid #ffc10733;">
+                                <span class="label">IB Gateway</span>
+                                <span class="value" id="ib-gw-status" style="display:flex;align-items:center;gap:6px;">
+                                    <span id="ib-gw-dot" style="width:8px;height:8px;border-radius:50%;background:#555;display:inline-block;"></span>
+                                    <span id="ib-gw-text">Checking...</span>
+                                </span>
+                            </div>
+                            <div class="info-row"><span class="label">GW Port 7497</span><span class="value" id="ib-gw-port">--</span></div>
+                            <div class="info-row"><span class="label">GW Last Check</span><span class="value" id="ib-gw-time">--</span></div>
+                            <div class="info-row" id="ib-sms-row" style="display:none;">
+                                <span class="label">SMS Alert</span>
+                                <span class="value" id="ib-sms-info" style="color:#ffc107;">--</span>
+                            </div>
+
+                            <div style="border-top:1px solid #1a3a5c;margin:10px 0;padding-top:8px;">
+                                <div class="info-row"><span class="label">Process</span><span class="value" id="trader-process">--</span></div>
+                                <div class="info-row"><span class="label">Mode</span><span class="value" id="trader-mode">--</span></div>
+                                <div class="info-row"><span class="label">PID</span><span class="value" id="trader-pid">--</span></div>
+                                <div class="info-row"><span class="label">IB Port</span><span class="value" id="trader-port">--</span></div>
+                                <div class="info-row"><span class="label">Market</span><span class="value" id="trader-market-time">--</span></div>
+                            </div>
+
+                            <!-- Control Buttons -->
+                            <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:6px;">
+                                <button class="btn refresh" onclick="loadTraderStatus()">&#8635; Refresh</button>
+                                <button class="btn" onclick="deployTrader('run')" style="background:#00e67633;border-color:#00e676;color:#00e676;">&#9654; Deploy &amp; Run</button>
+                                <button class="btn" onclick="deployTrader('stop')" style="border-color:#e94560;color:#e94560;">&#9632; Stop</button>
+                            </div>
+
+                            <!-- Analysis Buttons -->
+                            <div style="border-top:1px solid #1a3a5c;margin-top:14px;padding-top:12px;">
+                                <h3 style="color:#ffc107;font-size:13px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #ffc10733;">On-Demand Analysis</h3>
+                                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                                    <button class="btn" onclick="runAnalysis('screener')" style="font-size:11px;border-color:#00e676;color:#00e676;">&#128200; Re-Screener</button>
+                                    <button class="btn" onclick="runAnalysis('news')" style="font-size:11px;border-color:#29b6f6;color:#29b6f6;">&#128240; News</button>
+                                    <button class="btn" onclick="runAnalysis('technical')" style="font-size:11px;border-color:#ff9800;color:#ff9800;">&#128202; Technical</button>
+                                    <button class="btn" onclick="runAnalysis('sentiment')" style="font-size:11px;border-color:#ab47bc;color:#ab47bc;">&#128161; Sentiment</button>
+                                    <button class="btn" onclick="runAnalysis('risk')" style="font-size:11px;border-color:#e94560;color:#e94560;">&#9888; Risk</button>
+                                    <button class="btn" onclick="runAnalysis('earnings')" style="font-size:11px;border-color:#ffc107;color:#ffc107;">&#128197; Earnings</button>
+                                </div>
+                                <div id="analysis-result" style="display:none;margin-top:10px;">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                                        <span id="analysis-title" style="color:#ffc107;font-size:12px;font-weight:700;"></span>
+                                        <button class="btn" onclick="document.getElementById('analysis-result').style.display='none'" style="font-size:10px;padding:2px 8px;">&#10005; Close</button>
+                                    </div>
+                                    <div class="log-box" id="analysis-output" style="max-height:250px;font-size:11px;">--</div>
+                                </div>
+                            </div>
+
+                            <!-- SMS Test -->
+                            <div style="border-top:1px solid #1a3a5c;margin-top:14px;padding-top:12px;">
+                                <h3 style="color:#ffc107;font-size:13px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #ffc10733;">SMS Alert Test (661-618-0571)</h3>
+                                <div style="display:flex;gap:6px;align-items:center;">
+                                    <input type="text" id="sms-test-input" placeholder="Enter test message..."
+                                           style="flex:1;background:#0a192f;border:1px solid #1a3a5c;border-radius:6px;padding:6px 10px;color:#e0e0e0;font-size:12px;font-family:'Consolas',monospace;outline:none;"
+                                           value="AJ Robotics: Test alert from CashCow dashboard">
+                                    <button class="btn" id="sms-test-btn" onclick="sendTestSMS()" style="font-size:11px;border-color:#ffc107;color:#ffc107;white-space:nowrap;">&#128241; Send Test</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Trading Log — right below Smart Trader Status -->
+                        <div class="card trader-card" id="trader-logs-section">
+                            <h3>Trading Log (Recent)</h3>
+                            <div class="log-box" id="trader-log-box" style="max-height:300px;">Loading trading logs...</div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Daily Picks -->
+                    <div class="card trader-card" style="align-self:start;">
+                        <h3>Daily Picks (Screener)</h3>
+                        <div style="overflow-x:auto;">
+                            <table class="picks-table">
+                                <thead>
+                                    <tr><th>#</th><th>Symbol</th><th>Score</th><th>Signal</th></tr>
+                                </thead>
+                                <tbody id="picks-body">
+                                    <tr><td colspan="4" style="color:#555">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 1: Overview + Resources -->
+            <div class="grid">
+                <div class="card">
+                    <h3>System Overview</h3>
+                    <div class="info-row"><span class="label">Hostname</span><span class="value" id="val-hostname">--</span></div>
+                    <div class="info-row"><span class="label">Uptime</span><span class="value" id="val-uptime">--</span></div>
+                    <div class="info-row"><span class="label">Temperature</span><span class="value" id="val-temp">--</span></div>
+                    <div class="info-row"><span class="label">IP Address</span><span class="value" id="val-ip">{{ machine_info.get('host', '--') }}</span></div>
+                    <div class="info-row"><span class="label">User</span><span class="value" id="val-user">{{ machine_info.get('username', '--') }}</span></div>
+                    <div class="info-row"><span class="label">Role</span><span class="value">{{ machine_info.get('role', '--') }}</span></div>
+                </div>
+
+                <div class="card">
+                    <h3>Resources</h3>
+                    <div class="resource-item">
+                        <div class="label-row"><span>Memory</span><span id="mem-text">--</span></div>
+                        <div class="bar-bg"><div class="bar-fill green" id="mem-bar" style="width:0%"></div></div>
+                    </div>
+                    <div class="resource-item">
+                        <div class="label-row"><span>Disk (/)</span><span id="disk-text">--</span></div>
+                        <div class="bar-bg"><div class="bar-fill green" id="disk-bar" style="width:0%"></div></div>
+                    </div>
+                    <div class="resource-item">
+                        <div class="label-row"><span>Swap</span><span id="swap-text">--</span></div>
+                        <div class="bar-bg"><div class="bar-fill green" id="swap-bar" style="width:0%"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2: Processes -->
+            <div class="grid">
+                <div class="card grid-full">
+                    <h3>Top Processes (by CPU)</h3>
+                    <div style="overflow-x:auto;">
+                        <table class="proc-table">
+                            <thead>
+                                <tr><th>USER</th><th>PID</th><th>CPU%</th><th>MEM%</th><th>COMMAND</th></tr>
+                            </thead>
+                            <tbody id="proc-body">
+                                <tr><td colspan="5" style="color:#555">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 3: Network + Services -->
+            <div class="grid">
+                <div class="card">
+                    <h3>Network Interfaces</h3>
+                    <div class="pre-block" id="net-info">--</div>
+                </div>
+                <div class="card">
+                    <h3>Running Services</h3>
+                    <div class="pre-block" id="svc-info">--</div>
+                </div>
+            </div>
+
+            <!-- Row 4: Last Logins -->
+            <div class="grid">
+                <div class="card">
+                    <h3>Recent Logins</h3>
+                    <div class="pre-block" id="login-info">--</div>
+                </div>
+
+                <div class="card">
+                    <h3>CPU Load</h3>
+                    <div class="pre-block" id="cpu-info">--</div>
+                </div>
+            </div>
+
+            <!-- Row 6: External Access Guide -->
+            <div class="grid">
+                <div class="access-card grid-full">
+                    <h3>&#128274; External Access Guide (via {{ machine_name }})</h3>
+                    <div id="access-guide">
+                        <p style="color:#aaa; font-size:13px; margin-bottom:12px;">
+                            {{ machine_name }} serves as the gateway for external access to the home network.
+                            Here are the recommended methods:
+                        </p>
+
+                        <div class="access-step">
+                            <span class="step-num">Option 1:</span>
+                            <strong>Tailscale VPN (Recommended)</strong><br>
+                            <span style="color:#aaa; font-size:12px;">
+                                Install Tailscale on {{ machine_name }} and your phone/laptop.<br>
+                                &bull; On {{ machine_name }}: <code>curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up</code><br>
+                                &bull; Enable subnet routing: <code>sudo tailscale up --advertise-routes=192.168.1.0/24</code><br>
+                                &bull; Then access all machines via Tailscale IP from anywhere
+                            </span>
+                        </div>
+
+                        <div class="access-step">
+                            <span class="step-num">Option 2:</span>
+                            <strong>SSH Port Forwarding (Router)</strong><br>
+                            <span style="color:#aaa; font-size:12px;">
+                                &bull; Forward router port (e.g. 2222) &rarr; {{ machine_info.get('host', '') }}:22<br>
+                                &bull; From outside: <code>ssh -p 2222 {{ machine_info.get('username', '') }}@YOUR_PUBLIC_IP</code><br>
+                                &bull; Then hop to other machines: <code>ssh dongchul@192.168.1.91</code>
+                            </span>
+                        </div>
+
+                        <div class="access-step">
+                            <span class="step-num">Option 3:</span>
+                            <strong>SSH Jump Host</strong><br>
+                            <span style="color:#aaa; font-size:12px;">
+                                &bull; Direct access to CashCow via Christy as jump:<br>
+                                <code>ssh -J {{ machine_info.get('username', '') }}@YOUR_PUBLIC_IP:2222 dongchul@192.168.1.91</code><br>
+                                &bull; Add to ~/.ssh/config for convenience
+                            </span>
+                        </div>
+
+                        <div class="access-step">
+                            <span class="step-num">Option 4:</span>
+                            <strong>Reverse SSH Tunnel</strong><br>
+                            <span style="color:#aaa; font-size:12px;">
+                                &bull; No router config needed. From {{ machine_name }}:<br>
+                                <code>ssh -R 2222:localhost:22 user@cloud-server</code><br>
+                                &bull; Then from anywhere: <code>ssh -p 2222 {{ machine_info.get('username', '') }}@cloud-server</code>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const MACHINE = '{{ machine_name }}';
+        const LOCAL_MACHINE = '{{ local_machine }}';
+        let _firstLoad = true;
+
+        function loadInfo() {
+            // Only show loading spinner on first load
+            if (_firstLoad) {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('main-content').style.display = 'none';
+            }
+
+            fetch('/api/machine/' + MACHINE + '/info')
+                .then(r => r.json())
+                .then(data => {
+                    if (_firstLoad) {
+                        document.getElementById('loading').style.display = 'none';
+                        document.getElementById('main-content').style.display = 'block';
+                        _firstLoad = false;
+                    }
+
+                    const badge = document.getElementById('status-badge');
+                    if (data.online) {
+                        if (badge.textContent !== 'Online') {
+                            badge.textContent = 'Online';
+                            badge.className = 'status-badge status-online';
+                        }
+                    } else {
+                        if (badge.textContent !== 'Offline') {
+                            badge.textContent = 'Offline';
+                            badge.className = 'status-badge status-offline';
+                        }
+                        return;
+                    }
+
+                    // Uptime
+                    setText('val-uptime', data.uptime || '--');
+
+                    // Temperature
+                    setText('val-temp', data.temperature_c ? data.temperature_c + ' °C' : 'N/A');
+
+                    // Memory
+                    if (data.memory && data.memory.total) {
+                        setText('mem-text', data.memory.used + ' / ' + data.memory.total);
+                        const usedVal = parseFloat(data.memory.used);
+                        const totalVal = parseFloat(data.memory.total);
+                        if (totalVal > 0) {
+                            const pct = Math.round((usedVal / totalVal) * 100);
+                            setBarDirect('mem-bar', pct);
+                        }
+                        if (data.memory.swap_total) {
+                            setText('swap-text', data.memory.swap_used + ' / ' + data.memory.swap_total);
+                        }
+                    }
+
+                    // Disk
+                    if (data.disk && data.disk.size) {
+                        setText('disk-text', data.disk.used + ' / ' + data.disk.size + ' (' + data.disk.use_pct + ')');
+                        const pct = parseInt(data.disk.use_pct);
+                        setBarDirect('disk-bar', pct);
+                    }
+
+                    // Processes — update rows incrementally
+                    const tbody = document.getElementById('proc-body');
+                    if (data.processes && data.processes.length > 0) {
+                        updateTableRows(tbody, data.processes, ['user', 'pid', 'cpu', 'mem', 'command'], true);
+                    }
+
+                    // Network
+                    setText('net-info', data.network || '--');
+
+                    // Services
+                    setText('svc-info', data.services || '--');
+
+                    // Logins
+                    setText('login-info', data.last_logins || '--');
+
+                    // CPU
+                    setText('cpu-info', data.cpu_info || '--');
+                })
+                .catch(err => {
+                    if (_firstLoad) {
+                        document.getElementById('loading').innerHTML =
+                            '<span style="color:#e94560;">Failed to connect: ' + err + '</span>';
+                    }
+                });
+        }
+
+        // Helper: only update textContent if changed
+        function setText(id, value) {
+            const el = document.getElementById(id);
+            if (el && el.textContent !== value) el.textContent = value;
+        }
+
+        // Helper: update bar width/color without flicker
+        function setBarDirect(id, pct) {
+            const bar = document.getElementById(id);
+            if (!bar) return;
+            const newWidth = pct + '%';
+            const newClass = 'bar-fill ' + (pct > 80 ? 'red' : pct > 60 ? 'yellow' : 'green');
+            if (bar.style.width !== newWidth) bar.style.width = newWidth;
+            if (bar.className !== newClass) bar.className = newClass;
+        }
+
+        // Helper: update table rows incrementally (by row index)
+        function updateTableRows(tbody, rows, fields, escapeCmd) {
+            // Ensure correct number of rows
+            while (tbody.children.length > rows.length) tbody.removeChild(tbody.lastChild);
+            rows.forEach((row, i) => {
+                let tr = tbody.children[i];
+                if (!tr) {
+                    tr = document.createElement('tr');
+                    fields.forEach(() => tr.appendChild(document.createElement('td')));
+                    tbody.appendChild(tr);
+                }
+                fields.forEach((f, j) => {
+                    const val = (escapeCmd && f === 'command') ? escapeHtml(row[f]) : (row[f] || '');
+                    const td = tr.children[j];
+                    if (!td) return;
+                    if (f === 'command') {
+                        if (td.innerHTML !== val) td.innerHTML = val;
+                    } else {
+                        if (td.textContent !== String(val)) td.textContent = val;
+                    }
+                });
+            });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function sshTo(machine) {
+            fetch('/api/actions/ssh/' + machine, { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { if (d.error) alert(d.error); });
+        }
+
+        function vncTo(machine) {
+            fetch('/api/actions/vnc/' + machine, { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { if (d.error) alert(d.error); });
+        }
+
+        // XBee Monitor (Christy only)
+        let _lastXbeeLogHash = '';
+        function loadXbeeStatus() {
+            if (MACHINE !== 'Christy') return;
+
+            document.getElementById('xbee-section').style.display = '';
+            document.getElementById('xbee-log-section').style.display = '';
+
+            // Check if monitor is running
+            fetch('/api/deploy/christy', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: 'status'})
+            })
+            .then(r => r.json())
+            .then(d => {
+                const badge = document.getElementById('xbee-badge');
+                const procEl = document.getElementById('xbee-process');
+                const isRunning = d.output && d.output.includes('xbee_monitor');
+
+                const newBadgeText = isRunning ? 'RUNNING' : 'STOPPED';
+                const newBadgeClass = isRunning ? 'trader-badge running' : 'trader-badge stopped';
+                const newProcText = isRunning ? 'Running' : 'Not running';
+
+                if (badge.textContent !== newBadgeText) {
+                    badge.textContent = newBadgeText;
+                    badge.className = newBadgeClass;
+                }
+                if (procEl.textContent !== newProcText) procEl.textContent = newProcText;
+            })
+            .catch(() => {
+                document.getElementById('xbee-badge').textContent = 'ERROR';
+            });
+
+            // Fetch XBee logs — incremental update
+            fetch('/api/deploy/christy/logs?limit=40')
+                .then(r => r.json())
+                .then(d => {
+                    const logBox = document.getElementById('xbee-log-box');
+                    if (d.logs && d.logs.length > 0) {
+                        // Quick hash: use first + last line to detect changes
+                        const hash = d.logs[0] + '|' + d.logs[d.logs.length - 1] + '|' + d.logs.length;
+                        if (hash === _lastXbeeLogHash) return; // No change, skip
+                        _lastXbeeLogHash = hash;
+
+                        // Build set of existing log lines
+                        const existingLines = new Set();
+                        logBox.querySelectorAll('.log-line').forEach(el => existingLines.add(el.textContent));
+
+                        // If first load or box has placeholder text, do full render
+                        if (existingLines.size === 0 || logBox.children.length === 0 ||
+                            (logBox.children.length === 1 && !logBox.querySelector('.log-line'))) {
+                            logBox.innerHTML = d.logs.map(line => {
+                                return '<div class="' + xbeeLogClass(line) + '">' + escapeHtml(line) + '</div>';
+                            }).join('');
+                            logBox.scrollTop = logBox.scrollHeight;
+                            return;
+                        }
+
+                        // Append only new lines (at the bottom)
+                        const wasAtBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 30;
+                        let added = 0;
+                        for (const line of d.logs) {
+                            if (!existingLines.has(line)) {
+                                const div = document.createElement('div');
+                                div.className = xbeeLogClass(line);
+                                div.textContent = line;
+                                logBox.appendChild(div);
+                                added++;
+                            }
+                        }
+                        // Trim old entries to keep max 60
+                        while (logBox.children.length > 60) {
+                            logBox.removeChild(logBox.firstChild);
+                        }
+                        // Auto-scroll if user was at bottom
+                        if (wasAtBottom && added > 0) {
+                            logBox.scrollTop = logBox.scrollHeight;
+                        }
+                    } else if (logBox.querySelector('.log-line') === null) {
+                        logBox.textContent = 'No XBee logs yet. Deploy and run the monitor first.';
+                    }
+                })
+                .catch(err => {
+                    document.getElementById('xbee-log-box').textContent = 'Error: ' + err;
+                });
+        }
+
+        function xbeeLogClass(line) {
+            let cls = 'log-line';
+            if (line.includes('HEARTBEAT SENT') || line.includes('SENT #'))
+                cls += ' connect';
+            else if (line.includes('REPLY') || line.includes('Roger'))
+                cls += ' buy';
+            else if (line.includes('ERROR') || line.includes('FATAL'))
+                cls += ' sell';
+            else if (line.includes('STATUS') || line.includes('YOLO'))
+                cls += ' warn';
+            return cls;
+        }
+
+        function deployXbee(action) {
+            const badge = document.getElementById('xbee-badge');
+            badge.textContent = action === 'run' ? 'DEPLOYING...' : 'STOPPING...';
+            badge.className = 'trader-badge alert';
+
+            const interval = document.getElementById('xbee-interval-select').value;
+
+            fetch('/api/deploy/christy', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: action, interval: parseInt(interval)})
+            })
+            .then(r => r.json())
+            .then(d => {
+                setTimeout(loadXbeeStatus, 3000);
+            })
+            .catch(err => {
+                badge.textContent = 'ERROR';
+                badge.className = 'trader-badge stopped';
+            });
+        }
+
+        function changeInterval() {
+            const sel = document.getElementById('xbee-interval-select');
+            const interval = parseInt(sel.value);
+            const labels = {'2':'2 sec','10':'10 sec','30':'30 sec','600':'10 min','1800':'30 min','21600':'6 hours'};
+            const label = labels[sel.value] || sel.value + 's';
+
+            if (!confirm('Restart XBee Monitor with heartbeat interval = ' + label + '?')) {
+                return;
+            }
+
+            const badge = document.getElementById('xbee-badge');
+            badge.textContent = 'RESTARTING...';
+            badge.className = 'trader-badge alert';
+
+            fetch('/api/deploy/christy', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: 'run', interval: interval})
+            })
+            .then(r => r.json())
+            .then(d => {
+                setTimeout(loadXbeeStatus, 3000);
+            })
+            .catch(err => {
+                badge.textContent = 'ERROR';
+                badge.className = 'trader-badge stopped';
+            });
+        }
+
+        // Smart Trader (CashCow only)
+        let _lastTraderLogHash = '';
+        function loadTraderStatus() {
+            if (MACHINE !== 'CashCow') return;
+
+            document.getElementById('trader-section').style.display = '';
+            document.getElementById('trader-logs-section').style.display = '';
+
+            fetch('/api/machine/' + MACHINE + '/trader-status')
+                .then(r => r.json())
+                .then(d => {
+                    // Update status badges with market awareness
+                    const label = d.status_label || (d.running ? 'Running' : 'Stopped');
+                    let badgeClass;
+                    if (d.running && d.market_open) {
+                        badgeClass = 'trader-badge trading';
+                    } else if (d.running && !d.market_open) {
+                        badgeClass = 'trader-badge running';
+                    } else if (!d.running && d.market_open) {
+                        badgeClass = 'trader-badge stopped';
+                    } else {
+                        badgeClass = 'trader-badge idle';
+                    }
+                    setBadge('trader-badge', label, badgeClass);
+
+                    if (d.running) {
+                        setText('trader-process', 'Running');
+                        setText('trader-mode', d.mode);
+                        setText('trader-pid', String(d.pid));
+                    } else {
+                        setText('trader-process', 'Not running');
+                        setText('trader-mode', '--');
+                        setText('trader-pid', '--');
+                    }
+
+                    // Market time display
+                    if (d.market_time) {
+                        setText('trader-market-time', d.market_time + ' (' + (d.market_status || '').replace('-', ' ') + ')');
+                    }
+
+                    // Config
+                    const portText = d.config ? (d.config.ib_port || '7497') : '7497 (default)';
+                    setText('trader-port', portText);
+
+                    // Daily Picks — incremental table update
+                    const picksBody = document.getElementById('picks-body');
+                    let picksArr = null;
+                    if (d.daily_picks) {
+                        if (Array.isArray(d.daily_picks)) {
+                            picksArr = d.daily_picks;
+                        } else if (typeof d.daily_picks === 'object') {
+                            // Handle nested format: {picks: [...], all_scores: [...]}
+                            picksArr = d.daily_picks.all_scores
+                                    || d.daily_picks.picks
+                                    || null;
+                        }
+                    }
+                    if (picksArr && Array.isArray(picksArr) && picksArr.length > 0) {
+                        updatePicksTable(picksBody, picksArr);
+                    } else {
+                        setPlaceholderRow(picksBody, 4, 'No picks available');
+                    }
+
+                    // Trading Logs — incremental update
+                    const logBox = document.getElementById('trader-log-box');
+                    if (d.log_lines && d.log_lines.length > 0) {
+                        const hash = d.log_lines[0] + '|' + d.log_lines[d.log_lines.length - 1] + '|' + d.log_lines.length;
+                        if (hash === _lastTraderLogHash) return;
+                        _lastTraderLogHash = hash;
+
+                        const existingLines = new Set();
+                        logBox.querySelectorAll('.log-line').forEach(el => existingLines.add(el.textContent));
+
+                        // First load: full render
+                        if (existingLines.size === 0 || !logBox.querySelector('.log-line')) {
+                            logBox.innerHTML = d.log_lines.map(line =>
+                                '<div class="' + traderLogClass(line) + '">' + escapeHtml(line) + '</div>'
+                            ).join('');
+                            logBox.scrollTop = logBox.scrollHeight;
+                            return;
+                        }
+
+                        // Append new lines
+                        const wasAtBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 30;
+                        let added = 0;
+                        for (const line of d.log_lines) {
+                            if (!existingLines.has(line)) {
+                                const div = document.createElement('div');
+                                div.className = traderLogClass(line);
+                                div.textContent = line;
+                                logBox.appendChild(div);
+                                added++;
+                            }
+                        }
+                        while (logBox.children.length > 60) logBox.removeChild(logBox.firstChild);
+                        if (wasAtBottom && added > 0) logBox.scrollTop = logBox.scrollHeight;
+                    } else if (!logBox.querySelector('.log-line')) {
+                        logBox.textContent = 'No trading logs available';
+                    }
+                })
+                .catch(err => {
+                    setBadge('trader-badge', 'ERROR', 'trader-badge stopped');
+                    console.error('Trader status error:', err);
+                });
+        }
+
+        function traderLogClass(line) {
+            let cls = 'log-line';
+            const upper = line.toUpperCase();
+            if (upper.includes('BUY') || upper.includes('GOLDEN') || upper.includes('OVERSOLD'))
+                cls += ' buy';
+            else if (upper.includes('SELL') || upper.includes('DEAD') || upper.includes('OVERBOUGHT'))
+                cls += ' sell';
+            else if (upper.includes('WARNING') || upper.includes('WARN') || upper.includes('RISK'))
+                cls += ' warn';
+            else if (upper.includes('CONNECT') || upper.includes('TWS') || upper.includes('START'))
+                cls += ' connect';
+            return cls;
+        }
+
+        // Helper: update badge only if changed
+        function setBadge(id, text, className) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (el.textContent !== text) el.textContent = text;
+            if (el.className !== className) el.className = className;
+        }
+
+        // Helper: update picks table rows incrementally
+        function updatePicksTable(tbody, picks) {
+            // Clear placeholder rows (colspan rows with wrong structure)
+            if (tbody.children.length > 0 && tbody.children[0].children.length === 1 &&
+                tbody.children[0].children[0].getAttribute('colspan')) {
+                tbody.innerHTML = '';
+            }
+            while (tbody.children.length > picks.length) tbody.removeChild(tbody.lastChild);
+            picks.forEach((p, i) => {
+                const signal = p.signal || p.action || '--';
+                const cls = signal.toUpperCase().includes('BUY') ? 'signal-buy' :
+                            signal.toUpperCase().includes('SELL') ? 'signal-sell' : 'signal-hold';
+                const rawScore = p.total_score !== undefined ? p.total_score : p.score;
+                const score = rawScore !== undefined && rawScore !== '--' && rawScore !== null ? Number(rawScore).toFixed(1) : '--';
+                const symbol = p.symbol || p.ticker || '--';
+
+                let tr = tbody.children[i];
+                if (!tr) {
+                    tr = document.createElement('tr');
+                    for (let j = 0; j < 4; j++) tr.appendChild(document.createElement('td'));
+                    tbody.appendChild(tr);
+                }
+                const cells = tr.children;
+                if (cells[0].textContent !== String(i + 1)) cells[0].textContent = i + 1;
+                if (cells[1].textContent !== symbol) {
+                    cells[1].textContent = symbol;
+                    cells[1].style.color = '#fff';
+                    cells[1].style.fontWeight = '600';
+                }
+                if (cells[2].textContent !== score) cells[2].textContent = score;
+                if (cells[3].textContent !== signal) {
+                    cells[3].textContent = signal;
+                    cells[3].className = cls;
+                }
+            });
+        }
+
+        // Helper: set placeholder row in table
+        function setPlaceholderRow(tbody, colspan, msg) {
+            if (tbody.children.length === 1 && tbody.children[0].children.length === 1 &&
+                tbody.children[0].children[0].getAttribute('colspan')) return; // Already placeholder
+            tbody.innerHTML = '<tr><td colspan="' + colspan + '" style="color:#555">' + msg + '</td></tr>';
+        }
+
+        function deployTrader(action) {
+            const badge = document.getElementById('trader-badge');
+            badge.textContent = action === 'run' ? 'DEPLOYING...' : 'STOPPING...';
+            badge.className = 'trader-badge alert';
+
+            fetch('/api/deploy/cashcow', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: action, auto: true, port: 7497})
+            })
+            .then(r => r.json())
+            .then(d => {
+                setTimeout(loadTraderStatus, 3000);
+            })
+            .catch(err => {
+                badge.textContent = 'ERROR';
+                badge.className = 'trader-badge stopped';
+            });
+        }
+
+        // IB Gateway Monitor (CashCow only)
+        function loadIBGatewayStatus() {
+            if (MACHINE !== 'CashCow') return;
+
+            fetch('/api/cashcow/ib-gateway-status')
+                .then(r => r.json())
+                .then(d => {
+                    const dot = document.getElementById('ib-gw-dot');
+                    const text = document.getElementById('ib-gw-text');
+
+                    if (d.connected === true) {
+                        dot.style.background = '#00e676';
+                        dot.style.boxShadow = '0 0 6px #00e676';
+                        text.textContent = 'Connected' + (d.pid ? ' (PID: ' + d.pid + ')' : '');
+                        text.style.color = '#00e676';
+                    } else if (d.connected === false) {
+                        dot.style.background = '#e94560';
+                        dot.style.boxShadow = '0 0 6px #e94560';
+                        text.textContent = 'Not Connected';
+                        text.style.color = '#e94560';
+                    } else {
+                        dot.style.background = '#555';
+                        dot.style.boxShadow = 'none';
+                        text.textContent = 'Checking...';
+                        text.style.color = '#888';
+                    }
+
+                    setText('ib-gw-port', d.port_open ? 'Open' : 'Closed');
+                    document.getElementById('ib-gw-port').style.color = d.port_open ? '#00e676' : '#e94560';
+                    setText('ib-gw-time', d.last_check || '--');
+
+                    // SMS alert info
+                    const smsRow = document.getElementById('ib-sms-row');
+                    if (d.sms_sent_today) {
+                        smsRow.style.display = '';
+                        setText('ib-sms-info', 'Sent at ' + (d.sms_last_sent || '--'));
+                    } else {
+                        smsRow.style.display = 'none';
+                    }
+                })
+                .catch(() => {});
+        }
+
+        // On-Demand Analysis
+        function runAnalysis(type) {
+            const titles = {
+                'screener': 'Re-Screener Results',
+                'news': 'News Analysis',
+                'technical': 'Technical Signal Analysis',
+                'sentiment': 'Market Sentiment',
+                'risk': 'Portfolio Risk Check',
+                'earnings': 'Earnings Calendar',
+            };
+
+            const resultDiv = document.getElementById('analysis-result');
+            const titleEl = document.getElementById('analysis-title');
+            const outputEl = document.getElementById('analysis-output');
+
+            resultDiv.style.display = 'block';
+            titleEl.textContent = (titles[type] || type) + ' — Running...';
+            outputEl.textContent = 'Analyzing... please wait (up to 60s)...';
+
+            fetch('/api/cashcow/analysis', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({type: type})
+            })
+            .then(r => r.json())
+            .then(d => {
+                titleEl.textContent = (titles[type] || type) + ' — ' + (d.timestamp || '');
+                if (d.error && !d.output) {
+                    outputEl.textContent = 'Error: ' + d.error;
+                } else {
+                    outputEl.textContent = d.output || 'No output';
+                }
+                outputEl.scrollTop = 0;
+            })
+            .catch(err => {
+                titleEl.textContent = (titles[type] || type) + ' — Error';
+                outputEl.textContent = 'Request failed: ' + err;
+            });
+        }
+
+        // SMS Test
+        function sendTestSMS() {
+            const input = document.getElementById('sms-test-input');
+            const msg = input.value.trim();
+            if (!msg) { alert('Enter a message first'); return; }
+
+            const btn = document.getElementById('sms-test-btn');
+            btn.textContent = 'Sending...';
+            btn.disabled = true;
+
+            fetch('/api/cashcow/sms-test', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({message: msg})
+            })
+            .then(r => r.json())
+            .then(d => {
+                btn.disabled = false;
+                if (d.ok) {
+                    btn.textContent = 'Sent!';
+                    btn.style.borderColor = '#00e676';
+                    btn.style.color = '#00e676';
+                    setTimeout(() => { btn.textContent = '\u{1F4F1} Send Test'; btn.style.borderColor='#ffc107'; btn.style.color='#ffc107'; }, 3000);
+                } else {
+                    btn.textContent = 'Failed';
+                    btn.style.borderColor = '#e94560';
+                    btn.style.color = '#e94560';
+                    setTimeout(() => { btn.textContent = '\u{1F4F1} Send Test'; btn.style.borderColor='#ffc107'; btn.style.color='#ffc107'; }, 4000);
+                    alert('SMS failed:\n\n' + (d.error || 'Unknown error') +
+                          '\n\nSetup:\n1. Set GMAIL_USER and GMAIL_APP_PASSWORD env vars\n' +
+                          '2. Create App Password: Google Account > Security > App passwords\n' +
+                          '3. Restart AJMain server');
+                }
+            })
+            .catch(err => {
+                btn.textContent = 'Error';
+                btn.disabled = false;
+                alert('Server error. Make sure AJMain is restarted after code changes.');
+            });
+        }
+
+        // Remote Reboot
+        function rebootMachine(name) {
+            if (!confirm('Are you sure you want to reboot ' + name + '?')) return;
+
+            const btn = document.getElementById('reboot-btn-' + name);
+            const result = document.getElementById('reboot-result');
+            btn.textContent = 'Rebooting...';
+            btn.disabled = true;
+            btn.style.background = '#555';
+
+            fetch('/api/machine/reboot', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({machine: name})
+            })
+            .then(r => r.json())
+            .then(d => {
+                result.style.display = 'block';
+                if (d.ok) {
+                    btn.textContent = 'Sent!';
+                    btn.style.background = '#00e676';
+                    btn.style.color = '#000';
+                    result.style.color = '#00e676';
+                    result.textContent = name + ' reboot command sent at ' + new Date().toLocaleTimeString();
+                } else {
+                    btn.textContent = 'Failed';
+                    btn.style.background = '#e94560';
+                    result.style.color = '#e94560';
+                    result.textContent = 'Error: ' + (d.error || 'Unknown');
+                }
+                setTimeout(() => {
+                    btn.textContent = 'Reboot';
+                    btn.disabled = false;
+                    btn.style.background = '#e94560';
+                    btn.style.color = '#fff';
+                }, 5000);
+            })
+            .catch(err => {
+                btn.textContent = 'Error';
+                btn.disabled = false;
+                btn.style.background = '#e94560';
+                result.style.display = 'block';
+                result.style.color = '#e94560';
+                result.textContent = 'Server error';
+            });
+        }
+
+        // Heartbeat Responder (Dreamer & Gram)
+        // For Gram, proxy heartbeat API calls to Gram's agent
+        function hbUrl(path) {
+            // path like '/api/heartbeat/status' -> '/api/proxy/Gram/heartbeat/status' for Gram
+            if (MACHINE === 'Gram') return '/api/proxy/Gram' + path.replace('/api', '');
+            return path;
+        }
+        let _lastHbLogCount = 0;
+        function loadHeartbeatStatus() {
+            if (MACHINE !== 'Dreamer' && MACHINE !== 'Gram') return;
+
+            document.getElementById('heartbeat-section').style.display = '';
+
+            fetch(hbUrl('/api/heartbeat/status'))
+                .then(r => r.json())
+                .then(d => {
+                    const toggle = document.getElementById('hb-toggle');
+                    const errEl = document.getElementById('hb-error');
+
+                    if (d.running) {
+                        setBadge('hb-badge', 'ON', 'trader-badge running');
+                        setText('hb-status', 'Listening on XBee');
+                        if (!toggle.checked) toggle.checked = true;
+                        errEl.style.display = 'none';
+                    } else {
+                        setBadge('hb-badge', 'OFF', 'trader-badge stopped');
+                        setText('hb-status', 'Off');
+                        if (toggle.checked) toggle.checked = false;
+                        if (d.error) {
+                            errEl.textContent = d.error;
+                            errEl.style.display = 'block';
+                        } else {
+                            errEl.style.display = 'none';
+                        }
+                    }
+
+                    setText('hb-port', d.port + ' @ ' + d.baud + ' baud');
+                    setText('hb-received', String(d.received_count));
+                    setText('hb-replied', String(d.replied_count));
+                    setText('hb-from', d.last_from ? '...' + d.last_from.slice(-8) : '--');
+                    setText('hb-rssi', d.last_rssi != null
+                        ? d.last_rssi + ' dBm ' + (d.last_rssi_bar || '')
+                        : '--');
+                    setText('hb-time', d.last_time || '--');
+
+                    // Update heartbeat log incrementally
+                    const logBox = document.getElementById('hb-log-box');
+                    if (d.history && d.history.length > 0) {
+                        if (d.history.length !== _lastHbLogCount) {
+                            _lastHbLogCount = d.history.length;
+                            const existingCount = logBox.querySelectorAll('.log-line').length;
+                            if (existingCount === 0) {
+                                // First render
+                                logBox.innerHTML = d.history.map(formatHbEvent).join('');
+                            } else {
+                                // Append only new entries
+                                const newEntries = d.history.slice(existingCount);
+                                const wasAtBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 30;
+                                for (const h of newEntries) {
+                                    const div = document.createElement('div');
+                                    div.className = h.reply ? 'log-line buy' : 'log-line';
+                                    div.innerHTML = formatHbLine(h);
+                                    logBox.appendChild(div);
+                                }
+                                while (logBox.children.length > 60) logBox.removeChild(logBox.firstChild);
+                                if (wasAtBottom) logBox.scrollTop = logBox.scrollHeight;
+                            }
+                            logBox.scrollTop = logBox.scrollHeight;
+                        }
+                    } else if (!logBox.querySelector('.log-line')) {
+                        logBox.textContent = d.running
+                            ? 'Listening on XBee ' + d.port + '... waiting for "All Good?" from Christy'
+                            : 'Turn on the toggle to start responding to Christy via XBee';
+                    }
+                })
+                .catch(err => console.error('Heartbeat status error:', err));
+        }
+
+        function formatHbLine(h) {
+            const rssiText = h.rssi != null ? 'RSSI: ' + h.rssi + ' dBm ' + (h.rssi_bar || '') : '';
+            if (h.reply) {
+                return '[' + h.time + '] &lt;&lt; RECV from ...' + h.from +
+                    ': "' + escapeHtml(h.msg) + '" | ' + rssiText +
+                    ' &rarr; REPLY: ' + escapeHtml(h.reply);
+            }
+            return '[' + h.time + '] &lt;&lt; RECV from ...' + h.from +
+                ': "' + escapeHtml(h.msg) + '" | ' + rssiText;
+        }
+
+        function formatHbEvent(h) {
+            const cls = h.reply ? 'log-line buy' : 'log-line';
+            return '<div class="' + cls + '">' + formatHbLine(h) + '</div>';
+        }
+
+        function toggleHeartbeat() {
+            const toggle = document.getElementById('hb-toggle');
+            const action = toggle.checked ? 'on' : 'off';
+            const badge = document.getElementById('hb-badge');
+            badge.textContent = toggle.checked ? 'OPENING...' : 'CLOSING...';
+            badge.className = 'trader-badge alert';
+
+            fetch(hbUrl('/api/heartbeat/toggle'), {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: action})
+            })
+            .then(r => r.json())
+            .then(d => {
+                setTimeout(loadHeartbeatStatus, 1000);
+            })
+            .catch(err => {
+                badge.textContent = 'ERROR';
+                badge.className = 'trader-badge stopped';
+            });
+        }
+
+        // XBee Responding Devices (Christy only)
+        let _lastRespondersHash = '';
+        function loadResponders() {
+            if (MACHINE !== 'Christy') return;
+
+            document.getElementById('responders-section').style.display = '';
+
+            fetch('/api/xbee/responders')
+                .then(r => r.json())
+                .then(d => {
+                    if (d.error && (!d.responders || d.responders.length === 0)) return;
+
+                    const grid = document.getElementById('responders-grid');
+                    const responders = d.responders || [];
+
+                    // Quick hash check to avoid unnecessary DOM updates
+                    const hash = responders.map(r => r.mac + r.online + r.rssi).join('|');
+                    if (hash === _lastRespondersHash) return;
+                    _lastRespondersHash = hash;
+
+                    if (responders.length === 0) {
+                        grid.innerHTML = '<span style="color:#555;font-size:13px;">No devices responding yet. Start the XBee Monitor first.</span>';
+                        return;
+                    }
+
+                    // Update tiles — match by MAC
+                    const existingTiles = {};
+                    grid.querySelectorAll('.responder-tile').forEach(t => {
+                        existingTiles[t.dataset.mac] = t;
+                    });
+
+                    const seenMacs = new Set();
+                    responders.forEach(r => {
+                        seenMacs.add(r.mac);
+                        let tile = existingTiles[r.mac];
+                        if (!tile) {
+                            tile = document.createElement('div');
+                            tile.className = 'responder-tile';
+                            tile.dataset.mac = r.mac;
+                            tile.innerHTML =
+                                '<div><span class="r-dot"></span><span class="r-name"></span></div>' +
+                                '<div class="r-mac"></div>' +
+                                '<div class="r-info"></div>' +
+                                '<div class="r-status"></div>';
+                            grid.appendChild(tile);
+                        }
+
+                        // Update class
+                        tile.className = 'responder-tile ' + (r.online ? 'online' : 'offline');
+
+                        // Update dot
+                        const dot = tile.querySelector('.r-dot');
+                        dot.className = 'r-dot ' + (r.online ? 'on' : 'off');
+
+                        // Update name
+                        const nameEl = tile.querySelector('.r-name');
+                        const name = r.name || ('...' + r.mac.slice(-4));
+                        if (nameEl.textContent !== name) nameEl.textContent = name;
+
+                        // Update MAC
+                        const macEl = tile.querySelector('.r-mac');
+                        const macText = r.mac;
+                        if (macEl.textContent !== macText) macEl.textContent = macText;
+
+                        // Update info
+                        const infoEl = tile.querySelector('.r-info');
+                        const rssiText = r.rssi != null ? 'RSSI: ' + r.rssi + ' dBm' : '';
+                        const timeText = r.last_time ? r.last_time.split(' ')[1] : '';
+                        const infoText = [rssiText, timeText].filter(Boolean).join(' | ');
+                        if (infoEl.textContent !== infoText) infoEl.textContent = infoText;
+
+                        // Update status
+                        const statusEl = tile.querySelector('.r-status');
+                        const statusText = r.online ? 'Online' : 'Offline';
+                        const statusClass = 'r-status ' + (r.online ? 'on' : 'off');
+                        if (statusEl.textContent !== statusText) statusEl.textContent = statusText;
+                        if (statusEl.className !== statusClass) statusEl.className = statusClass;
+                    });
+
+                    // Remove tiles for devices no longer in the list
+                    Object.keys(existingTiles).forEach(mac => {
+                        if (!seenMacs.has(mac)) {
+                            existingTiles[mac].remove();
+                        }
+                    });
+                })
+                .catch(err => console.error('Responders error:', err));
+        }
+
+        // Log Viewer (Christy only)
+        function loadLogFile() {
+            if (MACHINE !== 'Christy') return;
+
+            document.getElementById('log-viewer-section').style.display = '';
+
+            const file = document.getElementById('log-file-select').value;
+            const limit = document.getElementById('log-lines-select').value;
+            const infoEl = document.getElementById('log-viewer-info');
+            const box = document.getElementById('log-viewer-box');
+
+            infoEl.textContent = 'Loading ' + file + '...';
+
+            fetch('/api/xbee/log-file?file=' + encodeURIComponent(file) + '&limit=' + limit)
+                .then(r => r.json())
+                .then(d => {
+                    if (d.error) {
+                        infoEl.textContent = 'Error: ' + d.error;
+                        return;
+                    }
+
+                    // File info line
+                    const info = d.info || {};
+                    const parts = [file];
+                    if (info.size_human) parts.push(info.size_human);
+                    if (info.modified) parts.push('Modified: ' + info.modified);
+                    parts.push('Showing ' + d.total_lines + ' lines');
+                    infoEl.textContent = parts.join(' | ');
+
+                    // Render log lines with color coding
+                    if (d.lines && d.lines.length > 0) {
+                        box.innerHTML = d.lines.map(line => {
+                            let cls = 'log-line';
+                            const upper = line.toUpperCase();
+                            if (upper.includes('ERROR') || upper.includes('FATAL'))
+                                cls += ' sell';
+                            else if (upper.includes('REPLY') || upper.includes('ROGER'))
+                                cls += ' buy';
+                            else if (upper.includes('SENT') || upper.includes('HEARTBEAT SENT'))
+                                cls += ' connect';
+                            else if (upper.includes('STATUS') || upper.includes('YOLO') || upper.includes('WARN'))
+                                cls += ' warn';
+                            return '<div class="' + cls + '">' + escapeHtml(line) + '</div>';
+                        }).join('');
+                        box.scrollTop = box.scrollHeight;
+                    } else {
+                        box.textContent = 'File is empty or not found.';
+                    }
+                })
+                .catch(err => {
+                    infoEl.textContent = 'Error: ' + err;
+                });
+        }
+
+        function downloadLog() {
+            const file = document.getElementById('log-file-select').value;
+            fetch('/api/xbee/log-file?file=' + encodeURIComponent(file) + '&limit=5000')
+                .then(r => r.json())
+                .then(d => {
+                    if (!d.lines || d.lines.length === 0) {
+                        alert('No log content to download.');
+                        return;
+                    }
+                    const blob = new Blob([d.lines.join('\n')], {type: 'text/plain'});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = file;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                });
+        }
+
+        // CashCow Panel (Christy right-side)
+        function loadCashCowPanel() {
+            if (MACHINE !== 'Christy') return;
+
+            // Fetch IB Gateway status separately
+            fetch('/api/cashcow/ib-gateway-status')
+                .then(r => r.json())
+                .then(gw => {
+                    if (gw.connected === true) {
+                        setText('cc-gateway', 'Connected' + (gw.pid ? ' (PID: ' + gw.pid + ')' : ''));
+                        document.getElementById('cc-gateway').style.color = '#00e676';
+                    } else if (gw.connected === false) {
+                        setText('cc-gateway', 'Not Connected');
+                        document.getElementById('cc-gateway').style.color = '#e94560';
+                    } else {
+                        setText('cc-gateway', 'Checking...');
+                        document.getElementById('cc-gateway').style.color = '#888';
+                    }
+                })
+                .catch(() => { setText('cc-gateway', 'Unknown'); });
+
+            fetch('/api/machine/CashCow/trader-status')
+                .then(r => r.json())
+                .then(d => {
+                    const badge = document.getElementById('cc-badge');
+                    const label = d.status_label || (d.running ? 'Running' : 'Stopped');
+                    badge.textContent = label;
+                    if (d.running && d.market_open) {
+                        badge.className = 'panel-badge badge-ok';
+                    } else if (d.running && !d.market_open) {
+                        badge.className = 'panel-badge badge-ok';
+                    } else if (!d.running && d.market_open) {
+                        badge.className = 'panel-badge badge-err';
+                    } else {
+                        badge.className = 'panel-badge badge-warn';
+                    }
+                    setText('cc-trader', d.running ? 'Running (' + (d.mode || '--') + ')' : 'Not Running');
+
+                    // Positions, portfolio, P&L — placeholders until API provides them
+                    setText('cc-positions', d.daily_picks ? (Array.isArray(d.daily_picks) ? d.daily_picks.length : '--') + ' picks' : '--');
+                    setText('cc-portfolio', '--');
+                    setText('cc-pnl', '--');
+
+                    // Top holding from picks
+                    let topHold = '--';
+                    let picksArr = null;
+                    if (d.daily_picks) {
+                        if (Array.isArray(d.daily_picks)) picksArr = d.daily_picks;
+                        else if (d.daily_picks.all_scores) picksArr = d.daily_picks.all_scores;
+                        else if (d.daily_picks.picks) picksArr = d.daily_picks.picks;
+                    }
+                    if (picksArr && picksArr.length > 0) {
+                        const top = picksArr[0];
+                        topHold = (top.symbol || top.ticker || '??') + ' (' + (top.signal || top.action || '--') + ')';
+                    }
+                    setText('cc-top-hold', topHold);
+
+                    // Last check time
+                    const now = new Date();
+                    setText('cc-last-check', now.toLocaleTimeString());
+                })
+                .catch(err => {
+                    const badge = document.getElementById('cc-badge');
+                    badge.textContent = 'Offline';
+                    badge.className = 'panel-badge badge-err';
+                    setText('cc-trader', 'Cannot reach CashCow');
+                    setText('cc-gateway', '--');
+                    const now = new Date();
+                    setText('cc-last-check', now.toLocaleTimeString() + ' (error)');
+                });
+        }
+
+        // ── Camera Dashboard (go2rtc WebRTC) ──
+        let _camConfig = null;
+        let _camPeers = {};  // cam_id -> RTCPeerConnection
+
+        function initCameraDashboard() {
+            fetch('/api/cameras/config')
+                .then(r => r.json())
+                .then(cfg => {
+                    _camConfig = cfg;
+                    renderCameraGrid(cfg);
+                    checkGo2rtcStatus();
+                    setInterval(checkGo2rtcStatus, 30000);
+                })
+                .catch(err => {
+                    document.getElementById('cam-footer').textContent = 'Failed to load camera config';
+                });
+        }
+
+        function renderCameraGrid(cfg) {
+            const grid = document.getElementById('cam-grid');
+            const cameras = cfg.cameras || {};
+            const ids = Object.keys(cameras);
+            if (ids.length === 0) {
+                grid.innerHTML = '<div style="color:#555;text-align:center;padding:20px;">No cameras configured</div>';
+                return;
+            }
+            grid.innerHTML = '';
+            ids.forEach(camId => {
+                const cam = cameras[camId];
+                const slot = document.createElement('div');
+                slot.className = 'cam-slot';
+                slot.id = 'cam-slot-' + camId;
+
+                if (cam.event_only) {
+                    // Event-only camera (battery, no stream)
+                    slot.innerHTML = `
+                        <div class="cam-placeholder" id="cam-ph-${camId}" style="font-size:9px;flex-direction:column;gap:4px;">
+                            <span style="font-size:18px;">&#128267;</span>
+                            <span>Event Monitor</span>
+                            <span id="cam-event-${camId}" style="color:#ffc107;font-size:9px;">Waiting...</span>
+                        </div>
+                        <div class="cam-label">
+                            <span>${cam.name} <span style="color:#555;font-size:9px;">(${cam.ip})</span></span>
+                            <span class="cam-dot connecting" id="cam-dot-${camId}"></span>
+                        </div>
+                    `;
+                    slot.onclick = () => openEventModal(camId, cam.name, cam.eufy_sn);
+                } else {
+                    // RTSP streaming camera
+                    slot.innerHTML = `
+                        <div class="cam-placeholder" id="cam-ph-${camId}">Connecting...</div>
+                        <video id="cam-video-${camId}" autoplay playsinline muted style="display:none;"></video>
+                        <div class="cam-label">
+                            <span>${cam.name} <span style="color:#555;font-size:9px;">(${cam.ip})</span></span>
+                            <span class="cam-dot connecting" id="cam-dot-${camId}"></span>
+                        </div>
+                    `;
+                    slot.onclick = () => openCamModal(camId, cam.name);
+                }
+                grid.appendChild(slot);
+            });
+            document.getElementById('cam-footer').textContent = ids.length + ' cameras configured';
+        }
+
+        function checkGo2rtcStatus() {
+            fetch('/api/cameras/go2rtc/status')
+                .then(r => r.json())
+                .then(data => {
+                    const badge = document.getElementById('go2rtc-badge');
+                    if (data.online) {
+                        badge.textContent = 'go2rtc online';
+                        badge.style.background = '#00e676';
+                        badge.style.color = '#000';
+                        // Connect streams that aren't connected yet (skip event_only)
+                        if (_camConfig) {
+                            Object.keys(_camConfig.cameras || {}).forEach(camId => {
+                                const cam = _camConfig.cameras[camId];
+                                if (!cam.event_only && !_camPeers[camId]) {
+                                    connectWebRTC(camId);
+                                }
+                            });
+                        }
+                        // Poll eufy events for event_only cameras
+                        pollEufyEvents();
+                    } else {
+                        badge.textContent = 'go2rtc offline';
+                        badge.style.background = '#e94560';
+                        badge.style.color = '#fff';
+                    }
+                })
+                .catch(() => {
+                    const badge = document.getElementById('go2rtc-badge');
+                    badge.textContent = 'go2rtc error';
+                    badge.style.background = '#e94560';
+                });
+        }
+
+        function connectWebRTC(camId) {
+            if (!_camConfig) return;
+            const go2rtc = _camConfig.go2rtc || {};
+            const apiUrl = go2rtc.api_url || ('http://' + go2rtc.host + ':' + go2rtc.port);
+
+            const video = document.getElementById('cam-video-' + camId);
+            const ph = document.getElementById('cam-ph-' + camId);
+            const dot = document.getElementById('cam-dot-' + camId);
+            if (!video) return;
+
+            // go2rtc WebRTC via HTTP API
+            const pc = new RTCPeerConnection({
+                iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
+            });
+            _camPeers[camId] = pc;
+
+            pc.ontrack = (event) => {
+                video.srcObject = event.streams[0];
+                video.style.display = 'block';
+                if (ph) ph.style.display = 'none';
+                if (dot) { dot.className = 'cam-dot online'; }
+            };
+
+            pc.oniceconnectionstatechange = () => {
+                if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+                    if (dot) { dot.className = 'cam-dot offline'; }
+                    video.style.display = 'none';
+                    if (ph) { ph.style.display = 'flex'; ph.textContent = 'Disconnected'; }
+                    // Clean up and retry after 10s
+                    delete _camPeers[camId];
+                    try { pc.close(); } catch(e) {}
+                    setTimeout(() => connectWebRTC(camId), 10000);
+                }
+            };
+
+            // Add recv-only transceivers
+            pc.addTransceiver('video', {direction: 'recvonly'});
+
+            pc.createOffer()
+                .then(offer => pc.setLocalDescription(offer))
+                .then(() => {
+                    return fetch(apiUrl + '/api/webrtc?src=' + camId, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            type: pc.localDescription.type,
+                            sdp: pc.localDescription.sdp,
+                        })
+                    });
+                })
+                .then(r => {
+                    if (!r.ok) throw new Error('go2rtc returned ' + r.status);
+                    return r.json();
+                })
+                .then(answer => {
+                    pc.setRemoteDescription(new RTCSessionDescription(answer));
+                })
+                .catch(err => {
+                    console.warn('WebRTC connect failed for ' + camId + ':', err);
+                    if (dot) { dot.className = 'cam-dot offline'; }
+                    if (ph) { ph.textContent = 'No Stream'; ph.style.display = 'flex'; }
+                    delete _camPeers[camId];
+                    try { pc.close(); } catch(e) {}
+                    // Retry after 15s
+                    setTimeout(() => connectWebRTC(camId), 15000);
+                });
+        }
+
+        function openCamModal(camId, camName) {
+            const modal = document.getElementById('cam-modal');
+            const modalVideo = document.getElementById('cam-modal-video');
+            const title = document.getElementById('cam-modal-title');
+            title.textContent = camName;
+
+            // Share the same stream from the thumbnail
+            const thumbVideo = document.getElementById('cam-video-' + camId);
+            if (thumbVideo && thumbVideo.srcObject) {
+                modalVideo.srcObject = thumbVideo.srcObject;
+            }
+            modal.classList.add('active');
+        }
+
+        function closeCamModal() {
+            const modal = document.getElementById('cam-modal');
+            const modalVideo = document.getElementById('cam-modal-video');
+            modal.classList.remove('active');
+            modalVideo.srcObject = null;
+        }
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { closeCamModal(); closeEventModal(); }
+        });
+
+        let _currentEventSN = null;
+        let _currentEventCamName = null;
+
+        function openEventModal(camId, camName, eufySN) {
+            const modal = document.getElementById('event-modal');
+            _currentEventSN = eufySN;
+            _currentEventCamName = camName;
+            document.getElementById('event-modal-title').textContent = camName + ' — Events';
+            document.getElementById('event-modal-list').innerHTML = 'Loading...';
+            document.getElementById('event-detail-container').style.display = 'none';
+            document.getElementById('event-modal-list').style.display = '';
+            document.getElementById('event-tabs').style.display = '';
+            // Reset to push tab
+            document.querySelectorAll('.event-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'push'));
+            modal.classList.add('active');
+            loadPushEvents(eufySN);
+        }
+
+        function switchEventTab(tab) {
+            document.querySelectorAll('.event-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+            document.getElementById('event-detail-container').style.display = 'none';
+            document.getElementById('event-modal-list').style.display = '';
+            if (tab === 'push') {
+                loadPushEvents(_currentEventSN);
+            } else {
+                loadCloudEvents(_currentEventSN);
+            }
+        }
+
+        function getEventIcon(type) {
+            if (type === 'person') return '&#128694;';
+            if (type === 'motion') return '&#128168;';
+            if (type === 'pet') return '&#128062;';
+            if (type === 'doorbell') return '&#128276;';
+            if (type === 'push') return '&#128233;';
+            return '&#9889;';
+        }
+
+        function loadPushEvents(eufySN) {
+            const list = document.getElementById('event-modal-list');
+            list.innerHTML = 'Loading...';
+            fetch('/api/cameras/eufy/events')
+                .then(r => r.json())
+                .then(data => {
+                    const events = (data.events || []).filter(e => !eufySN || e.deviceSN === eufySN);
+                    if (events.length === 0) {
+                        list.innerHTML = '<div style="color:#555;text-align:center;padding:20px;">No events recorded yet</div>';
+                        return;
+                    }
+                    list.innerHTML = events.map((ev, idx) => {
+                        const icon = getEventIcon(ev.type);
+                        const time = new Date(ev.timestamp).toLocaleString();
+                        const thumb = ev.data?.pic_url ? `<img class="ev-thumb" src="${ev.data.pic_url}">` : '';
+                        const detail = ev.data?.content || ev.data?.title || '';
+                        return `<div class="event-item" onclick="showEventDetail('push', ${idx})">
+                            <span class="ev-icon">${icon}</span>
+                            <div style="flex:1;">
+                                <span class="ev-type">${ev.type}</span>
+                                <span class="ev-time">${time}</span>
+                                ${detail ? `<div class="ev-detail">${detail}</div>` : ''}
+                            </div>
+                            ${thumb}
+                        </div>`;
+                    }).join('');
+                    // Store events for detail view
+                    window._pushEvents = events;
+                })
+                .catch(() => {
+                    list.innerHTML = '<div style="color:#e94560;">Failed to load events</div>';
+                });
+        }
+
+        function loadCloudEvents(eufySN) {
+            const list = document.getElementById('event-modal-list');
+            list.innerHTML = 'Loading cloud events...';
+            const url = eufySN ? `/api/cameras/eufy/history?sn=${eufySN}` : '/api/cameras/eufy/history';
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    const events = data.events || [];
+                    if (events.length === 0) {
+                        list.innerHTML = '<div style="color:#555;text-align:center;padding:20px;">No cloud events available</div>';
+                        return;
+                    }
+                    list.innerHTML = events.map((ev, idx) => {
+                        const icon = getEventIcon(ev.event_type === 3 ? 'person' : ev.event_type === 2 ? 'motion' : 'push');
+                        const time = ev.event_time ? new Date(ev.event_time).toLocaleString() : 'Unknown';
+                        const thumb = ev.thumbnail_url ? `<img class="ev-thumb" src="${ev.thumbnail_url}">` : '';
+                        return `<div class="event-item" onclick="showEventDetail('cloud', ${idx})">
+                            <span class="ev-icon">${icon}</span>
+                            <div style="flex:1;">
+                                <span class="ev-type">${ev.title || 'Event'}</span>
+                                <span class="ev-time">${time}</span>
+                                ${ev.content ? `<div class="ev-detail">${ev.content}</div>` : ''}
+                            </div>
+                            ${thumb}
+                        </div>`;
+                    }).join('');
+                    window._cloudEvents = events;
+                })
+                .catch(() => {
+                    list.innerHTML = '<div style="color:#e94560;">Failed to load cloud events</div>';
+                });
+        }
+
+        function showEventDetail(source, idx) {
+            const ev = source === 'push' ? (window._pushEvents || [])[idx] : (window._cloudEvents || [])[idx];
+            if (!ev) return;
+
+            const list = document.getElementById('event-modal-list');
+            const detail = document.getElementById('event-detail-container');
+            const tabs = document.getElementById('event-tabs');
+            list.style.display = 'none';
+            tabs.style.display = 'none';
+            detail.style.display = '';
+
+            let icon, type, time, text, imageUrl, videoUrl;
+
+            if (source === 'push') {
+                icon = getEventIcon(ev.type);
+                type = ev.type;
+                time = new Date(ev.timestamp).toLocaleString();
+                text = ev.data?.content || ev.data?.title || '';
+                imageUrl = ev.data?.pic_url || '';
+                videoUrl = ev.data?.doorbell_video_url || '';
+            } else {
+                icon = getEventIcon(ev.event_type === 3 ? 'person' : ev.event_type === 2 ? 'motion' : 'push');
+                type = ev.title || 'Event';
+                time = ev.event_time ? new Date(ev.event_time).toLocaleString() : 'Unknown';
+                text = ev.content || '';
+                imageUrl = ev.thumbnail_url || '';
+                videoUrl = '';
+            }
+
+            let mediaHtml;
+            if (videoUrl) {
+                mediaHtml = `<video class="ev-detail-video" src="${videoUrl}" controls autoplay playsinline></video>`;
+            } else if (imageUrl) {
+                mediaHtml = `<img class="ev-detail-image" src="${imageUrl}" alt="Event snapshot">`;
+            } else {
+                mediaHtml = `<div class="ev-no-media">No snapshot available for this event</div>`;
+            }
+
+            detail.innerHTML = `
+                <div class="event-detail-view">
+                    <span class="ev-back" onclick="backToEventList()">&larr; Back to events</span>
+                    <div class="ev-detail-header">
+                        <span class="ev-icon">${icon}</span>
+                        <div>
+                            <span class="ev-type">${type}</span><br>
+                            <span class="ev-time">${time}</span>
+                        </div>
+                    </div>
+                    ${text ? `<div class="ev-detail-text">${text}</div>` : ''}
+                    ${mediaHtml}
+                </div>
+            `;
+        }
+
+        function backToEventList() {
+            document.getElementById('event-modal-list').style.display = '';
+            document.getElementById('event-tabs').style.display = '';
+            document.getElementById('event-detail-container').style.display = 'none';
+        }
+
+        function closeEventModal() {
+            document.getElementById('event-modal').classList.remove('active');
+            document.getElementById('event-detail-container').style.display = 'none';
+        }
+
+        // Eufy event polling for event_only cameras
+        function pollEufyEvents() {
+            fetch('/api/cameras/eufy/events')
+                .then(r => r.json())
+                .then(data => {
+                    const events = data.events || [];
+                    // Update event_only camera slots
+                    if (_camConfig) {
+                        Object.entries(_camConfig.cameras || {}).forEach(([camId, cam]) => {
+                            if (!cam.event_only) return;
+                            const dot = document.getElementById('cam-dot-' + camId);
+                            const eventEl = document.getElementById('cam-event-' + camId);
+                            if (!eventEl) return;
+
+                            // Find latest event for this camera's eufy_sn
+                            const sn = cam.eufy_sn;
+                            const camEvents = sn ? events.filter(e => e.deviceSN === sn) : events;
+                            if (camEvents.length > 0) {
+                                const latest = camEvents[0];
+                                const time = new Date(latest.timestamp).toLocaleTimeString();
+                                const icon = latest.type === 'person' ? '🚶' :
+                                             latest.type === 'motion' ? '💨' :
+                                             latest.type === 'pet' ? '🐾' :
+                                             latest.type === 'doorbell' ? '🔔' :
+                                             latest.type === 'push' ? '📩' : '⚡';
+                                eventEl.innerHTML = `${icon} ${latest.type} @ ${time}`;
+                                eventEl.style.color = '#ffc107';
+                                if (dot) dot.className = 'cam-dot online';
+
+                                // Show thumbnail if available
+                                if (latest.data?.pic_url) {
+                                    const ph = document.getElementById('cam-ph-' + camId);
+                                    if (ph) {
+                                        ph.innerHTML = `<img src="${latest.data.pic_url}" style="width:100%;height:100%;object-fit:cover;">`;
+                                    }
+                                }
+                            } else {
+                                eventEl.textContent = 'No events yet';
+                                eventEl.style.color = '#555';
+                                if (dot) dot.className = 'cam-dot connecting';
+                            }
+                        });
+                    }
+                })
+                .catch(() => {});
+        }
+        // Poll eufy events every 10 seconds
+        setInterval(pollEufyEvents, 10000);
+
+        // --- Gram client-side detection & remote XBee control ---
+
+        let IS_LOCAL_GRAM = false;
+
+        function detectGramLocal() {
+            if (MACHINE !== 'Gram') return;
+            // Probe localhost:5000 to check if Gram's agent is running here
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 2000);
+            fetch('http://localhost:5000/api/heartbeat/status', { signal: controller.signal })
+                .then(r => r.json())
+                .then(d => {
+                    clearTimeout(timeout);
+                    // Check if reply matches Gram's call sign
+                    if (d.reply === 'R3!' || d.port === 'COM20') {
+                        IS_LOCAL_GRAM = true;
+                        // Show gamepad button, show local heartbeat section
+                        const gpBtn = document.getElementById('gram-gamepad-btn');
+                        if (gpBtn) gpBtn.style.display = '';
+                        loadHeartbeatStatus();
+                        setInterval(loadHeartbeatStatus, 5000);
+                    } else {
+                        showGramRemote();
+                    }
+                })
+                .catch(() => {
+                    clearTimeout(timeout);
+                    // Not on Gram — show remote XBee control
+                    showGramRemote();
+                });
+        }
+
+        function showGramRemote() {
+            IS_LOCAL_GRAM = false;
+            document.getElementById('gram-remote-section').style.display = '';
+            loadGramXbeeStatus();
+            setInterval(loadGramXbeeStatus, 5000);
+        }
+
+        function loadGramXbeeStatus() {
+            fetch('/api/proxy/Gram/heartbeat/status')
+                .then(r => r.json())
+                .then(d => {
+                    const toggle = document.getElementById('gram-xbee-toggle');
+                    const errEl = document.getElementById('gram-xbee-error');
+                    if (d.running) {
+                        setBadge('gram-xbee-badge', 'ON', 'trader-badge running');
+                        setText('gram-xbee-status', 'Listening on XBee');
+                        if (!toggle.checked) toggle.checked = true;
+                        errEl.style.display = 'none';
+                    } else {
+                        setBadge('gram-xbee-badge', 'OFF', 'trader-badge stopped');
+                        setText('gram-xbee-status', d.error || 'Off');
+                        if (toggle.checked) toggle.checked = false;
+                        if (d.error) {
+                            errEl.textContent = d.error;
+                            errEl.style.display = 'block';
+                        } else {
+                            errEl.style.display = 'none';
+                        }
+                    }
+                    setText('gram-xbee-port', (d.port || 'COM20') + ' @ ' + (d.baud || 115200) + ' baud');
+                    setText('gram-xbee-reply', d.reply || 'R3!');
+                    setText('gram-xbee-received', String(d.received_count || 0));
+                    setText('gram-xbee-rssi', d.last_rssi != null
+                        ? d.last_rssi + ' dBm ' + (d.last_rssi_bar || '')
+                        : '--');
+                    setText('gram-xbee-time', d.last_time || '--');
+                })
+                .catch(err => {
+                    setBadge('gram-xbee-badge', 'OFFLINE', 'trader-badge stopped');
+                    setText('gram-xbee-status', 'Gram agent unreachable');
+                });
+        }
+
+        function toggleGramXbee() {
+            const toggle = document.getElementById('gram-xbee-toggle');
+            const badge = document.getElementById('gram-xbee-badge');
+            badge.textContent = toggle.checked ? 'STARTING...' : 'STOPPING...';
+            badge.className = 'trader-badge alert';
+            fetch('/api/proxy/Gram/heartbeat/toggle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: toggle.checked ? 'on' : 'off'})
+            })
+            .then(r => r.json())
+            .then(() => setTimeout(loadGramXbeeStatus, 1000))
+            .catch(() => {
+                badge.textContent = 'ERROR';
+                badge.className = 'trader-badge stopped';
+            });
+        }
+
+        // Auto-refresh
+        loadInfo();
+        if (MACHINE === 'Dreamer') {
+            // Show Heartbeat Responder section (local XBee)
+            loadHeartbeatStatus();
+            setInterval(loadHeartbeatStatus, 5000);
+        }
+        if (MACHINE === 'Gram') {
+            detectGramLocal();
+        }
+        if (MACHINE === 'CashCow') {
+            loadTraderStatus();
+            loadIBGatewayStatus();
+            setInterval(loadTraderStatus, 30000);
+            setInterval(loadIBGatewayStatus, 30000);
+        }
+        if (MACHINE === 'Christy') {
+            document.getElementById('christy-dashboard').style.display = '';
+            loadXbeeStatus();
+            loadResponders();
+            loadLogFile();
+            loadCashCowPanel();
+            initCameraDashboard();
+            setInterval(loadXbeeStatus, 15000);
+            setInterval(loadResponders, 15000);
+            setInterval(loadCashCowPanel, 30000);
+        }
+        setInterval(loadInfo, 30000);
+    </script>
+</body>
+</html>

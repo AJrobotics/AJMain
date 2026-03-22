@@ -1,0 +1,1860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AJ Robotics - YOLO Training</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
+
+        .topbar { background: #16213e; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #0f3460; position: sticky; top: 0; z-index: 100; }
+        .topbar h1 { font-size: 20px; color: #e94560; }
+        .topbar .center { color: #888; font-size: 13px; }
+
+        .nav { background: #16213e; padding: 0 20px; display: flex; gap: 0; border-bottom: 1px solid #0f3460; overflow-x: auto; }
+        .nav a { color: #888; text-decoration: none; padding: 10px 16px; font-size: 13px; white-space: nowrap; border-bottom: 2px solid transparent; }
+        .nav a:hover, .nav a.active { color: #4ecca3; border-bottom-color: #4ecca3; }
+        .nav-dropdown { position: relative; }
+        .nav-dropdown > a { color: #888; text-decoration: none; padding: 10px 16px; font-size: 13px; white-space: nowrap; border-bottom: 2px solid transparent; display: block; cursor: pointer; }
+        .nav-dropdown:hover > a { color: #4ecca3; border-bottom-color: #4ecca3; }
+        .nav-dropdown-menu { display: none; position: absolute; top: 100%; left: 0; background: #16213e; border: 1px solid #0f3460; border-radius: 0 0 8px 8px; min-width: 160px; z-index: 200; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+        .nav-dropdown:hover .nav-dropdown-menu { display: block; }
+        .nav-dropdown-menu a { display: block; padding: 10px 16px; color: #aaa; text-decoration: none; font-size: 13px; border-bottom: none; }
+        .nav-dropdown-menu a:hover { background: #0f3460; color: #4ecca3; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 0; padding: 0 20px; background: #1a1a2e; border-bottom: 1px solid #0f3460; }
+        .tab { padding: 12px 24px; color: #888; cursor: pointer; font-size: 14px; font-weight: 600; border-bottom: 3px solid transparent; transition: all 0.2s; }
+        .tab:hover { color: #ccc; }
+        .tab.active { color: #e94560; border-bottom-color: #e94560; }
+        .tab-content { display: none; padding: 16px 20px; }
+        .tab-content.active { display: block; }
+
+        /* Common */
+        .btn { display: inline-block; background: #0f3460; color: #4ecca3; padding: 8px 18px; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; text-decoration: none; margin: 3px 3px 3px 0; transition: background 0.2s; }
+        .btn:hover { background: #1a4a8a; }
+        .btn.primary { background: #e94560; color: white; }
+        .btn.primary:hover { background: #c73652; }
+        .btn.green { background: #00e67633; border: 1px solid #00e676; color: #00e676; }
+        .btn.green:hover { background: #00e67655; }
+        .btn.danger { background: #e9456033; border: 1px solid #e94560; color: #e94560; }
+        .btn.danger:hover { background: #e9456055; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn.sm { padding: 5px 12px; font-size: 11px; }
+
+        .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; }
+        .badge.running { background: #4ecca333; color: #4ecca3; }
+        .badge.stopped { background: #e9456033; color: #e94560; }
+        .badge.idle { background: #88888833; color: #888; }
+
+        .card { background: #16213e; border: 1px solid #0f3460; border-radius: 12px; padding: 22px; margin-bottom: 16px; }
+        .card h2 { color: #e94560; font-size: 17px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+        .card h3 { color: #4ecca3; font-size: 14px; margin-bottom: 10px; }
+        .info-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; color: #aaa; border-bottom: 1px solid #0f346033; }
+        .info-row .val { color: #4ecca3; font-weight: 600; }
+
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+        /* Forms */
+        input[type="text"], input[type="number"], select, textarea {
+            background: #0a1929; border: 1px solid #0f3460; color: #eee; padding: 8px 12px;
+            border-radius: 6px; font-size: 13px; font-family: inherit;
+        }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: #4ecca3; }
+        input::placeholder { color: #555; }
+        label { color: #aaa; font-size: 13px; display: block; margin-bottom: 4px; }
+        .form-group { margin-bottom: 14px; }
+        .form-group input, .form-group select { width: 100%; }
+        .form-inline { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+        .form-inline .form-group { margin-bottom: 0; }
+
+        /* Dataset table */
+        .ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .ds-table th { text-align: left; color: #888; padding: 8px 12px; border-bottom: 1px solid #0f3460; font-weight: normal; }
+        .ds-table td { padding: 10px 12px; border-bottom: 1px solid #0f346033; }
+        .ds-table tr:hover { background: #0f346022; }
+        .ds-table .name { color: #4ecca3; font-weight: bold; cursor: pointer; }
+        .ds-table .name:hover { text-decoration: underline; }
+        .class-tag { display: inline-block; background: #0f3460; color: #aaa; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin: 1px 2px; }
+
+        /* Progress bar */
+        .progress-bar { background: #0a1929; border-radius: 8px; height: 24px; overflow: hidden; position: relative; margin: 10px 0; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #4ecca3, #00e676); border-radius: 8px; transition: width 0.5s; min-width: 0; }
+        .progress-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 12px; font-weight: bold; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+
+        /* Log box */
+        .log-box { background: #0a0a1a; border: 1px solid #0f3460; border-radius: 8px; padding: 12px; font-size: 11px; font-family: 'Consolas', 'Courier New', monospace; color: #888; max-height: 250px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5; }
+
+        /* Chart area */
+        .chart-area { background: #0a1929; border: 1px solid #0f3460; border-radius: 8px; padding: 16px; min-height: 180px; position: relative; }
+        .chart-canvas { width: 100%; height: 160px; }
+
+        /* Model cards */
+        .model-card { background: #0a1929; border: 1px solid #0f3460; border-radius: 10px; padding: 16px; margin-bottom: 12px; transition: border-color 0.2s; }
+        .model-card:hover { border-color: #4ecca388; }
+        .model-card .model-name { color: #4ecca3; font-weight: bold; font-size: 14px; margin-bottom: 8px; }
+        .model-card .metrics { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0; }
+        .model-card .metric { text-align: center; }
+        .model-card .metric .value { font-size: 18px; font-weight: bold; color: #4ecca3; }
+        .model-card .metric .label { font-size: 11px; color: #888; }
+        .model-card .meta { color: #666; font-size: 12px; margin-top: 8px; }
+
+        .empty-state { text-align: center; padding: 40px; color: #555; }
+        .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+
+        /* Notification toast */
+        .toast { position: fixed; top: 80px; right: 20px; background: #16213e; border: 1px solid #4ecca3; border-radius: 8px; padding: 12px 20px; color: #4ecca3; font-size: 13px; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.4); transform: translateX(120%); transition: transform 0.3s; }
+        .toast.show { transform: translateX(0); }
+        .toast.error { border-color: #e94560; color: #e94560; }
+
+        .footer { text-align: center; padding: 16px; color: #444; font-size: 11px; }
+
+        /* Modal */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 500; align-items: center; justify-content: center; }
+        .modal-overlay.show { display: flex; }
+        .modal { background: #16213e; border: 1px solid #0f3460; border-radius: 12px; padding: 24px; min-width: 400px; max-width: 90vw; }
+        .modal h2 { color: #e94560; margin-bottom: 16px; font-size: 18px; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+    <div class="topbar">
+        <h1>AJ Robotics</h1>
+        <div class="center" id="clock"></div>
+        <div>
+            <span class="badge idle" id="service-badge">Checking...</span>
+        </div>
+    </div>
+
+    <div class="nav">
+        <a href="/">Dashboard</a>
+        <a href="/machines">Machines</a>
+        <div class="nav-dropdown">
+            <a href="/robotics">Robotics &#9662;</a>
+            <div class="nav-dropdown-menu">
+                <a href="/robotics">Overview</a>
+                <a href="/robotics/gamepad">Gamepad Test</a>
+                <a href="/vision">Vision</a>
+                <a href="/training" class="active">Training</a>
+            </div>
+        </div>
+        <a href="/trader">Trader</a>
+        <a href="/deploy">Deploy</a>
+        <a href="/training" class="active">Training</a>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('datasets')">Datasets</div>
+        <div class="tab" onclick="switchTab('training')">Training</div>
+        <div class="tab" onclick="switchTab('models')">Models</div>
+        <div class="tab" onclick="switchTab('detect')">Object Detection</div>
+        <div class="tab" onclick="switchTab('unsupervised')">Unsupervised</div>
+    </div>
+
+    <!-- ==================== DATASETS TAB ==================== -->
+    <div class="tab-content active" id="tab-datasets">
+        <div class="card">
+            <h2>Datasets
+                <button class="btn green sm" onclick="showCreateDataset()">+ New Detection Dataset</button>
+                <button class="btn sm" style="background:#4ecca322;border:1px solid #4ecca3;color:#4ecca3;" onclick="showImportClassification()">Import Classification Folder</button>
+            </h2>
+            <table class="ds-table" id="datasets-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Classes</th>
+                        <th>Train</th>
+                        <th>Val</th>
+                        <th>Modified</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="datasets-body">
+                    <tr><td colspan="7" class="empty-state">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Dataset Detail (shown when clicking a dataset) -->
+        <div class="card" id="dataset-detail" style="display:none">
+            <h2 id="ds-detail-title">Dataset Detail</h2>
+            <div class="grid-2">
+                <div>
+                    <div class="info-row"><span>Path</span><span class="val" id="ds-path">--</span></div>
+                    <div class="info-row"><span>Train Images</span><span class="val" id="ds-train-imgs">--</span></div>
+                    <div class="info-row"><span>Train Labels</span><span class="val" id="ds-train-lbls">--</span></div>
+                    <div class="info-row"><span>Val Images</span><span class="val" id="ds-val-imgs">--</span></div>
+                    <div class="info-row"><span>Val Labels</span><span class="val" id="ds-val-lbls">--</span></div>
+                </div>
+                <div>
+                    <h3>Classes</h3>
+                    <div id="ds-classes-list" style="margin-bottom:12px;"></div>
+                    <div class="form-inline">
+                        <input type="text" id="ds-new-class" placeholder="Add class name..." style="flex:1" onkeydown="if(event.key==='Enter')addClassToDataset()">
+                        <button class="btn sm" onclick="addClassToDataset()">Add</button>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top:16px">
+                <h3>Upload Images</h3>
+                <div class="form-inline" style="margin-top:8px;">
+                    <select id="upload-split" style="width:100px"><option value="train">Train</option><option value="val">Val</option></select>
+                    <input type="file" id="upload-files" multiple accept="image/*" style="flex:1;background:none;border:none;color:#aaa;">
+                    <button class="btn green sm" onclick="uploadImages()">Upload</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== TRAINING TAB ==================== -->
+    <div class="tab-content" id="tab-training">
+        <div class="grid-2">
+            <!-- Training Config -->
+            <div class="card">
+                <h2>Training Setup</h2>
+                <div class="form-group">
+                    <label>Dataset</label>
+                    <select id="train-dataset"><option value="">-- Select --</option></select>
+                </div>
+                <div class="form-group">
+                    <label>Model <span id="train-type-badge" style="font-size:11px;padding:2px 8px;border-radius:10px;background:#0f3460;color:#888;margin-left:6px;">auto-detect</span></label>
+                    <select id="train-model">
+                        <optgroup label="Detection (Object Detection)">
+                            <option value="yolov8n.pt">YOLOv8n (Nano - 3.2M params, fast)</option>
+                            <option value="yolov8s.pt">YOLOv8s (Small - 11.2M params)</option>
+                            <option value="yolov8m.pt">YOLOv8m (Medium - 25.9M params)</option>
+                        </optgroup>
+                        <optgroup label="Classification (Image Classification)">
+                            <option value="yolov8n-cls.pt">YOLOv8n-cls (Nano - 1.5M params)</option>
+                            <option value="yolov8s-cls.pt">YOLOv8s-cls (Small - 6.4M params)</option>
+                            <option value="yolov8m-cls.pt">YOLOv8m-cls (Medium - 17M params)</option>
+                        </optgroup>
+                    </select>
+                </div>
+                <div class="form-inline">
+                    <div class="form-group" style="flex:1">
+                        <label>Epochs</label>
+                        <input type="number" id="train-epochs" value="100" min="1" max="1000">
+                    </div>
+                    <div class="form-group" style="flex:1">
+                        <label>Batch Size</label>
+                        <select id="train-batch">
+                            <option value="8">8</option>
+                            <option value="16" selected>16</option>
+                            <option value="32">32</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1">
+                        <label>Image Size</label>
+                        <select id="train-imgsz">
+                            <option value="320">320</option>
+                            <option value="640" selected>640</option>
+                            <option value="1280">1280</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="margin-top:16px; display:flex; gap:10px;">
+                    <button class="btn primary" onclick="startTraining()" id="btn-start">Start Training</button>
+                    <button class="btn danger" onclick="stopTraining()" id="btn-stop" disabled>Stop</button>
+                </div>
+            </div>
+
+            <!-- GPU / Server Info -->
+            <div class="card">
+                <h2>Dreamer GPU Status</h2>
+                <div class="info-row"><span>GPU</span><span class="val" id="gpu-name">--</span></div>
+                <div class="info-row"><span>Utilization</span><span class="val" id="gpu-util">--</span></div>
+                <div class="info-row"><span>Memory</span><span class="val" id="gpu-mem">--</span></div>
+                <div class="info-row"><span>Training Service</span><span class="val" id="svc-status">--</span></div>
+                <div style="margin-top:12px">
+                    <button class="btn sm" onclick="refreshTrainingStatus()">Refresh</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Training Progress -->
+        <div class="card" id="progress-card" style="display:none">
+            <h2>Training Progress <span class="badge running" id="train-badge">TRAINING</span></h2>
+            <div class="info-row"><span>Dataset</span><span class="val" id="prog-dataset">--</span></div>
+            <div class="info-row"><span>Model</span><span class="val" id="prog-model">--</span></div>
+            <div class="info-row"><span>Started</span><span class="val" id="prog-started">--</span></div>
+
+            <div class="progress-bar">
+                <div class="progress-fill" id="prog-fill" style="width:0%"></div>
+                <div class="progress-text" id="prog-text">0%</div>
+            </div>
+
+            <div class="grid-2">
+                <!-- Metrics -->
+                <div>
+                    <h3 style="margin-top:10px">Current Metrics</h3>
+                    <div class="info-row"><span>Epoch</span><span class="val" id="m-epoch">--</span></div>
+                    <div class="info-row"><span>Box Loss</span><span class="val" id="m-box-loss">--</span></div>
+                    <div class="info-row"><span>Class Loss</span><span class="val" id="m-cls-loss">--</span></div>
+                    <div class="info-row"><span>mAP50</span><span class="val" id="m-map50">--</span></div>
+                    <div class="info-row"><span>mAP50-95</span><span class="val" id="m-map50-95">--</span></div>
+                    <div class="info-row"><span>Precision</span><span class="val" id="m-precision">--</span></div>
+                    <div class="info-row"><span>Recall</span><span class="val" id="m-recall">--</span></div>
+                </div>
+                <!-- Chart -->
+                <div>
+                    <h3 style="margin-top:10px">Loss / mAP Chart</h3>
+                    <div class="chart-area">
+                        <canvas id="chart-canvas" class="chart-canvas"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <h3 style="margin-top:16px">Training Log</h3>
+            <div class="log-box" id="train-log">Waiting for output...</div>
+        </div>
+    </div>
+
+    <!-- ==================== MODELS TAB ==================== -->
+    <div class="tab-content" id="tab-models">
+        <div class="card">
+            <h2>Trained Models
+                <button class="btn sm" onclick="loadModels()">Refresh</button>
+            </h2>
+            <div id="models-list">
+                <div class="empty-state">Loading...</div>
+            </div>
+        </div>
+
+        <!-- Model Detail -->
+        <div class="card" id="model-detail" style="display:none">
+            <h2 id="md-title">Model Detail</h2>
+            <div class="grid-2">
+                <div>
+                    <div class="info-row"><span>Total Epochs</span><span class="val" id="md-epochs">--</span></div>
+                    <div class="info-row"><span>Model Size</span><span class="val" id="md-size">--</span></div>
+                    <div class="info-row"><span>Image Size</span><span class="val" id="md-imgsz">--</span></div>
+                    <div class="info-row"><span>Batch Size</span><span class="val" id="md-batch">--</span></div>
+                </div>
+                <div>
+                    <h3>Loss / mAP Chart</h3>
+                    <div class="chart-area">
+                        <canvas id="detail-chart-canvas" class="chart-canvas"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== OBJECT DETECTION TAB ==================== -->
+    <div class="tab-content" id="tab-detect">
+        <div class="grid-2">
+            <!-- Controls -->
+            <div class="card">
+                <h2>R1 Camera Capture</h2>
+                <div class="form-group">
+                    <label>Robot</label>
+                    <select id="detect-robot">
+                        <option value="R1" selected>R1 (192.168.1.82)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Model</label>
+                    <select id="detect-model" style="width:100%">
+                        <option value="yolov8n.pt">yolov8n.pt (Default 80 classes)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Confidence Threshold</label>
+                    <input type="range" id="detect-conf" min="0.1" max="0.9" step="0.05" value="0.25"
+                           oninput="document.getElementById('conf-val').textContent=this.value" style="width:100%">
+                    <span style="color:#4ecca3;font-size:12px;">Threshold: <span id="conf-val">0.25</span></span>
+                </div>
+                <!-- Combined Mode -->
+                <div style="margin-top:10px;padding:10px;background:#0f346033;border-radius:6px;border:1px solid #0f3460;">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+                        <input type="checkbox" id="detect-combined" onchange="toggleCombinedMode()" style="width:16px;height:16px;accent-color:#4ecca3;">
+                        <span style="color:#4ecca3;font-weight:600;">Combined Mode</span>
+                        <span style="color:#666;font-size:11px;">— Base (80 classes) + Custom models</span>
+                    </label>
+                    <div id="combined-models-list" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid #0f346066;">
+                        <p style="font-size:11px;color:#888;margin-bottom:6px;">Select custom models to run alongside base yolov8n.pt:</p>
+                        <div id="combined-checkboxes" style="max-height:120px;overflow-y:auto;"></div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:10px;margin-top:12px;">
+                    <button class="btn primary" onclick="captureAndDetect()" id="btn-capture">Capture & Detect</button>
+                    <button class="btn" onclick="uploadAndDetect()">Upload Image</button>
+                    <input type="file" id="upload-detect-file" accept="image/*" style="display:none" onchange="handleUploadDetect()">
+                </div>
+                <div id="detect-status" style="margin-top:10px;font-size:12px;color:#888;"></div>
+
+                <!-- Save to Dataset -->
+                <div style="margin-top:16px;padding-top:14px;border-top:1px solid #0f3460;">
+                    <h3>Save for Training</h3>
+                    <p style="font-size:11px;color:#666;margin-bottom:8px;">Capture images and save to a dataset folder for labeling</p>
+                    <div class="form-group">
+                        <label>Dataset Name</label>
+                        <input type="text" id="save-dataset-name" value="red_pepper" placeholder="e.g., red_pepper" style="width:100%">
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn green sm" onclick="saveCurrentImage()" id="btn-save-img">Save Current Image</button>
+                        <button class="btn sm" onclick="batchCapture()" id="btn-batch">Batch Capture (10)</button>
+                    </div>
+                    <div id="save-status" style="margin-top:8px;font-size:12px;color:#888;"></div>
+                </div>
+
+                <!-- Robot Status -->
+                <div style="margin-top:16px;padding-top:14px;border-top:1px solid #0f3460;">
+                    <h3>Robot Status</h3>
+                    <div id="robot-status" style="margin-top:8px;">
+                        <div class="info-row"><span>R1</span><span class="val" id="r1-status">Checking...</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detection Result -->
+            <div class="card">
+                <h2>Detection Result</h2>
+                <div id="detect-result" style="text-align:center;">
+                    <div class="empty-state">
+                        <div class="icon">📷</div>
+                        Click "Capture & Detect" to capture from R1 and run YOLO detection
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Annotated Image (full width) -->
+        <div class="card" id="detect-image-card" style="display:none;">
+            <h2>Annotated Image <span id="detect-summary" style="font-size:13px;color:#4ecca3;margin-left:10px;"></span></h2>
+            <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:300px;">
+                    <h3>YOLO Detection</h3>
+                    <img id="detect-annotated" style="width:100%;border-radius:8px;border:1px solid #0f3460;" />
+                </div>
+                <div style="flex:1;min-width:300px;">
+                    <h3>Original</h3>
+                    <img id="detect-original" style="width:100%;border-radius:8px;border:1px solid #0f3460;" />
+                </div>
+            </div>
+            <div style="margin-top:12px;">
+                <h3>Detected Objects</h3>
+                <table class="ds-table" id="detect-table">
+                    <thead><tr><th>#</th><th>Class</th><th>Confidence</th><th>Bounding Box</th></tr></thead>
+                    <tbody id="detect-objects"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Detection History -->
+        <div class="card">
+            <h2>Detection History
+                <button class="btn sm" onclick="loadDetectionHistory()">Refresh</button>
+            </h2>
+            <div id="detect-history">
+                <div class="empty-state">No detections yet</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== UNSUPERVISED LEARNING TAB ==================== -->
+    <div class="tab-content" id="tab-unsupervised">
+        <div class="grid-2">
+            <!-- Left: Controls -->
+            <div class="card">
+                <h2>Unsupervised Learning</h2>
+                <p style="color:#888;font-size:12px;margin-bottom:14px;">No labels needed — discover patterns, cluster images, or detect anomalies.</p>
+
+                <!-- Task Type -->
+                <div class="form-group">
+                    <label>Task</label>
+                    <select id="unsup-task" onchange="onUnsupTaskChange()" style="width:100%">
+                        <option value="cluster">Image Clustering (K-Means)</option>
+                        <option value="anomaly">Anomaly Detection (Autoencoder)</option>
+                        <option value="similarity">Similar Image Search</option>
+                    </select>
+                </div>
+
+                <!-- Data Source -->
+                <div class="form-group">
+                    <label>Image Source</label>
+                    <select id="unsup-source" onchange="onUnsupSourceChange()" style="width:100%">
+                        <option value="dataset">From Dataset</option>
+                        <option value="folder">From Folder Path</option>
+                        <option value="capture">Capture from R1</option>
+                    </select>
+                </div>
+
+                <!-- Dataset selector (shown when source=dataset) -->
+                <div class="form-group" id="unsup-ds-group">
+                    <label>Dataset</label>
+                    <select id="unsup-dataset" style="width:100%">
+                        <option value="">-- Select --</option>
+                    </select>
+                </div>
+
+                <!-- Folder path (shown when source=folder) -->
+                <div class="form-group" id="unsup-folder-group" style="display:none;">
+                    <label>Folder Path (on Dreamer)</label>
+                    <input type="text" id="unsup-folder" placeholder="C:\path\to\images" style="width:100%">
+                </div>
+
+                <!-- Clustering options -->
+                <div id="unsup-cluster-opts">
+                    <div class="form-group">
+                        <label>Number of Clusters (K)</label>
+                        <input type="number" id="unsup-k" value="3" min="2" max="20" style="width:100px;">
+                    </div>
+                    <div class="form-group">
+                        <label>Feature Extractor</label>
+                        <select id="unsup-backbone" style="width:100%">
+                            <option value="yolov8n.pt">YOLOv8n (fast)</option>
+                            <option value="yolov8s.pt">YOLOv8s (balanced)</option>
+                            <option value="yolov8n-cls.pt">YOLOv8n-cls (classification features)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Visualization</label>
+                        <select id="unsup-viz" style="width:100%">
+                            <option value="tsne">t-SNE (2D plot)</option>
+                            <option value="pca">PCA (2D plot)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Anomaly options -->
+                <div id="unsup-anomaly-opts" style="display:none;">
+                    <div class="form-group">
+                        <label>Training Epochs</label>
+                        <input type="number" id="unsup-anomaly-epochs" value="50" min="10" max="500" style="width:100px;">
+                    </div>
+                    <div class="form-group">
+                        <label>Threshold (auto if 0)</label>
+                        <input type="number" id="unsup-anomaly-threshold" value="0" min="0" max="1" step="0.01" style="width:100px;">
+                    </div>
+                    <p style="color:#666;font-size:11px;">Train on "normal" images. New images with high reconstruction error are anomalies.</p>
+                </div>
+
+                <!-- Similarity options -->
+                <div id="unsup-similarity-opts" style="display:none;">
+                    <div class="form-group">
+                        <label>Query Image</label>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn sm" onclick="document.getElementById('unsup-query-file').click()">Upload Image</button>
+                            <button class="btn sm" onclick="captureForSimilarity()">Capture from R1</button>
+                        </div>
+                        <input type="file" id="unsup-query-file" accept="image/*" style="display:none" onchange="previewQueryImage()">
+                    </div>
+                    <div id="unsup-query-preview" style="display:none;margin-top:8px;">
+                        <img id="unsup-query-img" style="max-width:200px;border-radius:6px;border:1px solid #0f3460;">
+                    </div>
+                    <div class="form-group">
+                        <label>Top N Results</label>
+                        <input type="number" id="unsup-topn" value="5" min="1" max="20" style="width:100px;">
+                    </div>
+                </div>
+
+                <div style="margin-top:16px;">
+                    <button class="btn primary" onclick="runUnsupervised()" id="btn-unsup-run">Run Analysis</button>
+                    <span id="unsup-status" style="margin-left:10px;font-size:12px;color:#888;"></span>
+                </div>
+            </div>
+
+            <!-- Right: Info -->
+            <div class="card">
+                <h2>About Unsupervised Learning</h2>
+                <div style="font-size:12px;color:#aaa;line-height:1.7;">
+                    <div style="margin-bottom:14px;">
+                        <span style="color:#4ecca3;font-weight:bold;">Image Clustering</span><br>
+                        Groups similar images together without labels. Uses YOLO backbone to extract visual features,
+                        then K-Means to find clusters. Useful for organizing datasets, discovering object categories,
+                        or finding duplicate/similar images.
+                    </div>
+                    <div style="margin-bottom:14px;">
+                        <span style="color:#e94560;font-weight:bold;">Anomaly Detection</span><br>
+                        Trains an autoencoder on "normal" images. Images that can't be reconstructed well
+                        are flagged as anomalies. Useful for quality control, defect detection,
+                        or finding unusual objects in a scene.
+                    </div>
+                    <div>
+                        <span style="color:#ffa500;font-weight:bold;">Similar Image Search</span><br>
+                        Upload or capture a query image, and find the most similar images in a dataset.
+                        Uses cosine similarity on YOLO feature vectors.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Area -->
+        <div class="card" id="unsup-results" style="display:none;">
+            <h2 id="unsup-results-title">Results</h2>
+            <div id="unsup-results-content"></div>
+        </div>
+
+        <!-- Visualization -->
+        <div class="card" id="unsup-viz-card" style="display:none;">
+            <h2>Visualization</h2>
+            <div style="text-align:center;">
+                <img id="unsup-viz-img" style="max-width:100%;border-radius:8px;">
+            </div>
+        </div>
+
+        <!-- Cluster Gallery -->
+        <div id="unsup-clusters-container"></div>
+    </div>
+
+    <!-- Create Dataset Modal -->
+    <div class="modal-overlay" id="modal-create-ds">
+        <div class="modal">
+            <h2>Create New Detection Dataset</h2>
+            <div class="form-group">
+                <label>Dataset Name</label>
+                <input type="text" id="new-ds-name" placeholder="e.g., indoor_objects_v1" style="width:100%">
+            </div>
+            <div class="form-group">
+                <label>Classes (comma-separated)</label>
+                <input type="text" id="new-ds-classes" placeholder="e.g., person, chair, cup, obstacle" style="width:100%">
+            </div>
+            <div class="modal-actions">
+                <button class="btn" onclick="hideCreateDataset()">Cancel</button>
+                <button class="btn primary" onclick="createDataset()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Classification Modal -->
+    <div class="modal-overlay" id="modal-import-cls">
+        <div class="modal" style="min-width:500px;">
+            <h2>Import Classification Folder</h2>
+            <p style="color:#888;font-size:12px;margin-bottom:14px;">
+                Select a folder where subfolders = class names, each containing images.<br>
+                Example: <code style="color:#4ecca3;">DLearnTest/A/*.jpg, DLearnTest/B/*.jpg, DLearnTest/C/*.jpg</code>
+            </p>
+            <div class="form-group">
+                <label>Source Folder Path (on Dreamer)</label>
+                <div class="form-inline">
+                    <input type="text" id="import-source" placeholder="e.g., C:\Users\Dream\My Drive\AJ_Robotics\GoodSonbotData\DLearnTest" style="flex:1">
+                    <button class="btn sm" onclick="scanFolder()">Scan</button>
+                </div>
+            </div>
+            <div id="scan-result" style="display:none;margin-bottom:14px;">
+                <div style="background:#0a1929;border:1px solid #0f3460;border-radius:8px;padding:12px;">
+                    <div style="color:#4ecca3;font-weight:bold;margin-bottom:8px;" id="scan-summary"></div>
+                    <div id="scan-classes" style="font-size:12px;"></div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Dataset Name</label>
+                <input type="text" id="import-name" placeholder="e.g., DLearnTest_v1" style="width:100%">
+            </div>
+            <div class="form-inline">
+                <div class="form-group" style="flex:1">
+                    <label>Train/Val Split Ratio</label>
+                    <select id="import-split">
+                        <option value="0.8" selected>80% Train / 20% Val</option>
+                        <option value="0.7">70% Train / 30% Val</option>
+                        <option value="0.9">90% Train / 10% Val</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" onclick="hideImportClassification()">Cancel</button>
+                <button class="btn primary" onclick="importClassification()" id="btn-import">Import</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <div class="footer">AJ Robotics &copy; 2026 | YOLO Training on Dreamer (RTX 4070)</div>
+
+<script>
+    const API = '/api/proxy/training';
+    let _currentDataset = null;
+    let _trainingPollTimer = null;
+
+    // ── Clock ──
+    function updateClock() {
+        document.getElementById('clock').textContent = new Date().toLocaleString('en-US', {
+            year: 'numeric', month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+        });
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // ── Toast ──
+    function showToast(msg, isError) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = 'toast show' + (isError ? ' error' : '');
+        setTimeout(() => t.className = 'toast', 3000);
+    }
+
+    // ── Tabs ──
+    function switchTab(name) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.querySelector(`.tab-content#tab-${name}`).classList.add('active');
+        event.target.classList.add('active');
+
+        if (name === 'datasets') loadDatasets();
+        if (name === 'training') { loadDatasetsForSelect(); refreshTrainingStatus(); }
+        if (name === 'models') loadModels();
+        if (name === 'detect') { checkRobotStatus(); loadDetectionHistory(); loadAvailableModels(); }
+        if (name === 'unsupervised') { loadUnsupDatasets(); }
+    }
+
+    // ── Helpers ──
+    function setText(id, text) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    }
+
+    function apiCall(path, opts) {
+        return fetch(API + path, opts).then(r => r.json());
+    }
+
+    // ============================================================
+    //  DATASETS
+    // ============================================================
+
+    function loadDatasets() {
+        apiCall('/datasets')
+            .then(data => {
+                const tbody = document.getElementById('datasets-body');
+                if (!data.datasets || data.datasets.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><div class="icon">📁</div>No datasets yet. Create a detection dataset or import a classification folder.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.datasets.map(ds => {
+                    const classTags = (ds.classes || []).map(c => `<span class="class-tag">${c}</span>`).join('');
+                    const typeBadge = ds.type === 'classification'
+                        ? '<span style="background:#4ecca322;color:#4ecca3;padding:2px 6px;border-radius:8px;font-size:10px;">CLS</span>'
+                        : '<span style="background:#e9456022;color:#e94560;padding:2px 6px;border-radius:8px;font-size:10px;">DET</span>';
+                    return `<tr>
+                        <td class="name" onclick="loadDatasetDetail('${ds.name}')">${ds.name}</td>
+                        <td>${typeBadge}</td>
+                        <td>${classTags || '<span style="color:#555">none</span>'}</td>
+                        <td>${ds.stats.train.images}</td>
+                        <td>${ds.stats.val.images}</td>
+                        <td style="color:#666">${ds.modified}</td>
+                        <td><button class="btn danger sm" onclick="deleteDataset('${ds.name}')">Delete</button></td>
+                    </tr>`;
+                }).join('');
+            })
+            .catch(() => showToast('Cannot connect to Training Service on Dreamer', true));
+    }
+
+    function loadDatasetDetail(name) {
+        _currentDataset = name;
+        apiCall('/datasets/' + name)
+            .then(data => {
+                if (!data.ok) return;
+                document.getElementById('dataset-detail').style.display = 'block';
+                setText('ds-detail-title', 'Dataset: ' + name);
+                setText('ds-path', data.path || '--');
+                setText('ds-train-imgs', data.stats.train.images);
+                setText('ds-train-lbls', data.stats.train.labels);
+                setText('ds-val-imgs', data.stats.val.images);
+                setText('ds-val-lbls', data.stats.val.labels);
+
+                const classesDiv = document.getElementById('ds-classes-list');
+                if (data.classes && data.classes.length > 0) {
+                    classesDiv.innerHTML = data.classes.map(c =>
+                        `<span class="class-tag" style="font-size:13px;padding:4px 10px;margin:2px;">${c} <span style="cursor:pointer;color:#e94560;margin-left:4px;" onclick="removeClassFromDataset('${name}','${c}')">&times;</span></span>`
+                    ).join('');
+                } else {
+                    classesDiv.innerHTML = '<span style="color:#555">No classes defined</span>';
+                }
+            });
+    }
+
+    function addClassToDataset() {
+        if (!_currentDataset) return;
+        const input = document.getElementById('ds-new-class');
+        const newClass = input.value.trim();
+        if (!newClass) return;
+
+        apiCall('/datasets/' + _currentDataset)
+            .then(data => {
+                const classes = [...(data.classes || []), newClass];
+                return apiCall('/datasets/' + _currentDataset + '/classes', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({classes})
+                });
+            })
+            .then(() => {
+                input.value = '';
+                loadDatasetDetail(_currentDataset);
+                showToast(`Class "${newClass}" added`);
+            });
+    }
+
+    function removeClassFromDataset(dsName, className) {
+        apiCall('/datasets/' + dsName)
+            .then(data => {
+                const classes = (data.classes || []).filter(c => c !== className);
+                return apiCall('/datasets/' + dsName + '/classes', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({classes})
+                });
+            })
+            .then(() => {
+                loadDatasetDetail(dsName);
+                showToast(`Class "${className}" removed`);
+            });
+    }
+
+    function uploadImages() {
+        if (!_currentDataset) return;
+        const files = document.getElementById('upload-files').files;
+        if (files.length === 0) { showToast('Select files first', true); return; }
+
+        const split = document.getElementById('upload-split').value;
+        const formData = new FormData();
+        formData.append('split', split);
+        for (let f of files) formData.append('file_' + f.name, f);
+
+        fetch(API + '/datasets/' + _currentDataset + '/upload', {
+            method: 'POST', body: formData
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                showToast(`${data.saved} images uploaded to ${split}`);
+                loadDatasetDetail(_currentDataset);
+                document.getElementById('upload-files').value = '';
+            } else {
+                showToast(data.error || 'Upload failed', true);
+            }
+        });
+    }
+
+    function showCreateDataset() {
+        document.getElementById('modal-create-ds').classList.add('show');
+        document.getElementById('new-ds-name').focus();
+    }
+    function hideCreateDataset() {
+        document.getElementById('modal-create-ds').classList.remove('show');
+    }
+
+    function createDataset() {
+        const name = document.getElementById('new-ds-name').value.trim();
+        const classesStr = document.getElementById('new-ds-classes').value.trim();
+        if (!name) { showToast('Enter a dataset name', true); return; }
+
+        const classes = classesStr ? classesStr.split(',').map(c => c.trim()).filter(c => c) : [];
+
+        apiCall('/datasets', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, classes})
+        })
+        .then(data => {
+            if (data.ok) {
+                hideCreateDataset();
+                showToast(`Dataset "${name}" created`);
+                document.getElementById('new-ds-name').value = '';
+                document.getElementById('new-ds-classes').value = '';
+                loadDatasets();
+            } else {
+                showToast(data.error, true);
+            }
+        });
+    }
+
+    function deleteDataset(name) {
+        if (!confirm('Delete dataset "' + name + '"? This cannot be undone.')) return;
+        apiCall('/datasets/' + name + '/delete', {method: 'POST'})
+            .then(data => {
+                if (data.ok) {
+                    showToast('Dataset "' + name + '" deleted');
+                    document.getElementById('dataset-detail').style.display = 'none';
+                    loadDatasets();
+                }
+            });
+    }
+
+    // ============================================================
+    //  TRAINING
+    // ============================================================
+
+    let _datasetsCache = [];
+    function loadDatasetsForSelect() {
+        apiCall('/datasets')
+            .then(data => {
+                _datasetsCache = data.datasets || [];
+                const sel = document.getElementById('train-dataset');
+                const current = sel.value;
+                sel.innerHTML = '<option value="">-- Select Dataset --</option>';
+                _datasetsCache.forEach(ds => {
+                    const typeLabel = ds.type === 'classification' ? 'CLS' : 'DET';
+                    sel.innerHTML += `<option value="${ds.name}" data-type="${ds.type || 'detection'}">[${typeLabel}] ${ds.name} (${ds.total_images} imgs, ${ds.num_classes} classes)</option>`;
+                });
+                if (current) sel.value = current;
+            })
+            .catch(() => {});
+    }
+
+    // Auto-select appropriate model when dataset changes
+    document.addEventListener('DOMContentLoaded', () => {
+        const dsSel = document.getElementById('train-dataset');
+        if (dsSel) dsSel.addEventListener('change', () => {
+            const opt = dsSel.selectedOptions[0];
+            const dsType = opt ? opt.getAttribute('data-type') : '';
+            const modelSel = document.getElementById('train-model');
+            const badge = document.getElementById('train-type-badge');
+            if (dsType === 'classification') {
+                modelSel.value = 'yolov8n-cls.pt';
+                badge.textContent = 'Classification';
+                badge.style.background = '#4ecca322';
+                badge.style.color = '#4ecca3';
+            } else if (dsType === 'detection') {
+                modelSel.value = 'yolov8n.pt';
+                badge.textContent = 'Detection';
+                badge.style.background = '#e9456022';
+                badge.style.color = '#e94560';
+            } else {
+                badge.textContent = 'auto-detect';
+                badge.style.background = '#0f3460';
+                badge.style.color = '#888';
+            }
+        });
+    });
+
+    function startTraining() {
+        const dataset = document.getElementById('train-dataset').value;
+        if (!dataset) { showToast('Select a dataset first', true); return; }
+
+        const model = document.getElementById('train-model').value;
+        const epochs = parseInt(document.getElementById('train-epochs').value) || 100;
+        const batch = parseInt(document.getElementById('train-batch').value) || 16;
+        const imgsz = parseInt(document.getElementById('train-imgsz').value) || 640;
+
+        if (!confirm(`Start training?\n\nDataset: ${dataset}\nModel: ${model}\nEpochs: ${epochs}\nBatch: ${batch}`)) return;
+
+        document.getElementById('btn-start').disabled = true;
+
+        apiCall('/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({dataset, model, epochs, batch, imgsz})
+        })
+        .then(data => {
+            if (data.ok) {
+                showToast('Training started!');
+                startPolling();
+                refreshTrainingStatus();
+            } else {
+                showToast(data.error || 'Failed to start', true);
+                document.getElementById('btn-start').disabled = false;
+            }
+        })
+        .catch(err => {
+            showToast('Error: ' + err, true);
+            document.getElementById('btn-start').disabled = false;
+        });
+    }
+
+    function stopTraining() {
+        if (!confirm('Stop training?')) return;
+        apiCall('/stop', {method: 'POST'})
+            .then(data => {
+                showToast(data.message || 'Stopped');
+                refreshTrainingStatus();
+            });
+    }
+
+    function refreshTrainingStatus() {
+        apiCall('/status')
+            .then(data => {
+                // Service badge
+                const badge = document.getElementById('service-badge');
+                if (data.active) {
+                    badge.textContent = 'TRAINING';
+                    badge.className = 'badge running';
+                } else {
+                    badge.textContent = 'IDLE';
+                    badge.className = 'badge idle';
+                }
+
+                setText('svc-status', data.ok ? 'Connected' : 'Offline');
+
+                // GPU info
+                if (data.gpu) {
+                    setText('gpu-name', data.gpu.name);
+                    setText('gpu-util', data.gpu.utilization);
+                    setText('gpu-mem', `${data.gpu.memory_used} / ${data.gpu.memory_total}`);
+                }
+
+                // Training progress
+                const card = document.getElementById('progress-card');
+                const btnStart = document.getElementById('btn-start');
+                const btnStop = document.getElementById('btn-stop');
+
+                if (data.active) {
+                    card.style.display = 'block';
+                    btnStart.disabled = true;
+                    btnStop.disabled = false;
+
+                    setText('prog-dataset', data.dataset || '--');
+                    setText('prog-model', data.model || '--');
+                    setText('prog-started', data.started_at || '--');
+
+                    if (data.progress && data.progress.percent !== undefined) {
+                        const pct = data.progress.percent;
+                        document.getElementById('prog-fill').style.width = pct + '%';
+                        setText('prog-text', `${data.progress.current_epoch}/${data.progress.total_epochs} (${pct}%)`);
+
+                        const m = data.progress.metrics || {};
+                        setText('m-epoch', `${data.progress.current_epoch} / ${data.progress.total_epochs}`);
+
+                        const isClassification = data.task_type === 'classification';
+                        if (isClassification) {
+                            setText('m-box-loss', m.train_loss != null ? 'Train: ' + parseFloat(m.train_loss).toFixed(4) : '--');
+                            setText('m-cls-loss', m.val_loss != null ? 'Val: ' + parseFloat(m.val_loss).toFixed(4) : '--');
+                            setText('m-map50', m.top1_acc != null ? (parseFloat(m.top1_acc) * 100).toFixed(1) + '%' : '--');
+                            setText('m-map50-95', m.top5_acc != null ? (parseFloat(m.top5_acc) * 100).toFixed(1) + '%' : '--');
+                            setText('m-precision', '--');
+                            setText('m-recall', '--');
+                            // Update labels
+                            updateMetricLabels(true);
+                        } else {
+                            setText('m-box-loss', m.box_loss != null ? parseFloat(m.box_loss).toFixed(4) : '--');
+                            setText('m-cls-loss', m.cls_loss != null ? parseFloat(m.cls_loss).toFixed(4) : '--');
+                            setText('m-map50', m.mAP50 != null ? parseFloat(m.mAP50).toFixed(4) : '--');
+                            setText('m-map50-95', m.mAP50_95 != null ? parseFloat(m.mAP50_95).toFixed(4) : '--');
+                            setText('m-precision', m.precision != null ? parseFloat(m.precision).toFixed(4) : '--');
+                            setText('m-recall', m.recall != null ? parseFloat(m.recall).toFixed(4) : '--');
+                            updateMetricLabels(false);
+                        }
+
+                        // Draw chart
+                        if (data.progress.history) {
+                            drawChart('chart-canvas', data.progress.history, isClassification);
+                        }
+                    }
+
+                    // Log
+                    if (data.log) {
+                        const logBox = document.getElementById('train-log');
+                        logBox.textContent = data.log.join('\n');
+                        logBox.scrollTop = logBox.scrollHeight;
+                    }
+
+                    startPolling();
+                } else {
+                    btnStart.disabled = false;
+                    btnStop.disabled = true;
+                    stopPolling();
+
+                    // Show last result if there was a run
+                    if (data.run_name && data.progress && data.progress.current_epoch > 0) {
+                        card.style.display = 'block';
+                        document.getElementById('train-badge').textContent = 'COMPLETE';
+                        document.getElementById('train-badge').className = 'badge idle';
+                    }
+                }
+            })
+            .catch(() => {
+                document.getElementById('service-badge').textContent = 'OFFLINE';
+                document.getElementById('service-badge').className = 'badge stopped';
+                setText('svc-status', 'Cannot reach Dreamer:5002');
+            });
+    }
+
+    function startPolling() {
+        if (_trainingPollTimer) return;
+        _trainingPollTimer = setInterval(refreshTrainingStatus, 3000);
+    }
+    function stopPolling() {
+        if (_trainingPollTimer) {
+            clearInterval(_trainingPollTimer);
+            _trainingPollTimer = null;
+        }
+    }
+
+    // ============================================================
+    //  MODELS
+    // ============================================================
+
+    function loadModels() {
+        apiCall('/models')
+            .then(data => {
+                const container = document.getElementById('models-list');
+                if (!data.models || data.models.length === 0) {
+                    container.innerHTML = '<div class="empty-state"><div class="icon">🤖</div>No trained models yet. Train a model in the Training tab.</div>';
+                    return;
+                }
+                container.innerHTML = data.models.map(m => {
+                    const bm = m.best_metrics || {};
+                    let metricsHtml;
+                    if (bm.top1_acc !== undefined) {
+                        // Classification model
+                        metricsHtml = `
+                        <div class="metrics">
+                            <div class="metric"><div class="value">${(parseFloat(bm.top1_acc) * 100).toFixed(1)}%</div><div class="label">Top-1 Acc</div></div>
+                            <div class="metric"><div class="value">${(parseFloat(bm.top5_acc || 0) * 100).toFixed(1)}%</div><div class="label">Top-5 Acc</div></div>
+                        </div>`;
+                    } else if (bm.mAP50 !== undefined) {
+                        // Detection model
+                        metricsHtml = `
+                        <div class="metrics">
+                            <div class="metric"><div class="value">${(bm.mAP50 * 100).toFixed(1)}%</div><div class="label">mAP50</div></div>
+                            <div class="metric"><div class="value">${(bm.mAP50_95 * 100).toFixed(1)}%</div><div class="label">mAP50-95</div></div>
+                            <div class="metric"><div class="value">${(bm.precision * 100).toFixed(1)}%</div><div class="label">Precision</div></div>
+                            <div class="metric"><div class="value">${(bm.recall * 100).toFixed(1)}%</div><div class="label">Recall</div></div>
+                        </div>`;
+                    } else {
+                        metricsHtml = '<div style="color:#555;font-size:12px;margin:8px 0;">No metrics available (training may still be in progress)</div>';
+                    }
+
+                    return `<div class="model-card">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <div class="model-name" style="cursor:pointer" onclick="loadModelDetail('${m.name}')">${m.name}</div>
+                            <div>
+                                ${m.has_best ? '<span class="badge running">best.pt</span>' : ''}
+                                <button class="btn danger sm" onclick="deleteModel('${m.name}')" style="margin-left:8px;">Delete</button>
+                            </div>
+                        </div>
+                        ${metricsHtml}
+                        <div class="meta">Epochs: ${m.total_epochs} | Size: ${m.model_size} | ${m.modified}</div>
+                    </div>`;
+                }).join('');
+            })
+            .catch(() => showToast('Cannot connect to Training Service', true));
+    }
+
+    function loadModelDetail(name) {
+        apiCall('/models/' + name)
+            .then(data => {
+                if (!data.ok) return;
+                const card = document.getElementById('model-detail');
+                card.style.display = 'block';
+                setText('md-title', 'Model: ' + name);
+                setText('md-epochs', data.total_epochs);
+                setText('md-size', data.model_size);
+                setText('md-imgsz', data.args.imgsz || '--');
+                setText('md-batch', data.args.batch || '--');
+
+                if (data.chart_data && data.chart_data.length > 0) {
+                    drawChart('detail-chart-canvas', data.chart_data);
+                }
+
+                card.scrollIntoView({behavior: 'smooth'});
+            });
+    }
+
+    function deleteModel(name) {
+        if (!confirm(`Delete model "${name}"? This cannot be undone.`)) return;
+        apiCall('/models/' + name + '/delete', {method: 'POST'})
+            .then(data => {
+                if (data.ok) {
+                    showToast(`Model "${name}" deleted`);
+                    document.getElementById('model-detail').style.display = 'none';
+                    loadModels();
+                }
+            });
+    }
+
+    // ============================================================
+    //  Import Classification
+    // ============================================================
+
+    function showImportClassification() {
+        document.getElementById('modal-import-cls').classList.add('show');
+        document.getElementById('import-source').focus();
+        document.getElementById('scan-result').style.display = 'none';
+    }
+    function hideImportClassification() {
+        document.getElementById('modal-import-cls').classList.remove('show');
+    }
+
+    function scanFolder() {
+        const path = document.getElementById('import-source').value.trim();
+        if (!path) { showToast('Enter a folder path', true); return; }
+
+        apiCall('/scan-folder', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path})
+        })
+        .then(data => {
+            const resultDiv = document.getElementById('scan-result');
+            if (!data.ok) {
+                resultDiv.style.display = 'block';
+                document.getElementById('scan-summary').innerHTML = '<span style="color:#e94560;">' + (data.error || 'Error') + '</span>';
+                document.getElementById('scan-classes').innerHTML = '';
+                return;
+            }
+            resultDiv.style.display = 'block';
+            document.getElementById('scan-summary').textContent =
+                `Found ${data.classes.length} classes, ${data.total_images} total images`;
+            document.getElementById('scan-classes').innerHTML = data.classes.map(c =>
+                `<span class="class-tag" style="font-size:12px;padding:3px 10px;margin:2px;">${c.name}: ${c.count} images</span>`
+            ).join('');
+
+            // Auto-fill name if empty
+            const nameInput = document.getElementById('import-name');
+            if (!nameInput.value) {
+                const parts = path.replace(/\\/g, '/').split('/');
+                nameInput.value = parts[parts.length - 1] || 'imported_dataset';
+            }
+        })
+        .catch(err => showToast('Error: ' + err, true));
+    }
+
+    function importClassification() {
+        const source = document.getElementById('import-source').value.trim();
+        const name = document.getElementById('import-name').value.trim();
+        const splitRatio = document.getElementById('import-split').value;
+
+        if (!source) { showToast('Enter source folder path', true); return; }
+        if (!name) { showToast('Enter dataset name', true); return; }
+
+        document.getElementById('btn-import').disabled = true;
+        document.getElementById('btn-import').textContent = 'Importing...';
+
+        apiCall('/import-classification', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({source, name, split_ratio: parseFloat(splitRatio)})
+        })
+        .then(data => {
+            document.getElementById('btn-import').disabled = false;
+            document.getElementById('btn-import').textContent = 'Import';
+            if (data.ok) {
+                hideImportClassification();
+                showToast(data.message);
+                loadDatasets();
+            } else {
+                showToast(data.error || 'Import failed', true);
+            }
+        })
+        .catch(err => {
+            document.getElementById('btn-import').disabled = false;
+            document.getElementById('btn-import').textContent = 'Import';
+            showToast('Error: ' + err, true);
+        });
+    }
+
+    // ============================================================
+    //  Metric Label Updates
+    // ============================================================
+
+    function updateMetricLabels(isClassification) {
+        const labels = document.querySelectorAll('#progress-card .info-row span:first-child');
+        const labelMap = isClassification
+            ? {'Box Loss': 'Train Loss', 'Class Loss': 'Val Loss', 'mAP50': 'Top-1 Accuracy', 'mAP50-95': 'Top-5 Accuracy', 'Precision': 'Precision', 'Recall': 'Recall'}
+            : {'Train Loss': 'Box Loss', 'Val Loss': 'Class Loss', 'Top-1 Accuracy': 'mAP50', 'Top-5 Accuracy': 'mAP50-95'};
+        labels.forEach(l => {
+            if (labelMap[l.textContent]) l.textContent = labelMap[l.textContent];
+        });
+    }
+
+    // ============================================================
+    //  Simple Canvas Chart (no external library)
+    // ============================================================
+
+    function drawChart(canvasId, history, isClassification) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.parentElement.clientWidth - 32;
+        const H = 150;
+        canvas.width = W;
+        canvas.height = H;
+
+        ctx.clearRect(0, 0, W, H);
+
+        if (!history || history.length < 2) {
+            ctx.fillStyle = '#555';
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Waiting for data...', W / 2, H / 2);
+            return;
+        }
+
+        const pad = {top: 10, right: 60, bottom: 25, left: 10};
+        const chartW = W - pad.left - pad.right;
+        const chartH = H - pad.top - pad.bottom;
+
+        // Extract series - support both detection and classification
+        const losses = history.map(h => h.box_loss != null ? h.box_loss : h.train_loss).filter(v => v != null);
+        const maps = history.map(h => h.mAP50 != null ? h.mAP50 : h.top1_acc).filter(v => v != null);
+
+        function drawLine(values, color, maxVal) {
+            if (values.length < 2) return;
+            const max = maxVal || Math.max(...values) * 1.1 || 1;
+            ctx.beginPath();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            for (let i = 0; i < values.length; i++) {
+                const x = pad.left + (i / (values.length - 1)) * chartW;
+                const y = pad.top + chartH - (values[i] / max) * chartH;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Last value label
+            const lastVal = values[values.length - 1];
+            const lastX = pad.left + chartW;
+            const lastY = pad.top + chartH - (lastVal / max) * chartH;
+            ctx.fillStyle = color;
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(lastVal.toFixed(4), lastX + 4, lastY + 4);
+        }
+
+        // Axis lines
+        ctx.strokeStyle = '#0f3460';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + chartH);
+        ctx.lineTo(pad.left + chartW, pad.top + chartH);
+        ctx.stroke();
+
+        // Draw loss (red, left scale)
+        if (losses.length >= 2) drawLine(losses, '#e94560');
+        // Draw mAP50 (green, 0-1 scale)
+        if (maps.length >= 2) drawLine(maps, '#4ecca3', 1.0);
+
+        // Legend
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = '#e94560';
+        ctx.textAlign = 'right';
+        ctx.fillText('Loss', pad.left + chartW, pad.top + chartH + 16);
+        ctx.fillStyle = '#4ecca3';
+        ctx.fillText(isClassification ? 'Top1 Acc' : 'mAP50', pad.left + chartW - 50, pad.top + chartH + 16);
+
+        // Epoch label
+        ctx.fillStyle = '#666';
+        ctx.textAlign = 'left';
+        ctx.fillText('Epoch 1', pad.left, pad.top + chartH + 16);
+    }
+
+    // ============================================================
+    //  Object Detection
+    // ============================================================
+
+    let _availableCustomModels = [];
+
+    function loadAvailableModels() {
+        apiCall('/available-models')
+            .then(data => {
+                const sel = document.getElementById('detect-model');
+                sel.innerHTML = '';
+                _availableCustomModels = [];
+                (data.models || []).forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.path;
+                    opt.textContent = m.name;
+                    sel.appendChild(opt);
+                    // Collect custom detection models (not base yolov8, not classification)
+                    if (!m.path.match(/^yolov8[nslmx]\.pt$/) && m.type !== 'classification') {
+                        _availableCustomModels.push(m);
+                    }
+                });
+                // Populate combined mode checkboxes
+                const cbDiv = document.getElementById('combined-checkboxes');
+                if (_availableCustomModels.length === 0) {
+                    cbDiv.innerHTML = '<span style="color:#666;font-size:11px;">No custom models available. Train a model first.</span>';
+                } else {
+                    cbDiv.innerHTML = _availableCustomModels.map(m => `
+                        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer;font-size:12px;">
+                            <input type="checkbox" class="combined-model-cb" value="${m.path}" checked style="width:14px;height:14px;accent-color:#00bcd4;">
+                            <span style="color:#eee;">${m.name}</span>
+                        </label>
+                    `).join('');
+                }
+            })
+            .catch(() => {});
+    }
+
+    function toggleCombinedMode() {
+        const checked = document.getElementById('detect-combined').checked;
+        document.getElementById('combined-models-list').style.display = checked ? 'block' : 'none';
+        // In combined mode, disable main model selector (will use base yolov8n.pt automatically)
+        const sel = document.getElementById('detect-model');
+        if (checked) {
+            sel.disabled = true;
+            sel.style.opacity = '0.5';
+        } else {
+            sel.disabled = false;
+            sel.style.opacity = '1';
+        }
+    }
+
+    function captureAndDetect() {
+        const robotId = document.getElementById('detect-robot').value;
+        const confidence = parseFloat(document.getElementById('detect-conf').value);
+        const modelPath = document.getElementById('detect-model').value;
+        const combined = document.getElementById('detect-combined').checked;
+        const btn = document.getElementById('btn-capture');
+        const status = document.getElementById('detect-status');
+
+        // Build request payload
+        const payload = {robot_id: robotId, confidence, model: modelPath};
+        if (combined) {
+            payload.combined = true;
+            // Gather selected custom models
+            const cbs = document.querySelectorAll('.combined-model-cb:checked');
+            payload.custom_models = Array.from(cbs).map(cb => cb.value);
+            payload.model = 'yolov8n.pt';  // Base model for combined mode
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Capturing...';
+        status.innerHTML = '<span style="color:#4ecca3;">Connecting to ' + robotId + (combined ? ' (Combined Mode)' : '') + '...</span>';
+
+        apiCall('/capture', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        })
+        .then(data => {
+            btn.disabled = false;
+            btn.textContent = 'Capture & Detect';
+
+            if (!data.ok) {
+                status.innerHTML = '<span style="color:#e94560;">Error: ' + (data.error || 'Unknown') + '</span>';
+                return;
+            }
+
+            status.innerHTML = '<span style="color:#4ecca3;">Detected ' + data.num_objects + ' objects in ' + data.processing_ms + 'ms</span>';
+            showDetectionResult(data);
+        })
+        .catch(err => {
+            btn.disabled = false;
+            btn.textContent = 'Capture & Detect';
+            status.innerHTML = '<span style="color:#e94560;">Error: ' + err + '</span>';
+        });
+    }
+
+    function uploadAndDetect() {
+        document.getElementById('upload-detect-file').click();
+    }
+
+    function handleUploadDetect() {
+        const fileInput = document.getElementById('upload-detect-file');
+        if (!fileInput.files.length) return;
+
+        const confidence = parseFloat(document.getElementById('detect-conf').value);
+        const status = document.getElementById('detect-status');
+        status.innerHTML = '<span style="color:#4ecca3;">Analyzing uploaded image...</span>';
+
+        const formData = new FormData();
+        formData.append('image', fileInput.files[0]);
+        formData.append('confidence', confidence);
+
+        fetch(API + '/analyze', {method: 'POST', body: formData})
+            .then(r => r.json())
+            .then(data => {
+                if (!data.ok) {
+                    status.innerHTML = '<span style="color:#e94560;">Error: ' + (data.error || 'Unknown') + '</span>';
+                    return;
+                }
+                status.innerHTML = '<span style="color:#4ecca3;">Detected ' + data.num_objects + ' objects in ' + data.processing_ms + 'ms</span>';
+                showDetectionResult(data);
+                fileInput.value = '';
+            })
+            .catch(err => {
+                status.innerHTML = '<span style="color:#e94560;">Error: ' + err + '</span>';
+            });
+    }
+
+    function showDetectionResult(data) {
+        // Show result card
+        const resultDiv = document.getElementById('detect-result');
+        resultDiv.innerHTML = `
+            <div style="text-align:left;">
+                <div class="info-row"><span>Robot</span><span class="val">${data.robot_id || 'Upload'}</span></div>
+                <div class="info-row"><span>Time</span><span class="val">${data.timestamp || '--'}</span></div>
+                <div class="info-row"><span>Processing</span><span class="val">${data.processing_ms}ms</span></div>
+                <div class="info-row"><span>Objects Found</span><span class="val" style="font-size:18px;">${data.num_objects}</span></div>
+                <div class="info-row"><span>Summary</span><span class="val">${data.summary}</span></div>
+                ${data.image_size ? `<div class="info-row"><span>Image Size</span><span class="val">${data.image_size.width} x ${data.image_size.height}</span></div>` : ''}
+            </div>
+        `;
+
+        // Show images
+        const imageCard = document.getElementById('detect-image-card');
+        imageCard.style.display = 'block';
+        document.getElementById('detect-summary').textContent = data.summary;
+
+        if (data.annotated_image) {
+            document.getElementById('detect-annotated').src = 'data:image/jpeg;base64,' + data.annotated_image;
+        }
+        if (data.original_image) {
+            document.getElementById('detect-original').src = 'data:image/jpeg;base64,' + data.original_image;
+            _lastOriginalImage = data.original_image;  // Store for save-to-dataset
+        }
+
+        // Show detections table
+        const tbody = document.getElementById('detect-objects');
+        if (data.detections && data.detections.length > 0) {
+            tbody.innerHTML = data.detections.map((d, i) => `
+                <tr>
+                    <td>${i + 1}</td>
+                    <td><span class="class-tag" style="font-size:13px;padding:4px 10px;">${d.class}</span></td>
+                    <td><span style="color:${d.confidence > 0.7 ? '#4ecca3' : d.confidence > 0.4 ? '#ffa500' : '#e94560'}">${(d.confidence * 100).toFixed(1)}%</span></td>
+                    <td style="color:#888;font-size:11px;">[${d.bbox.join(', ')}]</td>
+                </tr>
+            `).join('');
+        } else {
+            tbody.innerHTML = '<tr><td colspan="4" style="color:#555;">No objects detected</td></tr>';
+        }
+
+        imageCard.scrollIntoView({behavior: 'smooth'});
+        loadDetectionHistory();
+    }
+
+    function loadDetectionHistory() {
+        apiCall('/detection-history')
+            .then(data => {
+                const container = document.getElementById('detect-history');
+                if (!data.history || data.history.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No detections yet</div>';
+                    return;
+                }
+                container.innerHTML = data.history.map(h => `
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #0f346033;font-size:13px;">
+                        <div>
+                            <span style="color:#4ecca3;font-weight:bold;">${h.robot_id}</span>
+                            <span style="color:#888;margin-left:8px;">${h.timestamp}</span>
+                        </div>
+                        <div>
+                            <span style="color:#eee;">${h.num_objects} objects</span>
+                            <span style="color:#666;margin-left:8px;">${h.processing_ms}ms</span>
+                        </div>
+                    </div>
+                `).join('');
+            })
+            .catch(() => {});
+    }
+
+    let _lastOriginalImage = null;  // Store last captured original image
+
+    function saveCurrentImage() {
+        if (!_lastOriginalImage) {
+            showToast('Capture an image first', true);
+            return;
+        }
+        const dataset = document.getElementById('save-dataset-name').value.trim();
+        if (!dataset) { showToast('Enter dataset name', true); return; }
+
+        const robotId = document.getElementById('detect-robot').value;
+        const status = document.getElementById('save-status');
+        status.innerHTML = '<span style="color:#4ecca3;">Saving...</span>';
+
+        apiCall('/save-capture', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({robot_id: robotId, dataset: dataset, image: _lastOriginalImage})
+        })
+        .then(data => {
+            if (data.ok) {
+                status.innerHTML = '<span style="color:#4ecca3;">' + data.message + '</span>';
+                showToast(data.message);
+            } else {
+                status.innerHTML = '<span style="color:#e94560;">' + data.error + '</span>';
+            }
+        });
+    }
+
+    function batchCapture() {
+        const dataset = document.getElementById('save-dataset-name').value.trim();
+        if (!dataset) { showToast('Enter dataset name', true); return; }
+
+        const robotId = document.getElementById('detect-robot').value;
+        const count = parseInt(prompt('How many images to capture?', '10')) || 10;
+        if (count < 1) return;
+
+        const btn = document.getElementById('btn-batch');
+        const status = document.getElementById('save-status');
+        btn.disabled = true;
+        btn.textContent = 'Capturing...';
+        status.innerHTML = '<span style="color:#4ecca3;">Capturing ' + count + ' images from ' + robotId + '... (move the object between captures for variety)</span>';
+
+        apiCall('/batch-capture', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({robot_id: robotId, dataset: dataset, count: count, delay: 1.5})
+        })
+        .then(data => {
+            btn.disabled = false;
+            btn.textContent = 'Batch Capture (10)';
+            if (data.ok) {
+                status.innerHTML = '<span style="color:#4ecca3;">' + data.message + '</span>';
+                showToast(data.message);
+            } else {
+                status.innerHTML = '<span style="color:#e94560;">' + (data.error || 'Failed') + '</span>';
+            }
+        })
+        .catch(err => {
+            btn.disabled = false;
+            btn.textContent = 'Batch Capture (10)';
+            status.innerHTML = '<span style="color:#e94560;">Error: ' + err + '</span>';
+        });
+    }
+
+    function checkRobotStatus() {
+        apiCall('/robots')
+            .then(data => {
+                (data.robots || []).forEach(r => {
+                    if (r.id === 'R1') {
+                        const el = document.getElementById('r1-status');
+                        if (r.online) {
+                            el.textContent = 'Online (' + r.host + ')';
+                            el.style.color = '#00e676';
+                        } else {
+                            el.textContent = 'Offline';
+                            el.style.color = '#e94560';
+                        }
+                    }
+                });
+            })
+            .catch(() => {});
+    }
+
+    // ============================================================
+    //  Init
+    // ============================================================
+
+    loadDatasets();
+    refreshTrainingStatus();
+
+    // ============================================================
+    //  Unsupervised Learning
+    // ============================================================
+
+    function onUnsupTaskChange() {
+        const task = document.getElementById('unsup-task').value;
+        document.getElementById('unsup-cluster-opts').style.display = task === 'cluster' ? 'block' : 'none';
+        document.getElementById('unsup-anomaly-opts').style.display = task === 'anomaly' ? 'block' : 'none';
+        document.getElementById('unsup-similarity-opts').style.display = task === 'similarity' ? 'block' : 'none';
+    }
+
+    function onUnsupSourceChange() {
+        const src = document.getElementById('unsup-source').value;
+        document.getElementById('unsup-ds-group').style.display = src === 'dataset' ? 'block' : 'none';
+        document.getElementById('unsup-folder-group').style.display = src === 'folder' ? 'block' : 'none';
+    }
+
+    function loadUnsupDatasets() {
+        apiCall('/datasets')
+            .then(data => {
+                const sel = document.getElementById('unsup-dataset');
+                sel.innerHTML = '<option value="">-- Select --</option>';
+                (data.datasets || []).forEach(ds => {
+                    const opt = document.createElement('option');
+                    opt.value = ds.name;
+                    opt.textContent = `${ds.name} (${ds.type || 'det'}, ${ds.train_images || 0} imgs)`;
+                    sel.appendChild(opt);
+                });
+            })
+            .catch(() => {});
+    }
+
+    function previewQueryImage() {
+        const file = document.getElementById('unsup-query-file').files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = e => {
+            document.getElementById('unsup-query-img').src = e.target.result;
+            document.getElementById('unsup-query-preview').style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function captureForSimilarity() {
+        const status = document.getElementById('unsup-status');
+        status.innerHTML = '<span style="color:#4ecca3;">Capturing from R1...</span>';
+        apiCall('/capture', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({robot_id: 'R1', confidence: 0.25, model: 'yolov8n.pt'})
+        }).then(data => {
+            if (data.ok && data.original_image) {
+                document.getElementById('unsup-query-img').src = 'data:image/jpeg;base64,' + data.original_image;
+                document.getElementById('unsup-query-preview').style.display = 'block';
+                status.innerHTML = '<span style="color:#4ecca3;">Captured!</span>';
+            }
+        }).catch(err => {
+            status.innerHTML = '<span style="color:#e94560;">Capture failed: ' + err + '</span>';
+        });
+    }
+
+    function runUnsupervised() {
+        const task = document.getElementById('unsup-task').value;
+        const source = document.getElementById('unsup-source').value;
+        const btn = document.getElementById('btn-unsup-run');
+        const status = document.getElementById('unsup-status');
+
+        // Build payload
+        const payload = { task };
+
+        if (source === 'dataset') {
+            payload.dataset = document.getElementById('unsup-dataset').value;
+            if (!payload.dataset) { showToast('Select a dataset first', true); return; }
+        } else if (source === 'folder') {
+            payload.folder = document.getElementById('unsup-folder').value;
+            if (!payload.folder) { showToast('Enter a folder path', true); return; }
+        } else if (source === 'capture') {
+            payload.source = 'capture';
+            payload.robot_id = 'R1';
+        }
+
+        if (task === 'cluster') {
+            payload.k = parseInt(document.getElementById('unsup-k').value);
+            payload.backbone = document.getElementById('unsup-backbone').value;
+            payload.viz = document.getElementById('unsup-viz').value;
+        } else if (task === 'anomaly') {
+            payload.epochs = parseInt(document.getElementById('unsup-anomaly-epochs').value);
+            payload.threshold = parseFloat(document.getElementById('unsup-anomaly-threshold').value);
+            payload.backbone = 'yolov8n.pt';
+        } else if (task === 'similarity') {
+            payload.topn = parseInt(document.getElementById('unsup-topn').value);
+            payload.backbone = 'yolov8n.pt';
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Running...';
+        status.innerHTML = '<span style="color:#4ecca3;">Processing... This may take a moment.</span>';
+
+        // For similarity with uploaded image, use FormData
+        if (task === 'similarity' && document.getElementById('unsup-query-file').files.length > 0) {
+            const formData = new FormData();
+            formData.append('query_image', document.getElementById('unsup-query-file').files[0]);
+            formData.append('config', JSON.stringify(payload));
+
+            fetch(API + '/unsupervised', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => handleUnsupResult(data, task, btn, status))
+                .catch(err => {
+                    btn.disabled = false; btn.textContent = 'Run Analysis';
+                    status.innerHTML = '<span style="color:#e94560;">Error: ' + err + '</span>';
+                });
+        } else if (task === 'similarity' && document.getElementById('unsup-query-img').src) {
+            // Query from captured image (base64)
+            const imgSrc = document.getElementById('unsup-query-img').src;
+            if (imgSrc.startsWith('data:image')) {
+                payload.query_base64 = imgSrc.split(',')[1];
+            }
+            apiCall('/unsupervised', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            }).then(data => handleUnsupResult(data, task, btn, status))
+            .catch(err => {
+                btn.disabled = false; btn.textContent = 'Run Analysis';
+                status.innerHTML = '<span style="color:#e94560;">Error: ' + err + '</span>';
+            });
+        } else {
+            apiCall('/unsupervised', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            }).then(data => handleUnsupResult(data, task, btn, status))
+            .catch(err => {
+                btn.disabled = false; btn.textContent = 'Run Analysis';
+                status.innerHTML = '<span style="color:#e94560;">Error: ' + err + '</span>';
+            });
+        }
+    }
+
+    function handleUnsupResult(data, task, btn, status) {
+        btn.disabled = false;
+        btn.textContent = 'Run Analysis';
+
+        if (!data.ok) {
+            status.innerHTML = '<span style="color:#e94560;">Error: ' + (data.error || 'Unknown') + '</span>';
+            return;
+        }
+
+        status.innerHTML = '<span style="color:#4ecca3;">Done! ' + (data.processing_ms || '') + 'ms</span>';
+
+        // Show results
+        const resultsDiv = document.getElementById('unsup-results');
+        const resultsContent = document.getElementById('unsup-results-content');
+        const resultsTitle = document.getElementById('unsup-results-title');
+        resultsDiv.style.display = 'block';
+
+        if (task === 'cluster') {
+            resultsTitle.textContent = `Clustering Results (K=${data.k}, ${data.num_images} images)`;
+            let html = '<div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;">';
+            (data.cluster_summary || []).forEach((c, i) => {
+                html += `<div style="background:#0f346044;padding:10px 16px;border-radius:8px;border-left:4px solid hsl(${i*360/(data.k||3)},70%,50%);">
+                    <div style="font-size:16px;font-weight:bold;color:hsl(${i*360/(data.k||3)},70%,60%);">Cluster ${i}</div>
+                    <div style="color:#aaa;font-size:12px;">${c.count} images</div>
+                </div>`;
+            });
+            html += '</div>';
+            resultsContent.innerHTML = html;
+
+            // Show cluster galleries
+            const container = document.getElementById('unsup-clusters-container');
+            container.innerHTML = '';
+            (data.clusters || []).forEach((cluster, i) => {
+                let card = `<div class="card"><h2 style="color:hsl(${i*360/(data.k||3)},70%,60%);">Cluster ${i} (${cluster.images.length} images)</h2><div style="display:flex;flex-wrap:wrap;gap:8px;">`;
+                cluster.images.forEach(img => {
+                    card += `<div style="text-align:center;"><img src="data:image/jpeg;base64,${img.thumbnail}" style="width:120px;height:120px;object-fit:cover;border-radius:6px;border:2px solid hsl(${i*360/(data.k||3)},70%,40%);"><div style="font-size:10px;color:#888;margin-top:4px;">${img.name}</div></div>`;
+                });
+                card += '</div></div>';
+                container.innerHTML += card;
+            });
+        }
+
+        else if (task === 'anomaly') {
+            resultsTitle.textContent = `Anomaly Detection (${data.num_images} images analyzed)`;
+            let html = `<div style="margin-bottom:12px;">
+                <div class="info-row"><span>Threshold</span><span class="val">${data.threshold?.toFixed(4) || 'auto'}</span></div>
+                <div class="info-row"><span>Normal</span><span class="val" style="color:#4ecca3;">${data.num_normal} images</span></div>
+                <div class="info-row"><span>Anomalies</span><span class="val" style="color:#e94560;">${data.num_anomalies} images</span></div>
+            </div>`;
+            if (data.anomalies && data.anomalies.length > 0) {
+                html += '<h3 style="color:#e94560;margin:12px 0 8px;">Anomalous Images</h3><div style="display:flex;flex-wrap:wrap;gap:8px;">';
+                data.anomalies.forEach(a => {
+                    html += `<div style="text-align:center;"><img src="data:image/jpeg;base64,${a.thumbnail}" style="width:120px;height:120px;object-fit:cover;border-radius:6px;border:2px solid #e94560;"><div style="font-size:10px;color:#e94560;margin-top:4px;">err: ${a.error.toFixed(4)}</div><div style="font-size:9px;color:#888;">${a.name}</div></div>`;
+                });
+                html += '</div>';
+            }
+            resultsContent.innerHTML = html;
+            document.getElementById('unsup-clusters-container').innerHTML = '';
+        }
+
+        else if (task === 'similarity') {
+            resultsTitle.textContent = `Similar Images (Top ${data.results?.length || 0})`;
+            let html = '<div style="display:flex;flex-wrap:wrap;gap:12px;">';
+            (data.results || []).forEach((r, i) => {
+                html += `<div style="text-align:center;background:#0f346044;padding:8px;border-radius:8px;">
+                    <img src="data:image/jpeg;base64,${r.thumbnail}" style="width:150px;height:150px;object-fit:cover;border-radius:6px;">
+                    <div style="font-size:12px;color:#4ecca3;margin-top:4px;">#${i+1} — ${(r.similarity * 100).toFixed(1)}%</div>
+                    <div style="font-size:10px;color:#888;">${r.name}</div>
+                </div>`;
+            });
+            html += '</div>';
+            resultsContent.innerHTML = html;
+            document.getElementById('unsup-clusters-container').innerHTML = '';
+        }
+
+        // Show visualization plot if available
+        const vizCard = document.getElementById('unsup-viz-card');
+        if (data.viz_image) {
+            vizCard.style.display = 'block';
+            document.getElementById('unsup-viz-img').src = 'data:image/png;base64,' + data.viz_image;
+        } else {
+            vizCard.style.display = 'none';
+        }
+
+        resultsDiv.scrollIntoView({behavior: 'smooth'});
+    }
+
+</script>
+</body>
+</html>

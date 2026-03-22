@@ -1,0 +1,77 @@
+{
+    "computers": {
+        "Dreamer": {
+            "type": "pc",
+            "os": "Windows 11",
+            "host": "192.168.1.44",
+            "hostname": "SweetWater",
+            "username": "Dream",
+            "role": "Main Control Hub",
+            "agent_port": 5000,
+            "ajmain_path": "C:\\Users\\Dream\\My Drive\\AJ_Robotics\\AJMain",
+            "connection": ["ssh", "local"],
+            "network": ["lan", "wifi"],
+            "description": "Primary development PC, runs AJMain hub"
+        },
+        "CashCow": {
+            "type": "pc",
+            "os": "Ubuntu",
+            "host": "192.168.1.91",
+            "hostname": "SmartTrader",
+            "username": "dongchul",
+            "role": "Smart Trader",
+            "agent_port": 5000,
+            "connection": ["ssh", "vnc"],
+            "network": ["lan", "lan"],
+            "description": "Dell PC running IB Smart Trader 24/7 (dual LAN)"
+        },
+        "Christy": {
+            "type": "pc",
+            "os": "Ubuntu",
+            "host": "192.168.1.94",
+            "hostname": "AJRobotics",
+            "username": "ajrobotics",
+            "role": "Watchdog + XBee Coordinator",
+            "agent_port": 5000,
+            "connection": ["ssh", "vnc"],
+            "interfaces": ["xbee", "ethernet"],
+            "description": "System watchdog, XBee coordinator, robot management"
+        },
+        "Gram": {
+            "type": "laptop",
+            "os": "Windows 11",
+            "host": "192.168.1.10",
+            "hostname": "Dongchul_Gram",
+            "username": "Dream",
+            "role": "Dev & Test",
+            "agent_port": 5000,
+            "ajmain_path": "G:\\My Drive\\AJ_Robotics\\AJMain",
+            "connection": ["ssh"],
+            "network": ["wifi"],
+            "description": "LG Gram laptop for tool development and testing"
+        }
+    },
+    "robots": {
+        "ROSMASTER": {
+            "type": "robot",
+            "model": "TBD",
+            "name": "TBD",
+            "status": "arriving",
+            "dev_controller": "Dreamer",
+            "prod_controller": "Christy",
+            "description": "Dev/control from Dreamer, once stable Christy handles monitoring and critical decisions"
+        }
+    },
+    "raspberry_pis": {
+        "R1": {
+            "type": "raspberry_pi",
+            "host": "192.168.1.82",
+            "hostname": "RPMain",
+            "username": "dream",
+            "agent_port": 5000,
+            "xbee_addr": "0013A20041BB8D5E",
+            "connection": ["ssh"],
+            "description": "First Raspberry Pi"
+        }
+    }
+}

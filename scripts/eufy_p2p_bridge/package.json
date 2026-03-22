@@ -1,0 +1,12 @@
+{
+  "name": "eufy-p2p-bridge",
+  "version": "1.0.0",
+  "description": "Bridge eufyCam Solo S3 P2P stream to TCP for go2rtc",
+  "main": "bridge.js",
+  "scripts": {
+    "start": "node bridge.js"
+  },
+  "dependencies": {
+    "eufy-security-client": "^3.1.1"
+  }
+}

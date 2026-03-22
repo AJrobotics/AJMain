@@ -1,0 +1,40 @@
+{
+    "machines": {
+        "Dreamer": {
+            "modules": ["heartbeat"],
+            "port": 5000,
+            "xbee_port": "COM18",
+            "xbee_reply": "R4!",
+            "xbee_auto_start": true,
+            "description": "Dev hub + XBee heartbeat responder (R4)"
+        },
+        "CashCow": {
+            "modules": ["trader"],
+            "port": 5000,
+            "description": "IB Smart Trader 24/7"
+        },
+        "Christy": {
+            "modules": ["xbee_monitor", "watchdog", "robot_registry"],
+            "port": 5000,
+            "description": "System watchdog + XBee coordinator"
+        },
+        "Gram": {
+            "modules": ["heartbeat"],
+            "port": 5000,
+            "xbee_port": "COM20",
+            "xbee_reply": "R3!",
+            "xbee_auto_start": true,
+            "description": "Dev & test laptop + XBee responder (R3)"
+        },
+        "R1": {
+            "modules": ["xbee_responder", "vision_capture"],
+            "port": 5000,
+            "description": "Raspberry Pi + XBee responder + Vision"
+        }
+    },
+    "defaults": {
+        "port": 5000,
+        "monitor_interval": 15,
+        "log_buffer_size": 500
+    }
+}

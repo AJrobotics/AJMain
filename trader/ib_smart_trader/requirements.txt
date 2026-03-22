@@ -1,0 +1,7 @@
+# IB Smart Trader + Auto Screener - 필수 패키지
+# pip install -r requirements.txt
+
+ib_insync>=0.9.86      # IB API 연결
+pandas>=2.0.0           # 데이터 처리
+numpy>=1.24.0           # 수치 계산
+schedule>=1.2.0         # (선택) 고급 스케줄링

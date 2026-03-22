@@ -1,0 +1,16 @@
+{
+  "type": "classification",
+  "name": "DLearnTest",
+  "source": "C:\\Users\\Dream\\My Drive\\AJ_Robotics\\GoodSonbotData\\DLearnTest",
+  "classes": [
+    "A",
+    "B",
+    "C"
+  ],
+  "num_classes": 3,
+  "split_ratio": 0.8,
+  "train_count": 114,
+  "val_count": 30,
+  "total_images": 144,
+  "created": "2026-03-21 18:02:03"
+}

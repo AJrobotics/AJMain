@@ -1,0 +1,12 @@
+# Web GUI
+flask>=3.0
+
+# Remote connection
+paramiko>=3.0
+vncdotool>=1.2
+
+# Trading (Interactive Brokers)
+ib_insync>=0.9
+
+# Utilities
+psutil>=5.9

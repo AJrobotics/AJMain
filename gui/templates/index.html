@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AJ Robotics - Control Hub</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        /* Top Bar */
+        .topbar {
+            background: #16213e;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 2px solid #0f3460;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .topbar h1 { font-size: 20px; color: #e94560; }
+        .topbar .center { color: #888; font-size: 13px; }
+        .topbar .right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .summary-badge {
+            background: #0f3460;
+            color: #4ecca3;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        /* Nav */
+        .nav {
+            background: #16213e;
+            padding: 0 20px;
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid #0f3460;
+            overflow-x: auto;
+        }
+        .nav a {
+            color: #888;
+            text-decoration: none;
+            padding: 10px 16px;
+            font-size: 13px;
+            white-space: nowrap;
+            border-bottom: 2px solid transparent;
+        }
+        .nav a:hover, .nav a.active {
+            color: #4ecca3;
+            border-bottom-color: #4ecca3;
+        }
+        .nav-dropdown {
+            position: relative;
+        }
+        .nav-dropdown > a {
+            color: #888;
+            text-decoration: none;
+            padding: 10px 16px;
+            font-size: 13px;
+            white-space: nowrap;
+            border-bottom: 2px solid transparent;
+            display: block;
+            cursor: pointer;
+        }
+        .nav-dropdown:hover > a {
+            color: #4ecca3;
+            border-bottom-color: #4ecca3;
+        }
+        .nav-dropdown-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 0 0 8px 8px;
+            min-width: 160px;
+            z-index: 200;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+        .nav-dropdown:hover .nav-dropdown-menu {
+            display: block;
+        }
+        .nav-dropdown-menu a {
+            display: block;
+            padding: 10px 16px;
+            color: #aaa;
+            text-decoration: none;
+            font-size: 13px;
+            border-bottom: none;
+        }
+        .nav-dropdown-menu a:hover {
+            background: #0f3460;
+            color: #4ecca3;
+        }
+
+        /* Machine Status Strip */
+        .machine-strip {
+            display: flex;
+            gap: 12px;
+            padding: 16px 20px;
+            overflow-x: auto;
+        }
+        .machine-tile {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 10px;
+            padding: 14px 18px;
+            min-width: 150px;
+            flex: 1;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .machine-tile:hover { border-color: #4ecca3; }
+        .machine-tile .tile-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .dot {
+            width: 9px; height: 9px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+        .dot.online { background: #4ecca3; box-shadow: 0 0 6px #4ecca3; }
+        .dot.offline { background: #e94560; }
+        .dot.pending { background: #f0a500; box-shadow: 0 0 6px #f0a500; }
+        .machine-tile .name { font-weight: bold; font-size: 15px; }
+        .machine-tile .meta { color: #888; font-size: 11px; line-height: 1.5; }
+        .machine-tile .btn-restart {
+            display: inline-block; margin-top: 6px;
+            background: transparent; color: #e94560; border: 1px solid #e94560;
+            padding: 2px 10px; border-radius: 5px; font-size: 10px;
+            cursor: pointer; transition: all 0.2s; text-decoration: none;
+        }
+        .machine-tile .btn-restart:hover { background: #e94560; color: #1a1a2e; }
+        .machine-tile .btn-restart:disabled { opacity: 0.4; cursor: not-allowed; }
+        .machine-tile .btn-restart.success { border-color: #4ecca3; color: #4ecca3; }
+        .machine-tile .btn-link {
+            display: inline-block; margin-top: 4px;
+            background: transparent; color: #4ecca3; border: 1px solid #4ecca3;
+            padding: 2px 8px; border-radius: 5px; font-size: 10px;
+            cursor: pointer; text-decoration: none; transition: all 0.2s;
+        }
+        .machine-tile .btn-link:hover { background: #4ecca3; color: #1a1a2e; }
+
+        /* Main Content */
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            padding: 16px 20px;
+        }
+
+        /* Cards */
+        .card {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 12px;
+            padding: 22px;
+        }
+        .card h2 {
+            color: #e94560;
+            font-size: 17px;
+            margin-bottom: 14px;
+        }
+        .card .status-line {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+            font-size: 13px;
+            color: #aaa;
+        }
+        .card .info {
+            color: #888;
+            font-size: 13px;
+            line-height: 1.6;
+            margin-bottom: 14px;
+        }
+        .btn {
+            display: inline-block;
+            background: #0f3460;
+            color: #4ecca3;
+            padding: 7px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            text-decoration: none;
+            margin: 3px 3px 3px 0;
+        }
+        .btn:hover { background: #1a4a8a; }
+        .btn.primary { background: #e94560; color: white; }
+        .btn.primary:hover { background: #c73652; }
+
+        /* Quick Actions */
+        .quick-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 12px 20px;
+        }
+        .quick-actions .btn { font-size: 12px; }
+
+        /* Resource Bars */
+        .resource-item {
+            margin-bottom: 14px;
+        }
+        .resource-item .label-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 4px;
+        }
+        .bar-bg {
+            background: #0f3460;
+            border-radius: 4px;
+            height: 8px;
+            overflow: hidden;
+        }
+        .bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s;
+        }
+        .bar-fill.green { background: #4ecca3; }
+        .bar-fill.yellow { background: #f0a500; }
+        .bar-fill.red { background: #e94560; }
+
+        /* Activity Log */
+        .log-list {
+            max-height: 280px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .log-entry {
+            padding: 6px 0;
+            border-bottom: 1px solid #0f346033;
+            display: flex;
+            gap: 10px;
+        }
+        .log-entry .time { color: #555; white-space: nowrap; flex-shrink: 0; }
+        .log-entry .msg { color: #aaa; }
+        .log-entry.error .msg { color: #e94560; }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 16px;
+            color: #444;
+            font-size: 11px;
+        }
+
+        /* Mobile */
+        @media (max-width: 900px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (max-width: 600px) {
+            .topbar h1 { font-size: 16px; }
+            .topbar .center { display: none; }
+            .machine-strip {
+                flex-wrap: wrap;
+            }
+            .machine-tile {
+                min-width: calc(50% - 8px);
+                flex: 0 0 calc(50% - 8px);
+            }
+            .quick-actions { justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Top Bar -->
+    <div class="topbar">
+        <h1>AJ Robotics</h1>
+        <div class="center" id="clock"></div>
+        <div class="right">
+            <span class="summary-badge" id="summary">--/-- Online</span>
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="nav">
+        <a href="/" class="active">Dashboard</a>
+        <a href="/machines">Machines</a>
+        <div class="nav-dropdown">
+            <a href="/robotics">Robotics ▾</a>
+            <div class="nav-dropdown-menu">
+                <a href="/robotics">Overview</a>
+                <a href="/robotics/gamepad">Gamepad Test</a>
+                <a href="/vision">Vision</a>
+            </div>
+        </div>
+        <a href="/trader">Trader</a>
+        <a href="/deploy">Deploy</a>
+        <a href="/vision">Vision</a>
+        <a href="/training">Training</a>
+    </div>
+
+    <!-- Machine Status Strip -->
+    <div class="machine-strip" id="machine-strip">
+        <div class="machine-tile" id="tile-Dreamer" onclick="location.href='/machine/Dreamer'" style="cursor:pointer;">
+            <div class="tile-header"><span class="dot online" id="dot-Dreamer"></span><span class="name">Dreamer</span></div>
+            <div class="meta">192.168.1.44<br>Main Hub</div>
+            <div style="margin-top:6px;">
+                <a class="btn-link" href="http://192.168.1.44:5000/" target="_blank" onclick="event.stopPropagation()">Agent</a>
+                <a class="btn-link" href="http://192.168.1.44:5000/gamepad" target="_blank" onclick="event.stopPropagation()">Gamepad</a>
+                <button class="btn-restart" id="restart-Dreamer" onclick="event.stopPropagation(); restartAgent('Dreamer')">Restart</button>
+            </div>
+        </div>
+        <div class="machine-tile" id="tile-CashCow" onclick="location.href='/machine/CashCow'" style="cursor:pointer;">
+            <div class="tile-header"><span class="dot offline" id="dot-CashCow"></span><span class="name">CashCow</span></div>
+            <div class="meta">192.168.1.91<br>Smart Trader</div>
+            <div style="margin-top:6px;">
+                <a class="btn-link" href="http://192.168.1.91:5000/" target="_blank" onclick="event.stopPropagation()">Agent</a>
+                <button class="btn-restart" id="restart-CashCow" onclick="event.stopPropagation(); restartAgent('CashCow')">Restart</button>
+            </div>
+        </div>
+        <div class="machine-tile" id="tile-Christy" onclick="location.href='/machine/Christy'" style="cursor:pointer;">
+            <div class="tile-header"><span class="dot offline" id="dot-Christy"></span><span class="name">Christy</span></div>
+            <div class="meta">192.168.1.94<br>Data Hub</div>
+            <div style="margin-top:6px;">
+                <a class="btn-link" href="http://192.168.1.94:5000/" target="_blank" onclick="event.stopPropagation()">Dashboard</a>
+                <button class="btn-restart" id="restart-Christy" onclick="event.stopPropagation(); restartAgent('Christy')">Restart</button>
+            </div>
+        </div>
+        <div class="machine-tile" id="tile-Gram" onclick="location.href='/machine/Gram'" style="cursor:pointer;">
+            <div class="tile-header"><span class="dot offline" id="dot-Gram"></span><span class="name">Gram</span></div>
+            <div class="meta">192.168.1.10<br>Dev & Test</div>
+            <div style="margin-top:6px;">
+                <a class="btn-link" href="http://192.168.1.10:5000/" target="_blank" onclick="event.stopPropagation()">Agent</a>
+                <a class="btn-link" href="http://192.168.1.10:5000/gamepad" target="_blank" onclick="event.stopPropagation()">Gamepad</a>
+                <button class="btn-restart" id="restart-Gram" onclick="event.stopPropagation(); restartAgent('Gram')">Restart</button>
+            </div>
+        </div>
+        <div class="machine-tile" id="tile-R1" onclick="location.href='/machine/R1'" style="cursor:pointer;">
+            <div class="tile-header"><span class="dot offline" id="dot-R1"></span><span class="name">R1</span></div>
+            <div class="meta">192.168.1.82<br>Raspberry Pi</div>
+            <div style="margin-top:6px;">
+                <a class="btn-link" href="http://192.168.1.82:5000/" target="_blank" onclick="event.stopPropagation()">Agent</a>
+                <button class="btn-restart" id="restart-R1" onclick="event.stopPropagation(); restartAgent('R1')">Restart</button>
+            </div>
+        </div>
+        <div class="machine-tile" id="tile-ROSMASTER" onclick="location.href='/machine/ROSMASTER'" style="cursor:pointer;">
+            <div class="tile-header"><span class="dot pending"></span><span class="name">ROSMASTER</span></div>
+            <div class="meta">TBD<br>Robot (Arriving)</div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="content">
+        <!-- Left: Module Cards -->
+        <div>
+            <!-- Robotics Card -->
+            <div class="card" style="margin-bottom: 16px;">
+                <h2>Robotics Control</h2>
+                <div class="status-line">
+                    <span class="dot pending"></span> ROSMASTER: Arriving
+                </div>
+                <div class="info">
+                    Dev Controller: Dreamer<br>
+                    Prod Controller: Christy (after stabilization)
+                </div>
+                <a href="/robotics" class="btn primary">Open Panel</a>
+                <button class="btn" onclick="sshTo('Christy')">SSH Christy</button>
+                <button class="btn" onclick="sshTo('R1')">SSH R1</button>
+                <button class="btn" onclick="sshTo('CashCow')">SSH CashCow</button>
+            </div>
+
+            <!-- Smart Trader Card -->
+            <div class="card" style="margin-bottom: 16px;">
+                <h2>Smart Trader</h2>
+                <div class="status-line">
+                    <span class="dot offline" id="dot-trader"></span>
+                    <span id="trader-status">CashCow: Checking...</span>
+                </div>
+                <div class="info">
+                    IB Gateway: Pending connection<br>
+                    Daily P&L: --<br>
+                    Open Positions: --
+                </div>
+                <a href="/trader" class="btn primary">Open Panel</a>
+                <button class="btn" onclick="sshTo('CashCow')">SSH CashCow</button>
+                <button class="btn" onclick="vncTo('CashCow')">VNC CashCow</button>
+            </div>
+
+            <!-- YOLO Training Card -->
+            <div class="card">
+                <h2>YOLO Training</h2>
+                <div class="info">
+                    <span>Dreamer GPU (RTX 4070)</span><br>
+                    <span id="training-card-status" style="color:#888;">Classification &amp; Object Detection</span>
+                </div>
+                <a href="/training" class="btn primary">Open Training Panel</a>
+                <a href="http://192.168.1.44:5002" class="btn" target="_blank" style="background:#4ecca322;border:1px solid #4ecca3;color:#4ecca3;">Direct (Dreamer:5002)</a>
+            </div>
+
+            <!-- Vision Card -->
+            <div class="card" style="margin-bottom: 16px;">
+                <h2>Vision</h2>
+                <div class="status-line">
+                    <span class="dot offline" id="dot-vision"></span>
+                    <span id="vision-status">Server: Checking...</span>
+                </div>
+                <div class="info">
+                    <span id="vision-info">Backend: -- | Analyses: --</span>
+                </div>
+                <a href="/vision" class="btn primary">Open Vision</a>
+                <a href="http://192.168.1.82:5000/" class="btn" target="_blank" style="background:#4ecca322;border:1px solid #4ecca3;color:#4ecca3;">R1 Agent (Camera)</a>
+            </div>
+
+            <!-- Remote Deploy Card -->
+            <div class="card">
+                <h2>Remote Deploy</h2>
+                <div class="info">
+                    <span id="deploy-status">Last deployment: --</span><br>
+                    Target: Christy (XBee Monitor)
+                </div>
+                <a href="/deploy" class="btn primary">Open Panel</a>
+                <button class="btn" onclick="deployChristy('run')" id="btn-deploy" style="background:#00e67633;border-color:#00e676;color:#00e676;">&#9654; Deploy &amp; Run</button>
+                <button class="btn" onclick="deployChristy('stop')" style="border-color:#e94560;color:#e94560;">&#9632; Stop</button>
+                <button class="btn" onclick="deployChristy('status')">Status</button>
+            </div>
+        </div>
+
+        <!-- Right: Monitoring -->
+        <div>
+            <!-- System Resources -->
+            <div class="card" style="margin-bottom: 16px;">
+                <h2>{{ local_machine }} Resources</h2>
+                <div class="resource-item">
+                    <div class="label-row"><span>CPU</span><span id="cpu-val">--</span></div>
+                    <div class="bar-bg"><div class="bar-fill green" id="cpu-bar" style="width: 0%"></div></div>
+                </div>
+                <div class="resource-item">
+                    <div class="label-row"><span>Memory</span><span id="mem-val">--</span></div>
+                    <div class="bar-bg"><div class="bar-fill green" id="mem-bar" style="width: 0%"></div></div>
+                </div>
+                <div class="resource-item">
+                    <div class="label-row"><span>Disk</span><span id="disk-val">--</span></div>
+                    <div class="bar-bg"><div class="bar-fill green" id="disk-bar" style="width: 0%"></div></div>
+                </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div class="card">
+                <h2>Activity Log</h2>
+                <div class="log-list" id="log-list">
+                    <div class="log-entry"><span class="time">--:--:--</span><span class="msg">Waiting for events...</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="quick-actions">
+        <button class="btn" onclick="sshTo('CashCow')">SSH CashCow</button>
+        <button class="btn" onclick="sshTo('Christy')">SSH Christy</button>
+        <button class="btn" onclick="sshTo('R1')">SSH R1</button>
+        <button class="btn" onclick="sshTo('Gram')">SSH Gram</button>
+        <button class="btn" onclick="vncTo('CashCow')">VNC CashCow</button>
+        <button class="btn" onclick="vncTo('Christy')">VNC Christy</button>
+        <button class="btn primary" onclick="pingAll()">Ping All</button>
+    </div>
+
+    <div class="footer">AJ Robotics &copy; 2026 | Tailscale Enabled</div>
+
+    <script>
+        // Clock
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock').textContent = now.toLocaleString('en-US', {
+                year: 'numeric', month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // Fetch machine status
+        function updateMachineStatus() {
+            fetch('/api/machines/status')
+                .then(r => r.json())
+                .then(data => {
+                    let online = 0, total = 0;
+                    for (const [name, info] of Object.entries(data)) {
+                        total++;
+                        const dot = document.getElementById('dot-' + name);
+                        if (dot) {
+                            if (info.online) {
+                                dot.className = 'dot online';
+                                online++;
+                            } else if (info.status === 'arriving') {
+                                dot.className = 'dot pending';
+                            } else {
+                                dot.className = 'dot offline';
+                            }
+                        }
+                        if (name === 'CashCow') {
+                            const td = document.getElementById('dot-trader');
+                            const ts = document.getElementById('trader-status');
+                            if (td) td.className = info.online ? 'dot online' : 'dot offline';
+                            if (ts) ts.textContent = 'CashCow: ' + (info.online ? 'Online (' + info.latency_ms + 'ms)' : 'Offline');
+                        }
+                    }
+                    document.getElementById('summary').textContent = online + '/' + total + ' Online';
+                })
+                .catch(() => {
+                    document.getElementById('summary').textContent = 'Connection Lost';
+                });
+        }
+
+        // Fetch system resources
+        function updateResources() {
+            fetch('/api/system/resources')
+                .then(r => r.json())
+                .then(d => {
+                    setBar('cpu', d.cpu_percent, d.cpu_percent + '%');
+                    setBar('mem', d.memory.percent, d.memory.used_gb + ' / ' + d.memory.total_gb + ' GB');
+                    setBar('disk', d.disk.percent, d.disk.used_gb + ' / ' + d.disk.total_gb + ' GB');
+                });
+        }
+
+        function setBar(id, percent, label) {
+            const bar = document.getElementById(id + '-bar');
+            const val = document.getElementById(id + '-val');
+            if (bar) {
+                bar.style.width = percent + '%';
+                bar.className = 'bar-fill ' + (percent > 80 ? 'red' : percent > 60 ? 'yellow' : 'green');
+            }
+            if (val) val.textContent = label;
+        }
+
+        // Fetch activity log — incremental update (no flicker)
+        let _lastLogTimestamp = '';
+        function updateLogs() {
+            fetch('/api/logs/recent?limit=30')
+                .then(r => r.json())
+                .then(logs => {
+                    if (logs.length === 0) return;
+                    // Skip if no new entries
+                    const newest = logs[0].timestamp;
+                    if (newest === _lastLogTimestamp) return;
+                    _lastLogTimestamp = newest;
+
+                    const list = document.getElementById('log-list');
+                    const existingTimes = new Set();
+                    list.querySelectorAll('.log-entry .time').forEach(el => existingTimes.add(el.textContent));
+
+                    // Prepend only new entries
+                    let added = 0;
+                    for (const l of logs) {
+                        const timeStr = l.timestamp.split(' ')[1];
+                        const key = timeStr + l.message;
+                        if (existingTimes.has(timeStr) && list.children.length > 1) continue;
+                        const div = document.createElement('div');
+                        div.className = 'log-entry' + (l.level === 'error' ? ' error' : '');
+                        div.innerHTML = '<span class="time">' + timeStr + '</span><span class="msg">' + l.message + '</span>';
+                        if (list.firstChild) {
+                            list.insertBefore(div, list.firstChild);
+                        } else {
+                            list.appendChild(div);
+                        }
+                        added++;
+                    }
+                    // Trim old entries to keep max 30
+                    while (list.children.length > 30) {
+                        list.removeChild(list.lastChild);
+                    }
+                    // First load: replace everything
+                    if (added === 0 && list.children.length <= 1) {
+                        list.innerHTML = logs.map(l =>
+                            '<div class="log-entry ' + (l.level === 'error' ? 'error' : '') + '">' +
+                            '<span class="time">' + l.timestamp.split(' ')[1] + '</span>' +
+                            '<span class="msg">' + l.message + '</span></div>'
+                        ).join('');
+                    }
+                });
+        }
+
+        // Actions
+        function sshTo(machine) {
+            fetch('/api/actions/ssh/' + machine, { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { if (d.error) alert(d.error); });
+        }
+
+        function vncTo(machine) {
+            fetch('/api/actions/vnc/' + machine, { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { if (d.error) alert(d.error); });
+        }
+
+        function pingAll() {
+            fetch('/api/actions/ping-all', { method: 'POST' })
+                .then(() => updateMachineStatus());
+        }
+
+        function deployChristy(action) {
+            const status = document.getElementById('deploy-status');
+            const btn = document.getElementById('btn-deploy');
+            status.textContent = action === 'status' ? 'Checking...' : 'Deploying...';
+            if (btn && action === 'run') { btn.disabled = true; btn.textContent = 'Deploying...'; }
+
+            fetch('/api/deploy/christy', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: action})
+            })
+            .then(r => r.json())
+            .then(d => {
+                const ts = new Date().toLocaleTimeString();
+                if (d.ok) {
+                    if (action === 'run') {
+                        status.textContent = 'Deployed & running (' + ts + ')';
+                    } else if (action === 'stop') {
+                        status.textContent = 'Monitor stopped (' + ts + ')';
+                    } else if (action === 'status') {
+                        alert(d.output || 'No output');
+                        status.textContent = 'Status checked (' + ts + ')';
+                    } else {
+                        status.textContent = 'Synced (' + ts + ')';
+                    }
+                } else {
+                    status.textContent = 'Error: ' + (d.error || 'unknown');
+                    if (d.output) console.log(d.output);
+                }
+                if (btn) { btn.disabled = false; btn.innerHTML = '&#9654; Deploy & Run'; }
+                updateLogs();
+            })
+            .catch(err => {
+                status.textContent = 'Failed: ' + err;
+                if (btn) { btn.disabled = false; btn.innerHTML = '&#9654; Deploy & Run'; }
+            });
+        }
+
+        // Agent restart
+        async function restartAgent(name) {
+            if (!confirm('Restart agent on ' + name + '?')) return;
+            const btn = document.getElementById('restart-' + name);
+            if (btn) { btn.disabled = true; btn.textContent = 'Restarting...'; }
+            try {
+                const r = await fetch('/api/agent/restart/' + name, { method: 'POST' });
+                const d = await r.json();
+                if (!r.ok) {
+                    alert('Restart error: ' + (d.error || 'Unknown'));
+                    if (btn) { btn.disabled = false; btn.textContent = 'Restart'; }
+                    return;
+                }
+                // Poll status
+                const timer = setInterval(async () => {
+                    try {
+                        const sr = await fetch('/api/agent/restart/' + name + '/status');
+                        const sd = await sr.json();
+                        if (sd.status === 'success' || sd.status === 'started') {
+                            if (btn) { btn.disabled = false; btn.textContent = 'Restart'; btn.className = 'btn-restart success'; }
+                            clearInterval(timer);
+                            setTimeout(() => { if (btn) btn.className = 'btn-restart'; }, 5000);
+                            updateMachineStatus();
+                        } else if (sd.status === 'failed') {
+                            alert('Restart failed: ' + (sd.error || 'Unknown'));
+                            if (btn) { btn.disabled = false; btn.textContent = 'Restart'; }
+                            clearInterval(timer);
+                        }
+                    } catch(e) {}
+                }, 2000);
+                setTimeout(() => { clearInterval(timer); if (btn && btn.disabled) { btn.disabled = false; btn.textContent = 'Restart'; } }, 30000);
+            } catch(e) {
+                alert('Restart error: ' + e.message);
+                if (btn) { btn.disabled = false; btn.textContent = 'Restart'; }
+            }
+        }
+
+        // --- Vision status ---
+        async function updateVisionStatus() {
+            try {
+                const r = await fetch('/api/proxy/vision/status');
+                const d = await r.json();
+                const dot = document.getElementById('dot-vision');
+                const status = document.getElementById('vision-status');
+                const info = document.getElementById('vision-info');
+                if (d.server === 'running') {
+                    dot.className = 'dot online';
+                    status.textContent = 'Server: Online';
+                    const totalAnalyses = Object.values(d.robots || {}).reduce((s, r) => s + (r.total_analyses || 0), 0);
+                    info.textContent = `Backend: ${d.backend || '?'} | Analyses: ${totalAnalyses} | Uptime: ${d.uptime_human || '?'}`;
+                } else {
+                    dot.className = 'dot offline';
+                    status.textContent = 'Server: Offline';
+                    info.textContent = 'Backend: -- | Analyses: --';
+                }
+            } catch(e) {
+                document.getElementById('dot-vision').className = 'dot offline';
+                document.getElementById('vision-status').textContent = 'Server: Offline';
+            }
+        }
+
+        // Auto-refresh
+        updateMachineStatus();
+        updateResources();
+        updateLogs();
+        updateVisionStatus();
+        setInterval(updateMachineStatus, 10000);
+        setInterval(updateResources, 5000);
+        setInterval(updateLogs, 10000);
+        setInterval(updateVisionStatus, 15000);
+    </script>
+</body>
+</html>

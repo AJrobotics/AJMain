@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ipconfig)",
+      "Bash(find 'G:/My Drive/AJ_Robotics/AJMain' -type f \\\\\\(-name *.py -o -name *.js -o -name *.ts -o -name *.json -o -name *.yaml -o -name *.yml -o -name *.config \\\\\\))",
+      "WebSearch",
+      "Bash(python -c \":*)",
+      "Bash(python -m deploy.deploy_go2rtc --generate-yaml)",
+      "Bash(python -m deploy.deploy_go2rtc)",
+      "Bash(git --version)",
+      "Bash(gh --version)",
+      "Bash(git -C \"G:/My Drive/AJ_Robotics/AJMain\" remote -v)",
+      "Bash(winget install:*)",
+      "Bash(export PATH=\"$PATH:/c/Program Files/GitHub CLI:/c/Program Files \\(x86\\)/GitHub CLI\")",
+      "Bash(gh auth:*)"
+    ]
+  }
+}
