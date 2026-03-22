@@ -479,7 +479,20 @@ def create_app(machine_name: str, modules: list | None = None) -> Flask:
 
     @app.route("/gamepad")
     def gamepad_page():
+        if machine_name == "Gram":
+            return render_template("gamepad_gram.html", local_machine=machine_name)
         return render_template("gamepad_test.html", local_machine=machine_name)
+
+    @app.route("/api/gamepads/config")
+    def api_gamepads_config():
+        """Serve gamepads.json config for frontend gamepad pages."""
+        import json as _json
+        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs", "gamepads.json")
+        try:
+            with open(config_path, "r") as f:
+                return jsonify(_json.load(f))
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     @app.route("/machine/<name>")
     def machine_detail(name):

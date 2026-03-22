@@ -100,6 +100,13 @@ def gamepad_via_machine(machine):
         return f"Machine '{machine}' not found", 404
     host = info.get("host", "")
     port = info.get("agent_port", 5000)
+    if machine == "Gram":
+        return render_template(
+            "gamepad_gram.html",
+            proxy_machine=machine,
+            proxy_host=host,
+            proxy_port=port,
+        )
     return render_template(
         "gamepad_test.html",
         proxy_machine=machine,
@@ -129,6 +136,17 @@ def training_panel():
 
 
 # --- API Endpoints ---
+
+@app.route("/api/gamepads/config")
+def api_gamepads_config():
+    """Serve gamepads.json config for frontend gamepad pages."""
+    config_path = os.path.join(os.path.dirname(__file__), "configs", "gamepads.json")
+    try:
+        with open(config_path, "r") as f:
+            return jsonify(json.load(f))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/status")
 def api_status():

@@ -1,0 +1,1813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gamepad - Gram - AJ Robotics</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a1929;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        /* Top Bar */
+        .topbar {
+            background: #16213e;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 2px solid #0f3460;
+        }
+        .topbar h1 { font-size: 20px; color: #e94560; }
+        .topbar .right { display: flex; align-items: center; gap: 12px; }
+
+        /* Nav */
+        .nav {
+            background: #16213e;
+            padding: 0 20px;
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid #0f3460;
+        }
+        .nav a {
+            color: #888;
+            text-decoration: none;
+            padding: 10px 16px;
+            font-size: 13px;
+            border-bottom: 2px solid transparent;
+        }
+        .nav a:hover { color: #4ecca3; border-bottom-color: #4ecca3; }
+        .nav a.active { color: #4ecca3; border-bottom-color: #4ecca3; }
+
+        /* Page Title */
+        .page-title {
+            padding: 20px 24px 10px;
+            font-size: 22px;
+            color: #4ecca3;
+            font-weight: bold;
+        }
+        .page-subtitle {
+            padding: 0 24px 16px;
+            color: #666;
+            font-size: 13px;
+        }
+
+        /* Config Bar */
+        .config-bar {
+            display: flex;
+            gap: 20px;
+            padding: 0 24px 20px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+        }
+        .config-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .config-group label {
+            font-size: 11px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .config-group select {
+            background: #16213e;
+            color: #eee;
+            border: 1px solid #0f3460;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            min-width: 200px;
+            cursor: pointer;
+        }
+        .config-group select:focus { border-color: #4ecca3; outline: none; }
+
+        .status-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-dot.connected { background: #4ecca3; box-shadow: 0 0 6px #4ecca3; }
+        .status-dot.disconnected { background: #e94560; }
+        .status-dot.waiting { background: #f0a500; animation: pulse 1.5s infinite; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .status-text {
+            font-size: 12px;
+            color: #888;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding-bottom: 2px;
+        }
+
+        /* Grid Layout */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            padding: 0 24px 24px;
+        }
+
+        /* Card */
+        .card {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 12px;
+            padding: 18px;
+        }
+        .card h3 {
+            color: #4ecca3;
+            font-size: 14px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Stick Canvas */
+        .stick-container {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+        }
+        .stick-box {
+            text-align: center;
+        }
+        .stick-box .label {
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 6px;
+        }
+        .stick-box canvas {
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+        }
+        .stick-values {
+            font-size: 11px;
+            color: #666;
+            margin-top: 4px;
+            font-family: 'Consolas', monospace;
+        }
+
+        /* Buttons Grid */
+        .buttons-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .gp-btn {
+            width: 42px;
+            height: 36px;
+            background: #0f3460;
+            border: 1px solid #1a4a8a;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            color: #666;
+            font-family: 'Consolas', monospace;
+            transition: all 0.1s;
+        }
+        .gp-btn.pressed {
+            background: #e94560;
+            color: #fff;
+            border-color: #e94560;
+            box-shadow: 0 0 8px rgba(233,69,96,0.5);
+        }
+
+        /* Axes Bars */
+        .axis-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .axis-label {
+            font-size: 11px;
+            color: #888;
+            width: 28px;
+            text-align: right;
+            font-family: 'Consolas', monospace;
+        }
+        .axis-bar-bg {
+            flex: 1;
+            height: 14px;
+            background: #0a1929;
+            border-radius: 3px;
+            position: relative;
+            overflow: hidden;
+        }
+        .axis-bar-center {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: #333;
+        }
+        .axis-bar-fill {
+            position: absolute;
+            top: 1px;
+            bottom: 1px;
+            background: #4ecca3;
+            border-radius: 2px;
+            transition: left 0.05s, width 0.05s;
+        }
+        .axis-value {
+            font-size: 11px;
+            color: #666;
+            width: 48px;
+            text-align: left;
+            font-family: 'Consolas', monospace;
+        }
+
+        /* Oscilloscope */
+        #scope-canvas {
+            width: 100%;
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+            background: #0a1929;
+        }
+
+        /* Scope Legend */
+        .scope-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .scope-legend-item {
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            color: #888;
+        }
+        .scope-legend-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 2px;
+        }
+
+        /* XBee Status Card */
+        .xbee-info {
+            font-size: 12px;
+            color: #aaa;
+            line-height: 1.8;
+        }
+        .xbee-info .key { color: #666; }
+        .xbee-info .val { color: #eee; }
+
+        .btn {
+            display: inline-block;
+            background: #0f3460;
+            color: #4ecca3;
+            padding: 7px 16px;
+            border: 1px solid #1a4a8a;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            margin: 3px 3px 3px 0;
+        }
+        .btn:hover { background: #1a4a8a; }
+        .btn.active { background: #00e676; color: #000; border-color: #00e676; }
+        .btn.danger { background: #e94560; color: #fff; border-color: #e94560; }
+
+        /* Full Width */
+        .full-width { grid-column: 1 / -1; }
+
+        /* Hats (D-pad) */
+        .dpad-container {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+        .dpad-grid {
+            display: grid;
+            grid-template-columns: 28px 28px 28px;
+            grid-template-rows: 28px 28px 28px;
+            gap: 2px;
+        }
+        .dpad-cell {
+            background: #0f3460;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: #555;
+        }
+        .dpad-cell.active {
+            background: #f0a500;
+            color: #000;
+        }
+        .dpad-cell.center {
+            background: #0a1929;
+        }
+
+        /* Config loaded badge */
+        .config-badge {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #0f3460;
+            color: #666;
+        }
+        .config-badge.loaded { background: #1a4a3a; color: #4ecca3; }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .main-grid { grid-template-columns: 1fr; }
+            .full-width { grid-column: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Top Bar -->
+    <div class="topbar">
+        <h1>AJ Robotics - Gram Gamepad{% if proxy_machine is defined and proxy_machine %} (via {{ proxy_machine }}){% endif %}</h1>
+        <div class="right">
+            <span class="config-badge" id="config-badge">Config: loading...</span>
+            {% if proxy_machine is defined and proxy_machine %}
+            <a href="/machine/{{ proxy_machine }}" style="color:#888;text-decoration:none;font-size:13px;">&#8592; {{ proxy_machine }}</a>
+            {% else %}
+            <a href="/" style="color:#888;text-decoration:none;font-size:13px;">&#8592; Dashboard</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Nav -->
+    <div class="nav">
+        <a href="/">Dashboard</a>
+        <a href="/robotics">Robotics</a>
+        <a href="/robotics/gamepad/Gram" class="active">Gamepad</a>
+        <a href="/machines">Machines</a>
+    </div>
+
+    <div class="page-title">Gamepad{% if proxy_machine is defined and proxy_machine %} — {{ proxy_machine }} XBee{% endif %}</div>
+    <div class="page-subtitle">{% if proxy_machine is defined and proxy_machine %}Send gamepad commands to R1 via {{ proxy_machine }}'s XBee{% else %}Test gamepad input and send commands to robots via XBee{% endif %}</div>
+
+    <!-- Config Bar -->
+    <div class="config-bar">
+        <div class="config-group">
+            <label>Gamepad</label>
+            <select id="gamepad-select">
+                <option value="">-- No gamepad detected --</option>
+            </select>
+        </div>
+        <div class="config-group">
+            <label>{% if proxy_machine is defined and proxy_machine %}{{ proxy_machine }} XBee{% else %}Local XBee{% endif %}</label>
+            <div class="status-text">
+                <span class="status-dot waiting" id="xbee-dot"></span>
+                <span id="xbee-status">Checking...</span>
+            </div>
+        </div>
+        <div class="config-group">
+            <label>Target</label>
+            <select id="target-select">
+                <option value="broadcast">Broadcast (All)</option>
+                <option value="R1" selected>R1</option>
+                <option value="ROSMASTER">ROSMASTER</option>
+            </select>
+        </div>
+        <div class="config-group">
+            <label>Gamepad Status</label>
+            <div class="status-text">
+                <span class="status-dot disconnected" id="gp-dot"></span>
+                <span id="gp-status">No gamepad</span>
+            </div>
+            <div style="font-size:10px; color:#666;" id="keep-alive-status">Keep-alive: --</div>
+        </div>
+        <div class="config-group">
+            <label>Send Rate</label>
+            <select id="rate-select">
+                <option value="500" selected>500ms (2 Hz)</option>
+                <option value="1000">1000ms (1 Hz)</option>
+            </select>
+        </div>
+        <div class="config-group">
+            <label>&nbsp;</label>
+            <button class="btn" id="btn-send" onclick="toggleSend()">Start Sending</button>
+        </div>
+        <div class="config-group">
+            <label>Reverse</label>
+            <div style="display:flex; gap:10px; align-items:center; font-size:12px;">
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="rev-lx" style="cursor:pointer;"> LX</label>
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="rev-ly" style="cursor:pointer;"> LY</label>
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="rev-rx" style="cursor:pointer;"> RX</label>
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="rev-ry" style="cursor:pointer;"> RY</label>
+            </div>
+        </div>
+        <div class="config-group">
+            <label>RY Couple</label>
+            <div style="display:flex; gap:10px; align-items:center; font-size:12px;">
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="couple-ry-s4" checked style="cursor:pointer;"> S4</label>
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="couple-ry-s4-rev" style="cursor:pointer;"> S4 Rev</label>
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="couple-ry-s5" style="cursor:pointer;"> S5</label>
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="couple-ry-s5-rev" style="cursor:pointer;"> S5 Rev</label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Diagnostics Row -->
+    <div style="padding:0 24px 12px; font-size:11px; font-family:Consolas,monospace; color:#666;">
+        <span id="diag-info">Waiting for gamepad...</span>
+    </div>
+
+    <!-- Main Grid -->
+    <div class="main-grid">
+
+        <!-- Analog Sticks -->
+        <div class="card">
+            <h3>Analog Sticks</h3>
+            <div class="stick-container">
+                <div class="stick-box">
+                    <div class="label">Left Stick</div>
+                    <canvas id="stick-left" width="180" height="180"></canvas>
+                    <div class="stick-values" id="stick-left-val">X: 0.00  Y: 0.00</div>
+                </div>
+                <div class="stick-box">
+                    <div class="label">Right Stick</div>
+                    <canvas id="stick-right" width="180" height="180"></canvas>
+                    <div class="stick-values" id="stick-right-val">X: 0.00  Y: 0.00</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Buttons & D-Pad -->
+        <div class="card">
+            <h3>Buttons</h3>
+            <div class="buttons-grid" id="buttons-grid">
+                <!-- Populated by JS -->
+            </div>
+            <h3 style="margin-top:16px;">D-Pad (Hats)</h3>
+            <div class="dpad-container">
+                <div class="dpad-grid" id="dpad-grid">
+                    <div class="dpad-cell" id="dpad-ul"></div>
+                    <div class="dpad-cell" id="dpad-u">&#9650;</div>
+                    <div class="dpad-cell" id="dpad-ur"></div>
+                    <div class="dpad-cell" id="dpad-l">&#9664;</div>
+                    <div class="dpad-cell center" id="dpad-c"></div>
+                    <div class="dpad-cell" id="dpad-r">&#9654;</div>
+                    <div class="dpad-cell" id="dpad-dl"></div>
+                    <div class="dpad-cell" id="dpad-d">&#9660;</div>
+                    <div class="dpad-cell" id="dpad-dr"></div>
+                </div>
+                <div class="stick-values" id="hat-values">Hat: (0, 0)</div>
+            </div>
+        </div>
+
+        <!-- Axes Bars -->
+        <div class="card">
+            <h3>Axes (Raw Values)</h3>
+            <div id="axes-bars">
+                <div style="color:#555;font-size:12px;">No axes data</div>
+            </div>
+        </div>
+
+        <!-- XBee / Transmission Info -->
+        <div class="card">
+            <h3>XBee Transmission</h3>
+            <div class="xbee-info">
+                <div><span class="key">Local XBee:</span> <span class="val" id="xbee-port">--</span></div>
+                <div><span class="key">Baud Rate:</span> <span class="val">115200</span></div>
+                <div><span class="key">Target:</span> <span class="val" id="xbee-target">R1</span></div>
+                <div><span class="key">Mode:</span> <span class="val" id="xbee-mode">Unicast</span></div>
+                <div><span class="key">Sending:</span> <span class="val" id="xbee-sending">Off</span></div>
+                <div><span class="key">Packets Sent:</span> <span class="val" id="xbee-packets">0</span></div>
+                <div><span class="key">Send Rate:</span> <span class="val" id="xbee-rate">--</span></div>
+                <div><span class="key">Last ACK:</span> <span class="val" id="xbee-ack">--</span></div>
+                <div><span class="key">Deadzone:</span> <span class="val" id="xbee-deadzone">0.05</span></div>
+            </div>
+            <div style="margin-top:12px;">
+                <button class="btn" id="btn-send2" onclick="toggleSend()">Start Sending</button>
+            </div>
+            <hr style="border-color:#1a3a4a;margin:12px 0;">
+            <h4 style="color:#0ff;margin:0 0 8px;">Quick Test (Unicast to R1)</h4>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn" onclick="sendTestPacket('btn', 1)">Button 0</button>
+                <button class="btn" onclick="sendTestPacket('axes', [0.5,0,0,0])">L-Stick Right</button>
+                <button class="btn" onclick="sendTestPacket('axes', [0,0.5,0,0])">L-Stick Down</button>
+                <button class="btn" onclick="sendTestPacket('axes', [0,0,-0.5,0])">R-Stick Left</button>
+            </div>
+            <div id="qt-result" style="color:#0f0;font-size:12px;margin-top:8px;font-family:monospace;"></div>
+        </div>
+
+        <!-- Oscilloscope -->
+        <div class="card full-width">
+            <h3>Oscilloscope</h3>
+            <canvas id="scope-canvas" height="220"></canvas>
+            <div class="scope-legend" id="scope-legend"></div>
+        </div>
+
+        <!-- R1 Status Monitor -->
+        <div class="card full-width" id="r1-monitor">
+            <h3>R1 Status
+                <span id="r1-dot" class="status-dot disconnected" style="margin-left:8px;"></span>
+                <span id="r1-conn-text" style="font-size:11px;color:#666;font-weight:normal;margin-left:4px;">Checking...</span>
+            </h3>
+            <div id="r1-offline-msg" style="color:#666;font-size:13px;display:none;">
+                R1 Offline — connect via Ethernet to monitor
+            </div>
+            <div id="r1-content" style="display:none;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                    <!-- Left: Gamepad Receive Stats -->
+                    <div>
+                        <div style="font-size:11px;color:#888;text-transform:uppercase;margin-bottom:8px;">Gamepad Receive</div>
+                        <div style="display:flex;gap:16px;margin-bottom:12px;">
+                            <div style="text-align:center;">
+                                <div style="font-size:24px;font-weight:bold;color:#4ecca3;" id="r1-gp-count">0</div>
+                                <div style="font-size:10px;color:#666;">Packets</div>
+                            </div>
+                            <div style="text-align:center;">
+                                <div style="font-size:24px;font-weight:bold;color:#666;" id="r1-gp-arm-status">--</div>
+                                <div style="font-size:10px;color:#666;">GP&rarr;xArm</div>
+                            </div>
+                        </div>
+                        <!-- R1 Stick Positions (received) -->
+                        <div style="font-size:11px;color:#888;text-transform:uppercase;margin-bottom:6px;">R1 Received Sticks</div>
+                        <div style="display:flex;gap:12px;">
+                            <div style="text-align:center;">
+                                <canvas id="r1-stick-left" width="100" height="100" style="border:1px solid #0f3460;border-radius:6px;"></canvas>
+                                <div style="font-size:10px;color:#555;margin-top:2px;">Left</div>
+                            </div>
+                            <div style="text-align:center;">
+                                <canvas id="r1-stick-right" width="100" height="100" style="border:1px solid #0f3460;border-radius:6px;"></canvas>
+                                <div style="font-size:10px;color:#555;margin-top:2px;">Right</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: xArm Servo Positions -->
+                    <div>
+                        <div style="font-size:11px;color:#888;text-transform:uppercase;margin-bottom:8px;">
+                            xArm Servos
+                            <span id="r1-xarm-conn" style="font-size:10px;color:#666;margin-left:6px;">--</span>
+                        </div>
+                        <div id="r1-servo-bars"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vision Capture (R1) -->
+        <div class="card full-width" id="vision-capture-card">
+            <h3>Vision Capture
+                <span id="vision-christy-dot" class="status-dot disconnected" style="margin-left:8px;"></span>
+                <span id="vision-christy-text" style="font-size:11px;color:#666;font-weight:normal;margin-left:4px;">Christy: --</span>
+            </h3>
+            <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                <button class="btn" onclick="gamepadVisionCapture()" id="gp-capture-btn">Capture + YOLO</button>
+                <span style="font-size:11px; color:#666;">or press <b>Back/Select</b> button on gamepad</span>
+                <span id="gp-vision-queue" style="font-size:11px; color:#888; margin-left:auto;">Queue: --</span>
+            </div>
+            <div id="gp-vision-result" style="margin-top:10px; background:#0d1117; border-radius:6px; padding:10px; font-size:12px; color:#8b949e; display:none;">
+                <div style="color:#4ecca3; font-weight:bold; margin-bottom:4px;">YOLO Result</div>
+                <div id="gp-vision-text"></div>
+                <div id="gp-vision-meta" style="color:#555; margin-top:4px;"></div>
+                <a id="gp-vision-r1-link" href="http://192.168.1.82:5000/" target="_blank" style="color:#4ecca3; font-size:11px; margin-top:4px; display:inline-block;">View image on R1 agent page</a>
+            </div>
+        </div>
+    </div>
+
+<script>
+// ========== Proxy Configuration ==========
+const PROXY_MACHINE = "{{ proxy_machine|default('', true) }}";
+
+// API endpoint helpers
+const API = PROXY_MACHINE ? {
+    heartbeatStatus: '/api/proxy/' + PROXY_MACHINE + '/heartbeat/status',
+    gamepadBuffer:   '/api/proxy/' + PROXY_MACHINE + '/gamepad/buffer',
+    gamepadStart:    '/api/proxy/' + PROXY_MACHINE + '/gamepad/start',
+    gamepadStop:     '/api/proxy/' + PROXY_MACHINE + '/gamepad/stop',
+    xbeeSend:        '/api/proxy/' + PROXY_MACHINE + '/xbee/send',
+} : {
+    heartbeatStatus: '/api/heartbeat/status',
+    gamepadBuffer:   '/api/gamepad/buffer',
+    gamepadStart:    '/api/gamepad/start',
+    gamepadStop:     '/api/gamepad/stop',
+    xbeeSend:        '/api/xbee/send',
+};
+
+// ========== Gamepad Auto-Detection ==========
+let GAMEPAD_CONFIG = null;       // full gamepads.json (optional enhancement)
+let STICK_MAP = {lx: 0, ly: 1, rx: 2, ry: 3};  // updated by auto-detect or config
+let AXIS_OFFSETS = {};           // axis index -> idle offset to subtract
+let _mappingMode = '';           // 'standard' or '' (raw HID)
+let _calibrated = false;         // true after auto-calibration
+let _calibrationFrames = 0;      // frames collected for calibration
+let _calibrationSums = {};       // axis index -> sum of idle values
+const CALIBRATION_FRAMES = 30;   // ~0.5 sec at 60fps
+
+// XBee target addresses
+const XBEE_ADDRS = {
+    R1: '0013A20041BB8D5E',
+};
+
+// Deadzone threshold
+const DEADZONE = 0.05;
+
+// Load gamepads.json (optional — auto-detect handles most cases)
+async function loadGamepadConfig() {
+    const badge = document.getElementById('config-badge');
+    try {
+        const r = await fetch('/api/gamepads/config');
+        GAMEPAD_CONFIG = await r.json();
+        if (GAMEPAD_CONFIG.error) throw new Error(GAMEPAD_CONFIG.error);
+        badge.textContent = 'Config: loaded';
+        badge.className = 'config-badge loaded';
+    } catch(e) {
+        badge.textContent = 'Config: auto-detect';
+        badge.className = 'config-badge loaded';
+    }
+}
+loadGamepadConfig();
+
+// ========== Auto-Calibration ==========
+// Collects idle axis values over CALIBRATION_FRAMES, then:
+// - Detects axes that idle at -1.0 (triggers in raw HID mode)
+// - Sets offsets so all stick axes idle at 0.0
+// - Detects mapping mode from gamepad.mapping property
+
+function resetCalibration() {
+    _calibrated = false;
+    _calibrationFrames = 0;
+    _calibrationSums = {};
+    AXIS_OFFSETS = {};
+    _mappingMode = '';
+    updateDiagnostics();
+}
+
+function collectCalibrationFrame(gp) {
+    if (_calibrated) return;
+    if (_calibrationFrames === 0) {
+        _mappingMode = gp.mapping || '';
+    }
+
+    const axes = gp.axes;
+    for (let i = 0; i < axes.length; i++) {
+        if (!(i in _calibrationSums)) _calibrationSums[i] = 0;
+        _calibrationSums[i] += axes[i];
+    }
+    _calibrationFrames++;
+
+    if (_calibrationFrames >= CALIBRATION_FRAMES) {
+        finishCalibration(gp);
+    }
+}
+
+function finishCalibration(gp) {
+    const nAxes = gp.axes.length;
+    const idleValues = {};
+    for (let i = 0; i < nAxes; i++) {
+        idleValues[i] = _calibrationSums[i] / _calibrationFrames;
+    }
+
+    if (_mappingMode === 'standard') {
+        // Standard mapping: browser already remaps to LX=0, LY=1, RX=2, RY=3
+        // Axes idle near 0. No offsets needed, use default STICK_MAP.
+        STICK_MAP = {lx: 0, ly: 1, rx: 2, ry: 3};
+        AXIS_OFFSETS = {};
+
+    } else {
+        // Raw HID mode: detect trigger axes (idle at -1.0) and build mapping
+        // Triggers typically idle at -1.0 (or very close)
+        const triggerAxes = [];
+        const stickAxes = [];
+
+        for (let i = 0; i < nAxes; i++) {
+            const idle = idleValues[i];
+            if (idle < -0.8) {
+                // This axis idles far from 0 — likely a trigger
+                triggerAxes.push(i);
+            } else if (Math.abs(idle) < 0.3) {
+                // Idles near 0 — likely a stick axis
+                stickAxes.push(i);
+            }
+            // Other axes (constant weird offsets) are ignored for stick mapping
+        }
+
+        // Build stick map from detected stick axes
+        // Expected: first 4 near-zero axes are LX, LY, RX, RY
+        if (stickAxes.length >= 4) {
+            STICK_MAP = {
+                lx: stickAxes[0],
+                ly: stickAxes[1],
+                rx: stickAxes[2],
+                ry: stickAxes[3],
+            };
+        } else if (stickAxes.length >= 2) {
+            // Only 2 stick axes found — assume left stick only
+            STICK_MAP = {
+                lx: stickAxes[0],
+                ly: stickAxes[1],
+                rx: stickAxes[0],  // fallback
+                ry: stickAxes[1],
+            };
+        }
+        // else: keep default STICK_MAP
+
+        // Set offsets for all axes so they idle at 0
+        AXIS_OFFSETS = {};
+        for (let i = 0; i < nAxes; i++) {
+            const idle = idleValues[i];
+            if (Math.abs(idle) > DEADZONE) {
+                AXIS_OFFSETS[i] = idle;
+            }
+        }
+    }
+
+    // Apply coupling defaults for RY axis
+    applyCouplingDefaults();
+
+    _calibrated = true;
+    updateDiagnostics();
+}
+
+function applyCouplingDefaults() {
+    // If we have gamepads.json config with coupling for this stick map, apply it
+    if (!GAMEPAD_CONFIG || !GAMEPAD_CONFIG.gamepads) {
+        // Default coupling: RY -> S4
+        document.getElementById('couple-ry-s4').checked = true;
+        return;
+    }
+
+    // Try to find a matching profile
+    if (_gpIndex !== null) {
+        const gp = navigator.getGamepads()[_gpIndex];
+        if (gp) {
+            const profile = matchGamepadProfile(gp.id);
+            if (profile && profile.coupling) {
+                const ryKey = String(STICK_MAP.ry);
+                const coupling = profile.coupling[ryKey];
+                if (coupling) {
+                    document.getElementById('couple-ry-s4').checked = false;
+                    document.getElementById('couple-ry-s5').checked = false;
+                    coupling.forEach(function(c) {
+                        if (c.servo === 4) {
+                            document.getElementById('couple-ry-s4').checked = true;
+                            document.getElementById('couple-ry-s4-rev').checked = !!c.reverse;
+                        }
+                        if (c.servo === 5) {
+                            document.getElementById('couple-ry-s5').checked = true;
+                            document.getElementById('couple-ry-s5-rev').checked = !!c.reverse;
+                        }
+                    });
+                    return;
+                }
+            }
+        }
+    }
+}
+
+// Simple profile matcher (used for coupling/button_map lookup only)
+function matchGamepadProfile(gpId) {
+    if (!GAMEPAD_CONFIG || !GAMEPAD_CONFIG.gamepads) return null;
+    const lower = gpId.toLowerCase();
+    const profiles = GAMEPAD_CONFIG.gamepads;
+
+    // Try vendor:product match
+    const m = gpId.match(/Vendor:\s*([0-9a-fA-F]+).*?Product:\s*([0-9a-fA-F]+)/i);
+    const vpId = m ? (m[1] + ':' + m[2]).toLowerCase() : null;
+    if (vpId) {
+        for (const key in profiles) {
+            if (key.toLowerCase().includes(vpId)) return profiles[key];
+        }
+    }
+
+    // Substring match
+    for (const key in profiles) {
+        if (lower.includes(key.toLowerCase())) return profiles[key];
+    }
+
+    // Active fallback
+    const active = GAMEPAD_CONFIG.active;
+    if (active && profiles[active]) return profiles[active];
+    return null;
+}
+
+function updateDiagnostics() {
+    const badge = document.getElementById('config-badge');
+    const diag = document.getElementById('diag-info');
+    if (!_calibrated) {
+        if (badge) {
+            badge.textContent = 'Calibrating... (' + _calibrationFrames + '/' + CALIBRATION_FRAMES + ')';
+            badge.className = 'config-badge';
+        }
+        if (diag) diag.textContent = 'Calibrating...';
+        return;
+    }
+
+    const mode = _mappingMode === 'standard' ? 'Standard (remapped)' : 'Raw HID';
+    const map = 'LX=A' + STICK_MAP.lx + ' LY=A' + STICK_MAP.ly +
+                ' RX=A' + STICK_MAP.rx + ' RY=A' + STICK_MAP.ry;
+    const offsets = Object.keys(AXIS_OFFSETS).length;
+    const offsetStr = offsets > 0
+        ? Object.entries(AXIS_OFFSETS).map(function(e) { return 'A' + e[0] + ':' + e[1].toFixed(1); }).join(' ')
+        : 'none';
+
+    if (badge) {
+        badge.textContent = mode;
+        badge.className = 'config-badge loaded';
+    }
+    if (diag) {
+        diag.textContent = 'Mode: ' + mode + ' | Map: ' + map + ' | Offsets: ' + offsetStr;
+    }
+}
+
+// Coupling helpers
+function getCoupling() {
+    const coupling = {};
+    const ryServos = [];
+    if (document.getElementById('couple-ry-s4').checked) {
+        ryServos.push({servo: 4, reverse: document.getElementById('couple-ry-s4-rev').checked});
+    }
+    if (document.getElementById('couple-ry-s5').checked) {
+        ryServos.push({servo: 5, reverse: document.getElementById('couple-ry-s5-rev').checked});
+    }
+    if (ryServos.length > 0) {
+        // Use normalized index 3 (RY is always at index 3 in the sent payload)
+        coupling["3"] = ryServos;
+    }
+    return coupling;
+}
+
+// Reverse helpers
+function getReverse() {
+    return {
+        lx: document.getElementById('rev-lx').checked,
+        ly: document.getElementById('rev-ly').checked,
+        rx: document.getElementById('rev-rx').checked,
+        ry: document.getElementById('rev-ry').checked,
+    };
+}
+// Apply axis offset correction (subtract idle offset, clamp to -1..+1)
+function applyAxisOffsets(rawAxes) {
+    const out = Array.from(rawAxes);
+    for (const idx in AXIS_OFFSETS) {
+        const i = parseInt(idx);
+        if (i < out.length) {
+            out[i] = Math.max(-1, Math.min(1, out[i] - AXIS_OFFSETS[i]));
+        }
+    }
+    return out;
+}
+
+function applyStickReverse(rawAxes) {
+    const rev = getReverse();
+    const out = applyAxisOffsets(rawAxes);
+    if (rev.lx) out[STICK_MAP.lx] = -out[STICK_MAP.lx];
+    if (rev.ly) out[STICK_MAP.ly] = -out[STICK_MAP.ly];
+    if (rev.rx) out[STICK_MAP.rx] = -out[STICK_MAP.rx];
+    if (rev.ry) out[STICK_MAP.ry] = -out[STICK_MAP.ry];
+    return out;
+}
+
+// Apply deadzone to a single axis value
+function applyDeadzone(value) {
+    return Math.abs(value) < DEADZONE ? 0 : value;
+}
+
+// Quick Test: send a single packet via unicast
+function sendTestPacket(type, value) {
+    const target = document.getElementById('target-select').value;
+    const el = document.getElementById('qt-result');
+    let axes = [0,0,0,0,0,0,0,0,0,0];
+    let bmask = 0;
+    if (type === 'btn') {
+        bmask = value;
+    } else if (type === 'axes') {
+        for (let i = 0; i < value.length; i++) axes[i] = value[i];
+    }
+    const payload = JSON.stringify({ t: 'gp', r: target, a: axes, b: bmask });
+    const t0 = performance.now();
+    el.textContent = 'Sending...';
+    fetch(API.xbeeSend, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ message: payload, target_addr: XBEE_ADDRS[target] || null })
+    })
+    .then(r => r.json())
+    .then(d => {
+        const ms = Math.round(performance.now() - t0);
+        el.textContent = (d.success ? 'OK' : 'FAIL') + ' (' + ms + 'ms) ' + payload.substring(0, 60);
+        el.style.color = d.success ? '#0f0' : '#f44';
+    })
+    .catch(e => { el.textContent = 'Error: ' + e; el.style.color = '#f44'; });
+}
+
+// ========== Gamepad API ==========
+
+const SCOPE_COLORS = [
+    '#64b5f6','#e94560','#00c853','#ff9800','#ce93d8','#4dd0e1',
+    '#ffeb3b','#ef9a9a','#a5d6a7','#90caf9','#ffcc80','#b39ddb',
+    '#80deea','#fff59d','#f48fb1','#c5e1a5','#81d4fa','#ffe082',
+];
+
+let _gpIndex = null;
+let _sending = false;
+let _packetCount = 0;
+let _scopeData = {};   // channelName -> [values]
+let _scopeCursor = 0;
+const SCOPE_MAX = 300;
+let _scopeChannels = [];  // ordered list of channel names
+
+// Check XBee status (local or proxied) + gamepad ACK
+function checkXbee() {
+    const label = PROXY_MACHINE ? PROXY_MACHINE + ' XBee' : 'Local XBee';
+    fetch(API.heartbeatStatus)
+        .then(r => r.json())
+        .then(d => {
+            const dot = document.getElementById('xbee-dot');
+            const status = document.getElementById('xbee-status');
+            const port = document.getElementById('xbee-port');
+            if (d.running) {
+                dot.className = 'status-dot connected';
+                status.textContent = (d.port || '') + ' ' + (d.reply || '') + ' (Ready)';
+                port.textContent = d.port || label;
+            } else {
+                dot.className = 'status-dot disconnected';
+                status.textContent = (d.port || '?') + ' (Off — start heartbeat first)';
+                port.textContent = (d.port || '?') + ' (Off)';
+            }
+            // Update gamepad ACK from gamepad status
+            const gp = d.gamepad;
+            if (gp && gp.last_ack) {
+                const ack = gp.last_ack;
+                const el = document.getElementById('xbee-ack');
+                const ackStatus = ack.idle ? 'idle' : 'active';
+                el.textContent = ack.time + ' cnt:' + ack.count + ' RSSI:' + ack.rssi + ' [' + ackStatus + ']';
+                el.style.color = ack.idle ? '#ff0' : '#0f0';
+            }
+        })
+        .catch(() => {
+            document.getElementById('xbee-dot').className = 'status-dot disconnected';
+            document.getElementById('xbee-status').textContent = label + ' unreachable';
+        });
+}
+checkXbee();
+setInterval(checkXbee, 5000);
+
+// Devices to filter out (not gamepads)
+const GAMEPAD_BLACKLIST = ['plantronics', 'headset', 'headphone', 'microphone', 'speaker', 'audio'];
+
+function isBlacklisted(name) {
+    const lower = name.toLowerCase();
+    return GAMEPAD_BLACKLIST.some(b => lower.includes(b));
+}
+
+// Gamepad detection
+let _lastProfileKey = '';
+function scanGamepads() {
+    const gamepads = navigator.getGamepads();
+    const sel = document.getElementById('gamepad-select');
+    const dot = document.getElementById('gp-dot');
+    const statusEl = document.getElementById('gp-status');
+    let found = false;
+
+    // Remember current selection
+    const curVal = sel.value;
+
+    // Build new options (filter out non-gamepad devices)
+    const opts = [];
+    for (let i = 0; i < gamepads.length; i++) {
+        const gp = gamepads[i];
+        if (!gp) continue;
+        if (isBlacklisted(gp.id)) continue;
+        found = true;
+        opts.push({ index: i, id: gp.id, axes: gp.axes.length, buttons: gp.buttons.length });
+    }
+
+    if (opts.length === 0) {
+        if (sel.options.length !== 1 || sel.options[0].value !== '') {
+            sel.innerHTML = '<option value="">-- No gamepad detected --</option>';
+        }
+        dot.className = 'status-dot disconnected';
+        statusEl.textContent = 'No gamepad';
+        _gpIndex = null;
+        return;
+    }
+
+    // Update dropdown only if changed
+    const newKey = opts.map(o => o.index + ':' + o.id).join('|');
+    if (sel.dataset.key !== newKey) {
+        sel.dataset.key = newKey;
+        sel.innerHTML = '';
+        opts.forEach(o => {
+            const opt = document.createElement('option');
+            opt.value = o.index;
+            opt.textContent = '[' + o.index + '] ' + o.id + ' (' + o.axes + ' axes, ' + o.buttons + ' btns)';
+            sel.appendChild(opt);
+        });
+        // Restore selection
+        if (curVal && sel.querySelector('option[value="' + curVal + '"]')) {
+            sel.value = curVal;
+        }
+    }
+
+    _gpIndex = parseInt(sel.value);
+    if (isNaN(_gpIndex) && opts.length > 0) {
+        _gpIndex = opts[0].index;
+        sel.value = _gpIndex;
+    }
+
+    // Trigger auto-calibration when gamepad changes
+    const gp = gamepads[_gpIndex];
+    if (gp) {
+        const profileKey = gp.id;
+        if (profileKey !== _lastProfileKey) {
+            _lastProfileKey = profileKey;
+            resetCalibration();
+        }
+    }
+
+    dot.className = 'status-dot connected';
+    statusEl.textContent = 'Connected (' + opts.length + ')';
+}
+
+document.getElementById('gamepad-select').addEventListener('change', function() {
+    _gpIndex = parseInt(this.value);
+    _lastProfileKey = '';  // force re-calibration on change
+    resetCalibration();
+    _scopeData = {};
+    _scopeChannels = [];
+    _scopeCursor = 0;
+});
+
+document.getElementById('target-select').addEventListener('change', function() {
+    document.getElementById('xbee-target').textContent = this.value;
+});
+
+window.addEventListener('gamepadconnected', () => scanGamepads());
+window.addEventListener('gamepaddisconnected', () => { _gpIndex = null; _lastProfileKey = ''; resetCalibration(); scanGamepads(); });
+setInterval(scanGamepads, 2000);
+
+// Keep-alive: send tiny vibration pulse to prevent wireless controller sleep
+let _keepAliveStatus = 'off';
+function keepAliveVibration() {
+    if (_gpIndex === null) { _keepAliveStatus = 'no gamepad'; return; }
+    const gp = navigator.getGamepads()[_gpIndex];
+    if (!gp) { _keepAliveStatus = 'no gamepad'; return; }
+    if (gp.vibrationActuator) {
+        gp.vibrationActuator.playEffect('dual-rumble', {
+            duration: 1,
+            strongMagnitude: 0.0,
+            weakMagnitude: 0.01,
+        }).then(() => { _keepAliveStatus = 'vibration OK'; })
+          .catch(() => { _keepAliveStatus = 'vibration failed'; });
+    } else if (gp.hapticActuators && gp.hapticActuators.length > 0) {
+        gp.hapticActuators[0].pulse(0.01, 1)
+          .then(() => { _keepAliveStatus = 'haptic OK'; })
+          .catch(() => { _keepAliveStatus = 'haptic failed'; });
+    } else {
+        _keepAliveStatus = 'not supported';
+    }
+}
+setInterval(keepAliveVibration, 5000);
+
+// ========== Drawing ==========
+
+function drawStick(canvasId, x, y, color) {
+    const c = document.getElementById(canvasId);
+    const ctx = c.getContext('2d');
+    const w = c.width, h = c.height;
+    const margin = 20;
+    const area = Math.min(w, h) - 2 * margin;
+    const ox = (w - area) / 2;
+    const oy = (h - area) / 2;
+    const cx = ox + area / 2;
+    const cy = oy + area / 2;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Background
+    ctx.fillStyle = '#0a1929';
+    ctx.fillRect(0, 0, w, h);
+
+    // Border
+    ctx.strokeStyle = '#0f3460';
+    ctx.strokeRect(ox, oy, area, area);
+
+    // Cross-hairs
+    ctx.strokeStyle = '#1a2a4a';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(ox, cy); ctx.lineTo(ox + area, cy);
+    ctx.moveTo(cx, oy); ctx.lineTo(cx, oy + area);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Dead zone circle
+    ctx.strokeStyle = '#1a3a5a';
+    ctx.beginPath();
+    ctx.arc(cx, cy, area * DEADZONE, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Dot position
+    const px = ox + (x + 1) / 2 * area;
+    const py = oy + (y + 1) / 2 * area;
+
+    // Trail line
+    ctx.strokeStyle = color + '44';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(px, py);
+    ctx.stroke();
+
+    // Dot
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(px, py, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Axis labels
+    ctx.fillStyle = '#444';
+    ctx.font = '9px Consolas';
+    ctx.fillText('-1', ox - 14, cy + 3);
+    ctx.fillText('+1', ox + area + 3, cy + 3);
+    ctx.fillText('+1', cx - 6, oy - 4);
+    ctx.fillText('-1', cx - 6, oy + area + 12);
+}
+
+function updateButtons(buttons) {
+    const grid = document.getElementById('buttons-grid');
+
+    // Create button elements if needed
+    while (grid.children.length < buttons.length) {
+        const div = document.createElement('div');
+        div.className = 'gp-btn';
+        div.textContent = 'B' + grid.children.length;
+        grid.appendChild(div);
+    }
+    while (grid.children.length > buttons.length) {
+        grid.removeChild(grid.lastChild);
+    }
+
+    for (let i = 0; i < buttons.length; i++) {
+        const el = grid.children[i];
+        const pressed = buttons[i].pressed;
+        const newClass = pressed ? 'gp-btn pressed' : 'gp-btn';
+        if (el.className !== newClass) el.className = newClass;
+    }
+}
+
+function updateDpad(axes, buttons) {
+    let hatX = 0, hatY = 0;
+
+    // Try standard buttons 12-15
+    if (buttons.length > 15) {
+        if (buttons[12].pressed) hatY = 1;   // up
+        if (buttons[13].pressed) hatY = -1;  // down
+        if (buttons[14].pressed) hatX = -1;  // left
+        if (buttons[15].pressed) hatX = 1;   // right
+    }
+    // Some gamepads use axes 6,7 or 9 for dpad
+    if (axes.length > 7 && hatX === 0 && hatY === 0) {
+        hatX = Math.round(axes[6] || 0);
+        hatY = -Math.round(axes[7] || 0);
+    }
+
+    const ids = {
+        'dpad-u':  hatY > 0,
+        'dpad-d':  hatY < 0,
+        'dpad-l':  hatX < 0,
+        'dpad-r':  hatX > 0,
+        'dpad-ul': hatX < 0 && hatY > 0,
+        'dpad-ur': hatX > 0 && hatY > 0,
+        'dpad-dl': hatX < 0 && hatY < 0,
+        'dpad-dr': hatX > 0 && hatY < 0,
+    };
+    for (const [id, active] of Object.entries(ids)) {
+        const el = document.getElementById(id);
+        if (el) {
+            const cls = active ? 'dpad-cell active' : 'dpad-cell';
+            if (id === 'dpad-c') continue;
+            if (el.className !== cls) el.className = cls;
+        }
+    }
+    document.getElementById('hat-values').textContent = 'Hat: (' + hatX + ', ' + hatY + ')';
+}
+
+function updateAxesBars(axes) {
+    const container = document.getElementById('axes-bars');
+
+    if (!document.getElementById('axis-fill-0')) {
+        container.innerHTML = '';
+    }
+    while (container.children.length < axes.length) {
+        const idx = container.children.length;
+        const row = document.createElement('div');
+        row.className = 'axis-row';
+        row.innerHTML =
+            '<div class="axis-label">A' + idx + '</div>' +
+            '<div class="axis-bar-bg">' +
+            '  <div class="axis-bar-center"></div>' +
+            '  <div class="axis-bar-fill" id="axis-fill-' + idx + '"></div>' +
+            '</div>' +
+            '<div class="axis-value" id="axis-val-' + idx + '">0.00</div>';
+        container.appendChild(row);
+    }
+
+    for (let i = 0; i < axes.length; i++) {
+        const v = axes[i];
+        const fill = document.getElementById('axis-fill-' + i);
+        const val = document.getElementById('axis-val-' + i);
+        if (!fill) continue;
+
+        const pct = Math.abs(v) * 50;
+        if (v >= 0) {
+            fill.style.left = '50%';
+            fill.style.width = pct + '%';
+        } else {
+            fill.style.left = (50 - pct) + '%';
+            fill.style.width = pct + '%';
+        }
+
+        const mag = Math.abs(v);
+        fill.style.background = mag > 0.8 ? '#e94560' : mag > 0.3 ? '#f0a500' : '#4ecca3';
+
+        const txt = (v >= 0 ? '+' : '') + v.toFixed(3);
+        if (val.textContent !== txt) val.textContent = txt;
+    }
+}
+
+// ========== Oscilloscope ==========
+
+function pushScopeData(axes, buttons) {
+    for (let i = 0; i < axes.length; i++) {
+        const key = 'A' + i;
+        if (!_scopeData[key]) {
+            _scopeData[key] = new Array(SCOPE_MAX).fill(null);
+            _scopeChannels = Object.keys(_scopeData).sort((a, b) => {
+                const pa = a[0] === 'A' ? 0 : 1;
+                const pb = b[0] === 'A' ? 0 : 1;
+                if (pa !== pb) return pa - pb;
+                return parseInt(a.slice(1)) - parseInt(b.slice(1));
+            });
+        }
+        _scopeData[key][_scopeCursor] = axes[i];
+    }
+
+    for (let i = 0; i < Math.min(buttons.length, 12); i++) {
+        const key = 'B' + i;
+        if (!_scopeData[key]) {
+            _scopeData[key] = new Array(SCOPE_MAX).fill(null);
+            _scopeChannels = Object.keys(_scopeData).sort((a, b) => {
+                const pa = a[0] === 'A' ? 0 : 1;
+                const pb = b[0] === 'A' ? 0 : 1;
+                if (pa !== pb) return pa - pb;
+                return parseInt(a.slice(1)) - parseInt(b.slice(1));
+            });
+        }
+        _scopeData[key][_scopeCursor] = buttons[i].pressed ? 1 : 0;
+    }
+
+    _scopeCursor = (_scopeCursor + 1) % SCOPE_MAX;
+}
+
+function drawScope() {
+    const canvas = document.getElementById('scope-canvas');
+    const ctx = canvas.getContext('2d');
+
+    const rect = canvas.getBoundingClientRect();
+    if (canvas.width !== rect.width * window.devicePixelRatio) {
+        canvas.width = rect.width * window.devicePixelRatio;
+        canvas.height = 220 * window.devicePixelRatio;
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    }
+
+    const w = rect.width;
+    const h = 220;
+    const ml = 30, mr = 4, mt = 4, mb = 4;
+    const pw = w - ml - mr;
+    const ph = h - mt - mb;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#0a1929';
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.strokeStyle = '#0f3460';
+    ctx.strokeRect(ml, mt, pw, ph);
+
+    if (_scopeChannels.length === 0) {
+        ctx.fillStyle = '#444';
+        ctx.font = '12px Consolas';
+        ctx.fillText('Waiting for gamepad data...', w / 2 - 90, h / 2);
+        return;
+    }
+
+    const nCh = _scopeChannels.length;
+    const laneH = ph / nCh;
+    const step = pw / (SCOPE_MAX - 1);
+
+    // Update legend
+    const legend = document.getElementById('scope-legend');
+    if (legend.children.length !== nCh) {
+        legend.innerHTML = '';
+        _scopeChannels.forEach((key, ci) => {
+            const color = SCOPE_COLORS[ci % SCOPE_COLORS.length];
+            const item = document.createElement('span');
+            item.className = 'scope-legend-item';
+            item.innerHTML = '<span class="scope-legend-dot" style="background:' + color + '"></span>' + key;
+            legend.appendChild(item);
+        });
+    }
+
+    for (let ci = 0; ci < nCh; ci++) {
+        const key = _scopeChannels[ci];
+        const buf = _scopeData[key];
+        const color = SCOPE_COLORS[ci % SCOPE_COLORS.length];
+        const laneTop = mt + ci * laneH;
+        const isDigital = key[0] === 'B';
+
+        if (ci > 0) {
+            ctx.strokeStyle = '#0f3460';
+            ctx.beginPath();
+            ctx.moveTo(ml, laneTop);
+            ctx.lineTo(ml + pw, laneTop);
+            ctx.stroke();
+        }
+
+        const baseY = isDigital ? laneTop + laneH : laneTop + laneH / 2;
+        ctx.strokeStyle = '#0f346044';
+        ctx.setLineDash([2, 4]);
+        ctx.beginPath();
+        ctx.moveTo(ml, baseY);
+        ctx.lineTo(ml + pw, baseY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = color;
+        ctx.font = '8px Consolas';
+        ctx.fillText(key, 2, laneTop + laneH / 2 + 3);
+
+        const pad = Math.max(1, laneH * 0.08);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        let started = false;
+
+        for (let i = 0; i < SCOPE_MAX; i++) {
+            const val = buf[i];
+            if (val === null) { started = false; continue; }
+            const x = ml + i * step;
+            let y;
+            if (isDigital) {
+                y = laneTop + laneH - pad - val * (laneH - 2 * pad);
+            } else {
+                y = laneTop + pad + (1.0 - val) / 2.0 * (laneH - 2 * pad);
+            }
+            if (!started) { ctx.moveTo(x, y); started = true; }
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.lineWidth = 1;
+    }
+
+    // Sweep cursor
+    const cx = ml + (_scopeCursor / (SCOPE_MAX - 1)) * pw;
+    ctx.strokeStyle = '#ffffff55';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(cx, mt);
+    ctx.lineTo(cx, mt + ph);
+    ctx.stroke();
+    ctx.setLineDash([]);
+}
+
+// ========== Sending ==========
+
+let _sendInterval = null;
+
+// --- Accumulator: collects gamepad samples between sends ---
+let _accum = { axesSums: [], axesCounts: [], btnOr: 0, nAxes: 0, samples: 0 };
+
+function _resetAccum() {
+    _accum = { axesSums: [], axesCounts: [], btnOr: 0, nAxes: 0, samples: 0 };
+}
+
+function _accumSample() {
+    if (!_sending || _gpIndex === null) return;
+    const gp = navigator.getGamepads()[_gpIndex];
+    if (!gp) return;
+
+    const reversedAxes = applyStickReverse(gp.axes);
+    const n = reversedAxes.length;
+    if (_accum.nAxes === 0) {
+        _accum.nAxes = n;
+        _accum.axesSums = new Array(n).fill(0);
+        _accum.axesCounts = new Array(n).fill(0);
+    }
+    for (let i = 0; i < n; i++) {
+        _accum.axesSums[i] += reversedAxes[i];
+        _accum.axesCounts[i]++;
+    }
+    for (let i = 0; i < gp.buttons.length; i++) {
+        if (gp.buttons[i].pressed) _accum.btnOr |= (1 << i);
+    }
+    _accum.samples++;
+}
+
+function _sendAccumulated() {
+    if (!_sending || _accum.samples === 0) return;
+
+    const target = document.getElementById('target-select').value;
+    const rawAxes = [];
+    for (let i = 0; i < _accum.nAxes; i++) {
+        const avg = _accum.axesCounts[i] > 0
+            ? _accum.axesSums[i] / _accum.axesCounts[i] : 0;
+        // Apply deadzone to averaged value
+        rawAxes.push(parseFloat(applyDeadzone(avg).toFixed(2)));
+    }
+    const bmask = _accum.btnOr;
+    _resetAccum();
+
+    // Normalize: remap stick axes to indices 0-3 (LX, LY, RX, RY)
+    // so R1's GAMEPAD_AXIS_MAP {0:S2, 1:S3, 2:S6, 3:S4} always works
+    const axes = [0, 0, 0, 0];
+    axes[0] = rawAxes[STICK_MAP.lx] || 0;  // LX -> index 0
+    axes[1] = rawAxes[STICK_MAP.ly] || 0;  // LY -> index 1
+    axes[2] = rawAxes[STICK_MAP.rx] || 0;  // RX -> index 2
+    axes[3] = rawAxes[STICK_MAP.ry] || 0;  // RY -> index 3
+
+    const payload = JSON.stringify({ t: 'gp', r: target, a: axes, b: bmask });
+
+    fetch(API.gamepadBuffer, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ data: payload })
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (d.ok) {
+            _packetCount++;
+            document.getElementById('xbee-packets').textContent = _packetCount;
+        }
+    })
+    .catch(() => {});
+}
+
+function updateSendButtons(sending) {
+    const btn1 = document.getElementById('btn-send');
+    const btn2 = document.getElementById('btn-send2');
+    if (sending) {
+        btn1.className = 'btn danger';
+        btn1.textContent = 'Stop Sending';
+        btn2.className = 'btn danger';
+        btn2.textContent = 'Stop Sending';
+    } else {
+        btn1.className = 'btn';
+        btn1.textContent = 'Start Sending';
+        btn2.className = 'btn';
+        btn2.textContent = 'Start Sending';
+    }
+}
+
+function toggleSend() {
+    _sending = !_sending;
+    const info = document.getElementById('xbee-sending');
+    const rateMs = parseInt(document.getElementById('rate-select').value);
+
+    updateSendButtons(_sending);
+
+    if (_sending) {
+        info.textContent = 'Active';
+        document.getElementById('xbee-rate').textContent = (1000 / rateMs) + ' Hz';
+        _resetAccum();
+        const target = document.getElementById('target-select').value;
+        const addr = XBEE_ADDRS[target] || null;
+        document.getElementById('xbee-mode').textContent = addr ? 'Unicast' : 'Broadcast';
+        // Send stick mapping + coupling config before starting gamepad stream
+        // Always send standard mapping (0-3) since we normalize axes before sending
+        const NORMALIZED_MAP = {lx: 0, ly: 1, rx: 2, ry: 3};
+        const configPayload = JSON.stringify({type: 'gamepad_config', payload: {stick_map: NORMALIZED_MAP, coupling: getCoupling()}});
+        fetch(API.xbeeSend, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: configPayload, target_addr: addr })
+        });
+        fetch(API.gamepadStart, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ interval: rateMs / 1000.0, target_addr: addr })
+        });
+        _sendInterval = setInterval(_sendAccumulated, rateMs);
+    } else {
+        info.textContent = 'Off';
+        document.getElementById('xbee-rate').textContent = '--';
+        fetch(API.gamepadStop, { method: 'POST' });
+        if (_sendInterval) { clearInterval(_sendInterval); _sendInterval = null; }
+        _resetAccum();
+    }
+}
+
+// Rate selector change while sending
+document.getElementById('rate-select').addEventListener('change', function() {
+    if (!_sending) return;
+    const rateMs = parseInt(this.value);
+    document.getElementById('xbee-rate').textContent = (1000 / rateMs) + ' Hz';
+    fetch(API.gamepadStart, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ interval: rateMs / 1000.0 })
+    });
+    if (_sendInterval) clearInterval(_sendInterval);
+    _sendInterval = setInterval(_sendAccumulated, rateMs);
+});
+
+// ========== Main Loop ==========
+
+function gameLoop() {
+    if (_gpIndex === null) {
+        drawStick('stick-left', 0, 0, '#29b6f6');
+        drawStick('stick-right', 0, 0, '#e94560');
+        drawScope();
+        requestAnimationFrame(gameLoop);
+        return;
+    }
+
+    const gp = navigator.getGamepads()[_gpIndex];
+    if (!gp) {
+        requestAnimationFrame(gameLoop);
+        return;
+    }
+
+    // Auto-calibration: collect idle frames before displaying corrected data
+    if (!_calibrated) {
+        collectCalibrationFrame(gp);
+        // Still show raw data during calibration
+        updateAxesBars(Array.from(gp.axes));
+        updateButtons(Array.from(gp.buttons));
+        drawStick('stick-left', 0, 0, '#29b6f6');
+        drawStick('stick-right', 0, 0, '#e94560');
+        requestAnimationFrame(gameLoop);
+        return;
+    }
+
+    const rawAxes = Array.from(gp.axes);
+    const axes = applyStickReverse(rawAxes);
+    const buttons = Array.from(gp.buttons);
+
+    // Left stick (use auto-detected STICK_MAP)
+    const lx = axes[STICK_MAP.lx] || 0;
+    const ly = axes[STICK_MAP.ly] || 0;
+    drawStick('stick-left', lx, ly, '#29b6f6');
+    document.getElementById('stick-left-val').textContent =
+        'X: ' + lx.toFixed(2) + '  Y: ' + ly.toFixed(2);
+
+    // Right stick
+    const rx = axes[STICK_MAP.rx] || 0;
+    const ry = axes[STICK_MAP.ry] || 0;
+    drawStick('stick-right', rx, ry, '#e94560');
+    document.getElementById('stick-right-val').textContent =
+        'X: ' + rx.toFixed(2) + '  Y: ' + ry.toFixed(2);
+
+    // Buttons
+    updateButtons(buttons);
+
+    // D-Pad
+    updateDpad(axes, buttons);
+
+    // Axes bars (show corrected values)
+    updateAxesBars(axes);
+
+    // Oscilloscope
+    pushScopeData(axes, buttons);
+    drawScope();
+
+    // Accumulate gamepad sample for XBee sending (~60Hz sampling)
+    _accumSample();
+
+    // Send rate display
+    document.getElementById('xbee-packets').textContent = _packetCount;
+
+    // Keep-alive status
+    const kaEl = document.getElementById('keep-alive-status');
+    if (kaEl) kaEl.textContent = 'Keep-alive: ' + _keepAliveStatus;
+
+    requestAnimationFrame(gameLoop);
+}
+
+// Start
+drawStick('stick-left', 0, 0, '#29b6f6');
+drawStick('stick-right', 0, 0, '#e94560');
+requestAnimationFrame(gameLoop);
+
+// ========== R1 Status Monitor ==========
+
+const R1_PROXY = '/api/proxy/R1/xbee';
+let _r1Online = false;
+let _r1PollInterval = null;
+
+function drawR1Stick(canvasId, x, y, color) {
+    const c = document.getElementById(canvasId);
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    const w = c.width, h = c.height;
+    const m = 10;
+    const area = Math.min(w, h) - 2 * m;
+    const cx = w / 2, cy = h / 2;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#0a1929';
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.strokeStyle = '#1a2a4a';
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.moveTo(m, cy); ctx.lineTo(w - m, cy);
+    ctx.moveTo(cx, m); ctx.lineTo(cx, h - m);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const px = m + (x + 1) / 2 * area;
+    const py = m + (y + 1) / 2 * area;
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(px, py, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+}
+
+function initServosBars() {
+    const container = document.getElementById('r1-servo-bars');
+    if (!container || container.children.length > 0) return;
+    for (let i = 1; i <= 6; i++) {
+        const row = document.createElement('div');
+        row.style.cssText = 'margin-bottom:6px;';
+        row.innerHTML =
+            '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;">' +
+            '  <span style="color:#888;">S' + i + (i === 1 ? ' (Gripper)' : '') + '</span>' +
+            '  <span style="color:#aaa;font-family:Consolas,monospace;" id="r1-servo-val-' + i + '">500</span>' +
+            '</div>' +
+            '<div style="height:6px;background:#0a1929;border-radius:3px;overflow:hidden;">' +
+            '  <div id="r1-servo-bar-' + i + '" style="height:100%;width:50%;background:#4ecca3;border-radius:3px;transition:width 0.2s;"></div>' +
+            '</div>';
+        container.appendChild(row);
+    }
+}
+
+function pollR1Status() {
+    fetch(R1_PROXY + '/scope')
+        .then(r => { if (!r.ok) throw new Error('offline'); return r.json(); })
+        .then(d => {
+            if (!_r1Online) {
+                _r1Online = true;
+                document.getElementById('r1-dot').className = 'status-dot connected';
+                document.getElementById('r1-conn-text').textContent = 'Online';
+                document.getElementById('r1-content').style.display = '';
+                document.getElementById('r1-offline-msg').style.display = 'none';
+                initServosBars();
+            }
+
+            document.getElementById('r1-gp-count').textContent = d.gamepad_count || 0;
+
+            const armEl = document.getElementById('r1-gp-arm-status');
+            if (d.gamepad_arm_enabled) {
+                armEl.textContent = 'ON';
+                armEl.style.color = '#4ecca3';
+            } else {
+                armEl.textContent = 'OFF';
+                armEl.style.color = '#666';
+            }
+
+            if (d.sticks) {
+                drawR1Stick('r1-stick-left', d.sticks.left[0] || 0, d.sticks.left[1] || 0, '#29b6f6');
+                drawR1Stick('r1-stick-right', d.sticks.right[0] || 0, d.sticks.right[1] || 0, '#e94560');
+            }
+        })
+        .catch(() => {
+            if (_r1Online || document.getElementById('r1-conn-text').textContent === 'Checking...') {
+                _r1Online = false;
+                document.getElementById('r1-dot').className = 'status-dot disconnected';
+                document.getElementById('r1-conn-text').textContent = 'Offline';
+                document.getElementById('r1-content').style.display = 'none';
+                document.getElementById('r1-offline-msg').style.display = '';
+            }
+        });
+
+    fetch(R1_PROXY + '/hardware')
+        .then(r => { if (!r.ok) throw new Error('offline'); return r.json(); })
+        .then(d => {
+            if (!d.xarm) return;
+            const connEl = document.getElementById('r1-xarm-conn');
+            if (d.xarm.connected) {
+                connEl.textContent = 'Connected';
+                connEl.style.color = '#4ecca3';
+            } else if (d.xarm.available) {
+                connEl.textContent = 'Disconnected';
+                connEl.style.color = '#f0a500';
+            } else {
+                connEl.textContent = 'Not Available';
+                connEl.style.color = '#666';
+            }
+
+            if (d.xarm.servos) {
+                for (let i = 1; i <= 6; i++) {
+                    const val = d.xarm.servos[String(i)];
+                    if (val === undefined) continue;
+                    const bar = document.getElementById('r1-servo-bar-' + i);
+                    const valEl = document.getElementById('r1-servo-val-' + i);
+                    if (bar) bar.style.width = (val / 10) + '%';
+                    if (valEl) valEl.textContent = val;
+                }
+            }
+        })
+        .catch(() => {});
+}
+
+drawR1Stick('r1-stick-left', 0, 0, '#29b6f6');
+drawR1Stick('r1-stick-right', 0, 0, '#e94560');
+pollR1Status();
+_r1PollInterval = setInterval(pollR1Status, 500);
+
+// ========== Vision Capture ==========
+const R1_HOST = '192.168.1.82';
+const R1_AGENT = 'http://' + R1_HOST + ':5000';
+
+async function gamepadVisionCapture() {
+    const btn = document.getElementById('gp-capture-btn');
+    btn.disabled = true; btn.textContent = 'Capturing...';
+    try {
+        const r = await fetch('/api/proxy/R1/vision/capture', { method: 'POST' });
+        const d = await r.json();
+        const resultDiv = document.getElementById('gp-vision-result');
+        const textEl = document.getElementById('gp-vision-text');
+        const metaEl = document.getElementById('gp-vision-meta');
+        resultDiv.style.display = '';
+        if (d.ok) {
+            const analysis = d.analysis || 'No analysis';
+            textEl.textContent = analysis;
+            metaEl.textContent = 'Mode: ' + (d.mode || '?') + ' | ID: ' + (d.image_id || '?') + ' | ' + (d.timestamp || '');
+            if (d.processing_time_ms) metaEl.textContent += ' | ' + d.processing_time_ms + 'ms';
+        } else {
+            textEl.textContent = 'Error: ' + (d.error || 'Unknown');
+            metaEl.textContent = '';
+        }
+    } catch(e) {
+        document.getElementById('gp-vision-result').style.display = '';
+        document.getElementById('gp-vision-text').textContent = 'Error: ' + e.message;
+    }
+    btn.disabled = false; btn.textContent = 'Capture + YOLO';
+    refreshVisionQueue();
+}
+
+async function refreshVisionQueue() {
+    try {
+        const r = await fetch('/api/proxy/R1/vision/status');
+        const d = await r.json();
+        const dot = document.getElementById('vision-christy-dot');
+        const text = document.getElementById('vision-christy-text');
+        const queue = document.getElementById('gp-vision-queue');
+        if (d.christy_online) {
+            dot.className = 'status-dot connected';
+            text.textContent = 'Christy: Online';
+        } else {
+            dot.className = 'status-dot disconnected';
+            text.textContent = 'Christy: Offline';
+        }
+        queue.textContent = 'Captures: ' + (d.total_captures || 0) + ' | Queue: ' + (d.pending_sync || 0);
+    } catch(e) {
+        document.getElementById('vision-christy-dot').className = 'status-dot disconnected';
+        document.getElementById('vision-christy-text').textContent = 'R1: Offline';
+    }
+}
+
+// Gamepad button trigger for capture (Back/Select = button 8)
+let _lastCaptureBtn = false;
+function checkGamepadCapture() {
+    const gps = navigator.getGamepads();
+    if (_gpIndex == null) return;
+    const gp = gps[_gpIndex];
+    if (!gp) return;
+    const pressed = gp.buttons[8] && gp.buttons[8].pressed;
+    if (pressed && !_lastCaptureBtn) {
+        gamepadVisionCapture();
+    }
+    _lastCaptureBtn = pressed;
+}
+setInterval(checkGamepadCapture, 100);
+
+refreshVisionQueue();
+setInterval(refreshVisionQueue, 15000);
+</script>
+</body>
+</html>
