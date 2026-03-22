@@ -409,7 +409,7 @@ def create_app(machine_name: str, modules: list | None = None) -> Flask:
                 import time as _t
                 if "windows" in os_type:
                     # Windows: 3-step — kill, create schtask, run schtask
-                    ajmain = info.get("ajmain_path", "G:\\My Drive\\AJ_Robotics\\AJMain")
+                    ajmain = info.get("ajmain_path", "C:\\Users\\Dream\\AJMain")
                     ps1 = ajmain + "\\scripts\\start_agent_bg.ps1"
                     ssh.exec_command("taskkill /F /IM python.exe")
                     _t.sleep(2)

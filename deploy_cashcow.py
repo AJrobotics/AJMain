@@ -10,7 +10,7 @@ import getpass
 HOST = "192.168.1.91"
 USERNAME = "dongchul"
 REMOTE_BASE = "/home/dongchul/AJMain"
-LOCAL_BASE = r"G:\My Drive\AJ_Robotics\AJMain"
+LOCAL_BASE = r"C:\Users\Dream\AJMain"
 
 # Files to transfer: (local_relative_path, remote_relative_path)
 FILES_TO_TRANSFER = [

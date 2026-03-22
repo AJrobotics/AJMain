@@ -1597,7 +1597,7 @@ def api_agent_restart(machine):
             ssh.connect(host, username=username, timeout=10)
 
             if "windows" in os_type:
-                ajmain = info.get("ajmain_path", "G:\\My Drive\\AJ_Robotics\\AJMain")
+                ajmain = info.get("ajmain_path", "C:\\Users\\Dream\\AJMain")
                 ps1 = ajmain + "\\scripts\\start_agent_bg.ps1"
                 ssh.exec_command("taskkill /F /IM python.exe")
                 _time.sleep(2)

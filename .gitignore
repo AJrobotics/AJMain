@@ -54,3 +54,4 @@ test_capture.jpg
 
 # Logs
 *.log
+.claude/

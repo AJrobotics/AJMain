@@ -21,6 +21,7 @@
             "username": "dongchul",
             "role": "Smart Trader",
             "agent_port": 5000,
+            "ajmain_path": "/home/dongchul/AJMain",
             "connection": ["ssh", "vnc"],
             "network": ["lan", "lan"],
             "description": "Dell PC running IB Smart Trader 24/7 (dual LAN)"
@@ -33,6 +34,7 @@
             "username": "ajrobotics",
             "role": "Watchdog + XBee Coordinator",
             "agent_port": 5000,
+            "ajmain_path": "/home/ajrobotics/AJMain",
             "connection": ["ssh", "vnc"],
             "interfaces": ["xbee", "ethernet"],
             "description": "System watchdog, XBee coordinator, robot management"
@@ -45,7 +47,7 @@
             "username": "Dream",
             "role": "Dev & Test",
             "agent_port": 5000,
-            "ajmain_path": "G:\\My Drive\\AJ_Robotics\\AJMain",
+            "ajmain_path": "C:\\Users\\Dream\\AJMain",
             "connection": ["ssh"],
             "network": ["wifi"],
             "description": "LG Gram laptop for tool development and testing"
@@ -69,6 +71,7 @@
             "hostname": "RPMain",
             "username": "dream",
             "agent_port": 5000,
+            "ajmain_path": "/home/dream/AJMain",
             "xbee_addr": "0013A20041BB8D5E",
             "connection": ["ssh"],
             "description": "First Raspberry Pi"
