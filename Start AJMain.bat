@@ -35,12 +35,7 @@ start "" "http://127.0.0.1:5000" 2>nul
 python app.py
 
 echo.
-echo  Server stopped. Pushing changes to GitHub...
-cd /d "%~dp0"
-git add -A
-git commit -m "Auto sync from %COMPUTERNAME%" 2>nul
-git push origin main
-echo  Done.
+echo  Server stopped.
 echo.
 echo  Press any key to close.
 pause >nul

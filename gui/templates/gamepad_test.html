@@ -403,6 +403,7 @@
                 <span class="status-dot disconnected" id="gp-dot"></span>
                 <span id="gp-status">No gamepad</span>
             </div>
+            <div style="font-size:10px; color:#666;" id="keep-alive-status">Keep-alive: --</div>
         </div>
         <div class="config-group">
             <label>Send Rate</label>
@@ -414,6 +415,24 @@
         <div class="config-group">
             <label>&nbsp;</label>
             <button class="btn" id="btn-send" onclick="toggleSend()">Start Sending</button>
+        </div>
+        <div class="config-group">
+            <label>Reverse</label>
+            <div style="display:flex; gap:10px; align-items:center; font-size:12px;">
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="rev-lx" style="cursor:pointer;"> LX</label>
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="rev-ly" style="cursor:pointer;"> LY</label>
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="rev-rx" style="cursor:pointer;"> RX</label>
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="rev-ry" style="cursor:pointer;"> RY</label>
+            </div>
+        </div>
+        <div class="config-group">
+            <label>RY Couple</label>
+            <div style="display:flex; gap:10px; align-items:center; font-size:12px;">
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="couple-ry-s4" checked style="cursor:pointer;"> S4</label>
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="couple-ry-s4-rev" style="cursor:pointer;"> S4 Rev</label>
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="couple-ry-s5" style="cursor:pointer;"> S5</label>
+                <label style="color:#888; cursor:pointer;"><input type="checkbox" id="couple-ry-s5-rev" style="cursor:pointer;"> S5 Rev</label>
+            </div>
         </div>
     </div>
 
@@ -593,6 +612,44 @@ const API = PROXY_MACHINE ? {
     xbeeSend:        '/api/xbee/send',
 };
 
+// Stick axis mapping (gamepad-specific)
+const STICK_MAP = {lx: 0, ly: 1, rx: 2, ry: 3};
+
+// Coupling helpers
+function getCoupling() {
+    const coupling = {};
+    const ryServos = [];
+    if (document.getElementById('couple-ry-s4').checked) {
+        ryServos.push({servo: 4, reverse: document.getElementById('couple-ry-s4-rev').checked});
+    }
+    if (document.getElementById('couple-ry-s5').checked) {
+        ryServos.push({servo: 5, reverse: document.getElementById('couple-ry-s5-rev').checked});
+    }
+    if (ryServos.length > 0) {
+        coupling[String(STICK_MAP.ry)] = ryServos;
+    }
+    return coupling;
+}
+
+// Reverse helpers
+function getReverse() {
+    return {
+        lx: document.getElementById('rev-lx').checked,
+        ly: document.getElementById('rev-ly').checked,
+        rx: document.getElementById('rev-rx').checked,
+        ry: document.getElementById('rev-ry').checked,
+    };
+}
+function applyStickReverse(axes) {
+    const rev = getReverse();
+    const out = Array.from(axes);
+    if (rev.lx) out[STICK_MAP.lx] = -out[STICK_MAP.lx];
+    if (rev.ly) out[STICK_MAP.ly] = -out[STICK_MAP.ly];
+    if (rev.rx) out[STICK_MAP.rx] = -out[STICK_MAP.rx];
+    if (rev.ry) out[STICK_MAP.ry] = -out[STICK_MAP.ry];
+    return out;
+}
+
 // XBee target addresses (from hosts.json)
 const XBEE_ADDRS = {
     R1: '0013A20041BB8D5E',
@@ -760,6 +817,29 @@ window.addEventListener('gamepadconnected', () => scanGamepads());
 window.addEventListener('gamepaddisconnected', () => { _gpIndex = null; scanGamepads(); });
 setInterval(scanGamepads, 2000);
 
+// Keep-alive: send tiny vibration pulse to prevent wireless controller sleep
+let _keepAliveStatus = 'off';
+function keepAliveVibration() {
+    if (_gpIndex === null) { _keepAliveStatus = 'no gamepad'; return; }
+    const gp = navigator.getGamepads()[_gpIndex];
+    if (!gp) { _keepAliveStatus = 'no gamepad'; return; }
+    if (gp.vibrationActuator) {
+        gp.vibrationActuator.playEffect('dual-rumble', {
+            duration: 1,
+            strongMagnitude: 0.0,
+            weakMagnitude: 0.01,
+        }).then(() => { _keepAliveStatus = 'vibration OK'; })
+          .catch(() => { _keepAliveStatus = 'vibration failed'; });
+    } else if (gp.hapticActuators && gp.hapticActuators.length > 0) {
+        gp.hapticActuators[0].pulse(0.01, 1)
+          .then(() => { _keepAliveStatus = 'haptic OK'; })
+          .catch(() => { _keepAliveStatus = 'haptic failed'; });
+    } else {
+        _keepAliveStatus = 'not supported';
+    }
+}
+setInterval(keepAliveVibration, 5000);
+
 // ========== Drawing ==========
 
 function drawStick(canvasId, x, y, color) {
@@ -892,6 +972,10 @@ function updateDpad(axes, buttons) {
 function updateAxesBars(axes) {
     const container = document.getElementById('axes-bars');
 
+    // Clear placeholder and rebuild if A0 is missing
+    if (!document.getElementById('axis-fill-0')) {
+        container.innerHTML = '';
+    }
     // Create rows if needed
     while (container.children.length < axes.length) {
         const idx = container.children.length;
@@ -1104,14 +1188,15 @@ function _accumSample() {
     const gp = navigator.getGamepads()[_gpIndex];
     if (!gp) return;
 
-    const n = gp.axes.length;
+    const reversedAxes = applyStickReverse(gp.axes);
+    const n = reversedAxes.length;
     if (_accum.nAxes === 0) {
         _accum.nAxes = n;
         _accum.axesSums = new Array(n).fill(0);
         _accum.axesCounts = new Array(n).fill(0);
     }
     for (let i = 0; i < n; i++) {
-        _accum.axesSums[i] += gp.axes[i];
+        _accum.axesSums[i] += reversedAxes[i];
         _accum.axesCounts[i]++;
     }
     for (let i = 0; i < gp.buttons.length; i++) {
@@ -1170,6 +1255,13 @@ function toggleSend() {
         const target = document.getElementById('target-select').value;
         const addr = XBEE_ADDRS[target] || null;
         document.getElementById('xbee-mode').textContent = addr ? 'Unicast' : 'Broadcast';
+        // Send stick mapping + coupling config to R1 before starting gamepad stream
+        const configPayload = JSON.stringify({type: 'gamepad_config', payload: {stick_map: STICK_MAP, coupling: getCoupling()}});
+        fetch(API.xbeeSend, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: configPayload, target_addr: addr })
+        });
         fetch(API.gamepadStart, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -1223,19 +1315,20 @@ function gameLoop() {
         return;
     }
 
-    const axes = Array.from(gp.axes);
+    const rawAxes = Array.from(gp.axes);
+    const axes = applyStickReverse(rawAxes);
     const buttons = Array.from(gp.buttons);
 
-    // Left stick: axes 0, 1
-    const lx = axes[0] || 0;
-    const ly = axes[1] || 0;
+    // Left stick
+    const lx = axes[STICK_MAP.lx] || 0;
+    const ly = axes[STICK_MAP.ly] || 0;
     drawStick('stick-left', lx, ly, '#29b6f6');
     document.getElementById('stick-left-val').textContent =
         'X: ' + lx.toFixed(2) + '  Y: ' + ly.toFixed(2);
 
-    // Right stick: axes 2, 3
-    const rx = axes[2] || 0;
-    const ry = axes[3] || 0;
+    // Right stick
+    const rx = axes[STICK_MAP.rx] || 0;
+    const ry = axes[STICK_MAP.ry] || 0;
     drawStick('stick-right', rx, ry, '#e94560');
     document.getElementById('stick-right-val').textContent =
         'X: ' + rx.toFixed(2) + '  Y: ' + ry.toFixed(2);
@@ -1258,6 +1351,10 @@ function gameLoop() {
 
     // Send rate display
     document.getElementById('xbee-packets').textContent = _packetCount;
+
+    // Keep-alive status
+    const kaEl = document.getElementById('keep-alive-status');
+    if (kaEl) kaEl.textContent = 'Keep-alive: ' + _keepAliveStatus;
 
     requestAnimationFrame(gameLoop);
 }

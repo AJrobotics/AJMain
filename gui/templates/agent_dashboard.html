@@ -278,6 +278,26 @@
             padding: 6px 16px; border-radius: 6px; font-size: 12px; cursor: pointer;
         }
         .xbee-send-row button:hover { background: #4ecca3; color: #1a1a2e; }
+
+        /* R1 Gamepad buttons & dpad */
+        .r1-gp-btn {
+            width: 42px; height: 36px;
+            background: #1a1a2e; border: 1px solid #1a4a8a; border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; color: #666; font-family: Consolas, monospace;
+            transition: all 0.1s;
+        }
+        .r1-gp-btn.pressed {
+            background: #e94560; color: #fff; border-color: #e94560;
+            box-shadow: 0 0 8px rgba(233,69,96,0.5);
+        }
+        .r1-dpad {
+            background: #1a1a2e; border-radius: 4px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; color: #555;
+        }
+        .r1-dpad.active { background: #f0a500; color: #000; }
+        .r1-dpad-center { background: #0a1929; }
     </style>
 </head>
 <body>
@@ -475,13 +495,37 @@
         <div class="section" id="r1-gamepad-section">
             <div class="section-title">Gamepad Monitor</div>
             <div style="display:flex; gap:12px; flex-wrap:wrap;">
-                <!-- Oscilloscope -->
+                <!-- Stick Traces (axes 0-3 only) -->
                 <div style="flex:1; min-width:400px; background:#0f3460; border-radius:8px; padding:8px; border:1px solid #333;">
-                    <canvas id="r1-scope-canvas" width="600" height="280" style="width:100%; height:280px; display:block;"></canvas>
+                    <canvas id="r1-scope-canvas" width="600" height="200" style="width:100%; height:200px; display:block;"></canvas>
                 </div>
-                <!-- Stick display -->
+                <!-- Stick XY display -->
                 <div style="width:240px; background:#0f3460; border-radius:8px; padding:8px; border:1px solid #333;">
-                    <canvas id="r1-stick-canvas" width="240" height="280" style="width:100%; height:280px; display:block;"></canvas>
+                    <canvas id="r1-stick-canvas" width="240" height="200" style="width:100%; height:200px; display:block;"></canvas>
+                </div>
+            </div>
+            <!-- Buttons & D-Pad -->
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                <div style="flex:1; min-width:300px; background:#0f3460; border-radius:8px; padding:12px; border:1px solid #333;">
+                    <div style="font-size:12px; color:#888; margin-bottom:8px;">Buttons</div>
+                    <div id="r1-buttons-grid" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+                </div>
+                <div style="width:240px; background:#0f3460; border-radius:8px; padding:12px; border:1px solid #333;">
+                    <div style="font-size:12px; color:#888; margin-bottom:8px;">D-Pad</div>
+                    <div style="display:flex; gap:16px; align-items:center;">
+                        <div style="display:grid; grid-template-columns:28px 28px 28px; grid-template-rows:28px 28px 28px; gap:2px;">
+                            <div class="r1-dpad" id="r1-dpad-ul"></div>
+                            <div class="r1-dpad" id="r1-dpad-u">&#9650;</div>
+                            <div class="r1-dpad" id="r1-dpad-ur"></div>
+                            <div class="r1-dpad" id="r1-dpad-l">&#9664;</div>
+                            <div class="r1-dpad r1-dpad-center" id="r1-dpad-c"></div>
+                            <div class="r1-dpad" id="r1-dpad-r">&#9654;</div>
+                            <div class="r1-dpad" id="r1-dpad-dl"></div>
+                            <div class="r1-dpad" id="r1-dpad-d">&#9660;</div>
+                            <div class="r1-dpad" id="r1-dpad-dr"></div>
+                        </div>
+                        <div style="font-size:11px; color:#666; font-family:Consolas,monospace;" id="r1-hat-values">Hat: (0, 0)</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -502,13 +546,17 @@
                         </div>
                     </div>
                     <div id="r1-xarm-servos">
-                        <div style="display:grid; grid-template-columns:40px 1fr 45px; gap:4px 8px; align-items:center; font-size:12px;">
+                        <div style="display:grid; grid-template-columns:40px 1fr 45px 55px; gap:4px 8px; align-items:center; font-size:12px;">
+                            <div></div><div></div><div></div><div style="color:#888; text-align:center; font-size:10px;">Speed</div>
+
                             <div style="color:#888;">S1</div>
                             <div class="servo-track" data-servo="1" style="background:#0f3460; border-radius:3px; height:20px; position:relative; overflow:hidden; cursor:pointer;">
                                 <div id="r1-servo-bar-1" style="height:100%; background:#4ecca3; border-radius:3px; width:50%;"></div>
                                 <div id="r1-servo-marker-1" style="position:absolute; top:0; width:2px; height:100%; background:#fff; left:50%;"></div>
                             </div>
                             <div style="color:#aaa; text-align:right; font-family:Consolas,monospace;" id="r1-servo-val-1">500</div>
+                            <input type="number" id="r1-servo-speed-1" value="150" min="50" max="5000" step="50" style="width:50px; background:#0f3460; color:#eee; border:1px solid #1a4a8a; border-radius:4px; padding:2px 4px; font-size:11px; font-family:Consolas,monospace; text-align:center;">
+
 
                             <div style="color:#888;">S2</div>
                             <div class="servo-track" data-servo="2" style="background:#0f3460; border-radius:3px; height:20px; position:relative; overflow:hidden; cursor:pointer;">
@@ -516,6 +564,8 @@
                                 <div id="r1-servo-marker-2" style="position:absolute; top:0; width:2px; height:100%; background:#fff; left:50%;"></div>
                             </div>
                             <div style="color:#aaa; text-align:right; font-family:Consolas,monospace;" id="r1-servo-val-2">500</div>
+                            <input type="number" id="r1-servo-speed-2" value="150" min="50" max="5000" step="50" style="width:50px; background:#0f3460; color:#eee; border:1px solid #1a4a8a; border-radius:4px; padding:2px 4px; font-size:11px; font-family:Consolas,monospace; text-align:center;">
+
 
                             <div style="color:#888;">S3</div>
                             <div class="servo-track" data-servo="3" style="background:#0f3460; border-radius:3px; height:20px; position:relative; overflow:hidden; cursor:pointer;">
@@ -523,6 +573,8 @@
                                 <div id="r1-servo-marker-3" style="position:absolute; top:0; width:2px; height:100%; background:#fff; left:50%;"></div>
                             </div>
                             <div style="color:#aaa; text-align:right; font-family:Consolas,monospace;" id="r1-servo-val-3">500</div>
+                            <input type="number" id="r1-servo-speed-3" value="150" min="50" max="5000" step="50" style="width:50px; background:#0f3460; color:#eee; border:1px solid #1a4a8a; border-radius:4px; padding:2px 4px; font-size:11px; font-family:Consolas,monospace; text-align:center;">
+
 
                             <div style="color:#888;">S4</div>
                             <div class="servo-track" data-servo="4" style="background:#0f3460; border-radius:3px; height:20px; position:relative; overflow:hidden; cursor:pointer;">
@@ -530,6 +582,8 @@
                                 <div id="r1-servo-marker-4" style="position:absolute; top:0; width:2px; height:100%; background:#fff; left:50%;"></div>
                             </div>
                             <div style="color:#aaa; text-align:right; font-family:Consolas,monospace;" id="r1-servo-val-4">500</div>
+                            <input type="number" id="r1-servo-speed-4" value="150" min="50" max="5000" step="50" style="width:50px; background:#0f3460; color:#eee; border:1px solid #1a4a8a; border-radius:4px; padding:2px 4px; font-size:11px; font-family:Consolas,monospace; text-align:center;">
+
 
                             <div style="color:#888;">S5</div>
                             <div class="servo-track" data-servo="5" style="background:#0f3460; border-radius:3px; height:20px; position:relative; overflow:hidden; cursor:pointer;">
@@ -537,6 +591,8 @@
                                 <div id="r1-servo-marker-5" style="position:absolute; top:0; width:2px; height:100%; background:#fff; left:50%;"></div>
                             </div>
                             <div style="color:#aaa; text-align:right; font-family:Consolas,monospace;" id="r1-servo-val-5">500</div>
+                            <input type="number" id="r1-servo-speed-5" value="150" min="50" max="5000" step="50" style="width:50px; background:#0f3460; color:#eee; border:1px solid #1a4a8a; border-radius:4px; padding:2px 4px; font-size:11px; font-family:Consolas,monospace; text-align:center;">
+
 
                             <div style="color:#888;">S6</div>
                             <div class="servo-track" data-servo="6" style="background:#0f3460; border-radius:3px; height:20px; position:relative; overflow:hidden; cursor:pointer;">
@@ -544,6 +600,8 @@
                                 <div id="r1-servo-marker-6" style="position:absolute; top:0; width:2px; height:100%; background:#fff; left:50%;"></div>
                             </div>
                             <div style="color:#aaa; text-align:right; font-family:Consolas,monospace;" id="r1-servo-val-6">500</div>
+                            <input type="number" id="r1-servo-speed-6" value="150" min="50" max="5000" step="50" style="width:50px; background:#0f3460; color:#eee; border:1px solid #1a4a8a; border-radius:4px; padding:2px 4px; font-size:11px; font-family:Consolas,monospace; text-align:center;">
+
                         </div>
                         <div style="display:flex; justify-content:space-between; font-size:10px; color:#555; margin-top:2px; padding:0 40px 0 48px;">
                             <span>0</span><span>250</span><span>500</span><span>750</span><span>1000</span>
@@ -1152,6 +1210,8 @@
         }
 
         // --- XBee Responder functions (R1 / robots) ---
+        // Colors: LX=blue, LY=light-blue, RX=red, RY=pink
+        const STICK_COLORS = {'LX':'#29b6f6', 'LY':'#64b5f6', 'RX':'#e94560', 'RY':'#ef9a9a'};
         const SCOPE_COLORS = [
             '#00e676','#ff9800','#29b6f6','#ff4081','#ffeb3b',
             '#ab47bc','#26c6da','#ef5350','#66bb6a','#42a5f5',
@@ -1225,52 +1285,93 @@
         function scopeEnsureChannel(key) {
             if (!(key in _scopeChannels)) {
                 _scopeChannels[key] = new Array(SCOPE_MAX).fill(null);
-                // Rebuild sorted order
-                const keys = Object.keys(_scopeChannels);
-                keys.sort((a, b) => {
-                    const pA = a[0]==='A'?0:(a[0]==='H'?1:2);
-                    const pB = b[0]==='A'?0:(b[0]==='H'?1:2);
-                    if (pA !== pB) return pA - pB;
-                    const nA = parseInt(a.slice(1)) || 0;
-                    const nB = parseInt(b.slice(1)) || 0;
-                    return nA - nB || a.localeCompare(b);
-                });
+                // Fixed order: LX, LY, RX, RY
+                const order = ['LX','LY','RX','RY'];
                 _scopeChannelOrder.length = 0;
-                keys.forEach(k => _scopeChannelOrder.push(k));
+                order.forEach(k => { if (k in _scopeChannels) _scopeChannelOrder.push(k); });
             }
+        }
+
+        // Stick axis names for scope traces (updated dynamically from gamepad_config)
+        let STICK_AXES = {'0':'LX', '1':'LY', '2':'RX', '3':'RY'};  // default (updated by gamepad_config)
+
+        function updateStickAxesFromMap(stickMap) {
+            if (!stickMap) return;
+            STICK_AXES = {};
+            STICK_AXES[String(stickMap.lx)] = 'LX';
+            STICK_AXES[String(stickMap.ly)] = 'LY';
+            STICK_AXES[String(stickMap.rx)] = 'RX';
+            STICK_AXES[String(stickMap.ry)] = 'RY';
+            // Reset scope channels to rebuild with new mapping
+            for (const k in _scopeChannels) delete _scopeChannels[k];
+            _scopeChannelOrder.length = 0;
+            _scopeCursor = 0;
+            _scopeStarted = false;
         }
 
         function scopePush(gp) {
             if (!gp) return;
             const axes = gp.axes || {};
-            const buttons = gp.buttons || {};
-            const hats = gp.hats || {};
 
-            for (const [k, v] of Object.entries(axes).sort((a,b)=>String(a[0]).localeCompare(String(b[0])))) {
-                const ch = 'A' + k;
+            // Only push stick axes to oscilloscope (from dynamic STICK_AXES mapping)
+            for (const [k, ch] of Object.entries(STICK_AXES)) {
+                const v = axes[k];
+                if (v === undefined) continue;
                 scopeEnsureChannel(ch);
                 _scopeChannels[ch][_scopeCursor] = parseFloat(v);
             }
-            for (const [k, v] of Object.entries(hats).sort((a,b)=>String(a[0]).localeCompare(String(b[0])))) {
-                scopeEnsureChannel('H'+k+'x');
-                scopeEnsureChannel('H'+k+'y');
-                if (Array.isArray(v)) {
-                    _scopeChannels['H'+k+'x'][_scopeCursor] = v[0];
-                    _scopeChannels['H'+k+'y'][_scopeCursor] = v[1];
-                } else {
-                    _scopeChannels['H'+k+'x'][_scopeCursor] = parseFloat(v);
-                }
-            }
-            for (const [k, v] of Object.entries(buttons).sort((a,b)=>String(a[0]).localeCompare(String(b[0])))) {
-                const ch = 'B' + k;
-                scopeEnsureChannel(ch);
-                _scopeChannels[ch][_scopeCursor] = parseInt(v);
-            }
             _scopeCursor = (_scopeCursor + 1) % SCOPE_MAX;
             _scopeStarted = true;
+
+            // Update button grid and dpad from gamepad data
+            updateR1Buttons(gp.buttons || {});
+            updateR1Dpad(gp.buttons || {});
+        }
+
+        function updateR1Buttons(buttons) {
+            const grid = document.getElementById('r1-buttons-grid');
+            if (!grid) return;
+            const keys = Object.keys(buttons).sort((a,b) => parseInt(a) - parseInt(b));
+            // Create button elements if needed
+            while (grid.children.length < keys.length) {
+                const div = document.createElement('div');
+                div.className = 'r1-gp-btn';
+                div.textContent = 'B' + grid.children.length;
+                grid.appendChild(div);
+            }
+            for (let i = 0; i < keys.length; i++) {
+                const el = grid.children[i];
+                const pressed = parseInt(buttons[keys[i]]) === 1;
+                const cls = pressed ? 'r1-gp-btn pressed' : 'r1-gp-btn';
+                if (el.className !== cls) el.className = cls;
+            }
+        }
+
+        function updateR1Dpad(buttons) {
+            // Standard mapping: buttons 12-15 are dpad (up/down/left/right)
+            const up = parseInt(buttons['12'] || 0);
+            const down = parseInt(buttons['13'] || 0);
+            const left = parseInt(buttons['14'] || 0);
+            const right = parseInt(buttons['15'] || 0);
+            const ids = {
+                'r1-dpad-u': up, 'r1-dpad-d': down,
+                'r1-dpad-l': left, 'r1-dpad-r': right,
+                'r1-dpad-ul': up && left, 'r1-dpad-ur': up && right,
+                'r1-dpad-dl': down && left, 'r1-dpad-dr': down && right,
+            };
+            for (const [id, active] of Object.entries(ids)) {
+                const el = document.getElementById(id);
+                if (!el || id === 'r1-dpad-c') continue;
+                const cls = active ? 'r1-dpad active' : 'r1-dpad';
+                if (el.className !== cls) el.className = cls;
+            }
+            const hatEl = document.getElementById('r1-hat-values');
+            if (hatEl) hatEl.textContent = 'Hat: (' + (right - left) + ', ' + (up - down) + ')';
         }
 
         // Poll server for latest gamepad values (every 500ms)
+        let _lastStickMap = null;
+
         async function refreshR1Scope() {
             if (LOCAL_MACHINE !== 'R1') return;
             try {
@@ -1281,6 +1382,14 @@
                     _lastServerCount = d.gamepad_count;
                 }
                 if (d.sticks) _latestSticks = d.sticks;
+                // Update stick mapping if changed
+                if (d.stick_map) {
+                    const mapKey = JSON.stringify(d.stick_map);
+                    if (mapKey !== _lastStickMap) {
+                        _lastStickMap = mapKey;
+                        updateStickAxesFromMap(d.stick_map);
+                    }
+                }
             } catch(e) {}
         }
 
@@ -1325,6 +1434,16 @@
                         const pos = xarm.servos[String(i)];
                         if (pos === undefined) continue;
                         updateServoUI(i, Math.round(pos));
+                    }
+                }
+
+                // Sync speed inputs from server (only if not focused)
+                if (xarm.speed) {
+                    for (let i = 1; i <= 6; i++) {
+                        const inp = document.getElementById('r1-servo-speed-' + i);
+                        if (inp && inp !== document.activeElement) {
+                            inp.value = Math.round(xarm.speed[String(i)] || 150);
+                        }
                     }
                 }
 
@@ -1384,8 +1503,8 @@
                 const key = order[li];
                 const ch = channels[key];
                 if (!ch) continue;
-                const isDigital = key.startsWith('B');
-                const color = SCOPE_COLORS[li % SCOPE_COLORS.length];
+                const isDigital = false;
+                const color = STICK_COLORS[key] || SCOPE_COLORS[li % SCOPE_COLORS.length];
                 const laneTop = mt + li * laneH;
 
                 // Lane separator
@@ -1584,12 +1703,32 @@
             if (valEl) valEl.textContent = pos;
         }
 
+        function getServoSpeed(sid) {
+            const el = document.getElementById('r1-servo-speed-' + sid);
+            return el ? parseInt(el.value) || 150 : 150;
+        }
+
         function sendServoMove(sid, pos) {
             fetch('/api/xbee/xarm-move', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({servo: sid, position: pos, duration: 150})
+                body: JSON.stringify({servo: sid, position: pos, duration: getServoSpeed(sid)})
             }).catch(() => {});
+        }
+
+        // Sync speed input to server
+        for (let i = 1; i <= 6; i++) {
+            const inp = document.getElementById('r1-servo-speed-' + i);
+            if (inp) {
+                inp.addEventListener('change', function() {
+                    const sid = i;
+                    fetch('/api/xbee/xarm-speed', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({servo: sid, speed: parseFloat(this.value) || 150})
+                    }).catch(() => {});
+                });
+            }
         }
 
         document.querySelectorAll('.servo-track').forEach(track => {

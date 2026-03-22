@@ -22,6 +22,7 @@ SYNC_ITEMS = [
     "agent/",
     "agent_modules/",
     "shared/",
+    "robotics/",
     "configs/",
     "gui/templates/",
     "gui/static/",

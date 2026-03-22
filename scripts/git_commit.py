@@ -1,7 +1,7 @@
 """One-time script to create initial git commit."""
 import subprocess, os, sys
 
-REPO = r"C:\Users\Dream\My Drive\AJ_Robotics\AJMain"
+REPO = r"C:\Users\Dream\AJMain"
 GIT = r"c:\nrn901\mingw\usr\bin\git.exe"
 
 os.environ["GIT_DIR"] = os.path.join(REPO, ".git")

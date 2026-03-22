@@ -38,7 +38,7 @@ MAX_HISTORY_PER_ROBOT = 200
 
 # Known robots with cameras
 CAMERA_ROBOTS = {
-    "R1": {"host": "192.168.1.82", "user": "dream", "camera": "/dev/video0", "rotate": 180},
+    "R1": {"host": "192.168.1.82", "user": "dream", "camera": "/dev/video1", "rotate": 180},
     "ROSMASTER": {"host": "TBD", "user": "TBD", "camera": "/dev/video0", "rotate": 0},
 }
 

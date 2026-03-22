@@ -6,12 +6,12 @@
             "host": "192.168.1.44",
             "hostname": "SweetWater",
             "username": "Dream",
-            "role": "Main Control Hub",
+            "role": "Developer",
             "agent_port": 5000,
-            "ajmain_path": "C:\\Users\\Dream\\My Drive\\AJ_Robotics\\AJMain",
+            "ajmain_path": "C:\\Users\\Dream\\AJMain",
             "connection": ["ssh", "local"],
             "network": ["lan", "wifi"],
-            "description": "Primary development PC, runs AJMain hub"
+            "description": "Development PC for coding and testing"
         },
         "CashCow": {
             "type": "pc",
@@ -32,12 +32,12 @@
             "host": "192.168.1.94",
             "hostname": "AJRobotics",
             "username": "ajrobotics",
-            "role": "Watchdog + XBee Coordinator",
+            "role": "Main Hub + Watchdog + XBee Coordinator + Data Hub",
             "agent_port": 5000,
             "ajmain_path": "/home/ajrobotics/AJMain",
             "connection": ["ssh", "vnc"],
             "interfaces": ["xbee", "ethernet"],
-            "description": "System watchdog, XBee coordinator, robot management"
+            "description": "Main dashboard, watchdog, XBee coordinator, data hub"
         },
         "Gram": {
             "type": "laptop",

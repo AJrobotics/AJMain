@@ -43,10 +43,11 @@ SCOPE_MAX = 80
 ALLOWED_PINS = {17, 27, 22}
 
 # Gamepad -> xArm mapping
-GAMEPAD_AXIS_MAP = {0: 4, 1: 5, 2: 6, 3: 3}
+GAMEPAD_AXIS_MAP = {0: 2, 1: 3, 2: 6, 3: 4}
 GAMEPAD_DEADZONE = 0.10
-GAMEPAD_STEP = 8.0
-GAMEPAD_SERVO_DURATION = 250
+VELOCITY_LOOP_HZ = 50          # servo update rate
+VELOCITY_LOOP_DT = 1.0 / VELOCITY_LOOP_HZ
+GAMEPAD_SERVO_DURATION = 40    # ms per move command (smooth small steps)
 
 # ACK intervals
 ACK_INTERVAL_ACTIVE = 1
@@ -150,6 +151,25 @@ class XbeeResponderModule:
         self._servo_positions = {sid: 500.0 for sid in range(1, 7)}
         self._servo_lock = threading.Lock()
         self._gripper_open = False
+
+        # Stick axis mapping (updated by gamepad_config from sender)
+        self._stick_map = {"lx": "0", "ly": "1", "rx": "2", "ry": "3"}
+
+        # Servo reverse flags (toggled from dashboard UI)
+        self._servo_reverse = {sid: False for sid in range(1, 7)}
+
+        # Per-servo speed factor (units/sec at full stick deflection)
+        self._servo_speed = {sid: 150.0 for sid in range(1, 7)}
+
+        # Velocity control: latest axis values as velocity targets (-1 to +1)
+        self._servo_velocity = {sid: 0.0 for sid in range(1, 7)}
+        self._velocity_running = False
+
+        # Smooth home: target positions (None = not homing)
+        self._home_target = None
+
+        # Servo coupling: axis -> [{servo, reverse}, ...]
+        self._servo_coupling = {}
 
         # Ack sender
         self._last_remote = None
@@ -266,6 +286,7 @@ class XbeeResponderModule:
             "xarm_battery": self._handle_xarm_battery,
             "xarm_gamepad_toggle": self._handle_xarm_gamepad_toggle,
             "xarm_status": self._handle_xarm_status,
+            "gamepad_config": self._handle_gamepad_config,
         }
         handler = handlers.get(msg_type)
         if handler:
@@ -312,14 +333,15 @@ class XbeeResponderModule:
         # Update scope buffer
         self._push_scope(axes, buttons, hats)
 
-        # Update stick positions
+        # Update stick positions using dynamic mapping
+        sm = self._stick_map
         self._stick_left = [
-            float(axes.get(0, axes.get("0", 0.0))),
-            float(axes.get(1, axes.get("1", 0.0))),
+            float(axes.get(sm["lx"], axes.get(str(sm["lx"]), 0.0))),
+            float(axes.get(sm["ly"], axes.get(str(sm["ly"]), 0.0))),
         ]
         self._stick_right = [
-            float(axes.get(2, axes.get("2", 0.0))),
-            float(axes.get(3, axes.get("3", 0.0))),
+            float(axes.get(sm["rx"], axes.get(str(sm["rx"]), 0.0))),
+            float(axes.get(sm["ry"], axes.get(str(sm["ry"]), 0.0))),
         ]
 
         # Gamepad -> xArm
@@ -372,40 +394,105 @@ class XbeeResponderModule:
                                            key=sort_key)
 
     def _gamepad_to_xarm(self, axes, buttons):
-        """Map gamepad input to xArm servo positions."""
+        """Store axis values as velocity targets. The velocity loop moves servos."""
         with self._servo_lock:
+            # Update velocity targets from stick axes
             for axis_key, servo_id in GAMEPAD_AXIS_MAP.items():
                 val = float(axes.get(axis_key, axes.get(str(axis_key), 0.0)))
                 if abs(val) < GAMEPAD_DEADZONE:
-                    continue
-                self._servo_positions[servo_id] += val * GAMEPAD_STEP
-                self._servo_positions[servo_id] = max(
-                    0, min(1000, self._servo_positions[servo_id]))
+                    val = 0.0
+                if self._servo_reverse.get(servo_id):
+                    val = -val
+                self._servo_velocity[servo_id] = val
 
+            # Apply servo coupling (e.g. RY drives both S4 and S5)
+            for axis_key_str, coupled in self._servo_coupling.items():
+                axis_key = int(axis_key_str) if axis_key_str.isdigit() else axis_key_str
+                val = float(axes.get(axis_key, axes.get(str(axis_key), 0.0)))
+                if abs(val) < GAMEPAD_DEADZONE:
+                    val = 0.0
+                for entry in coupled:
+                    sid = entry["servo"]
+                    cval = -val if entry.get("reverse") else val
+                    self._servo_velocity[sid] = cval
+
+            # LB/RB -> add to Servo 2 velocity (on top of any axis mapping)
             lb = int(buttons.get(4, buttons.get("4", 0)))
             rb = int(buttons.get(5, buttons.get("5", 0)))
-            if lb:
-                self._servo_positions[2] = max(
-                    0, self._servo_positions[2] - GAMEPAD_STEP)
-            if rb:
-                self._servo_positions[2] = min(
-                    1000, self._servo_positions[2] + GAMEPAD_STEP)
+            if lb or rb:
+                self._servo_velocity[2] = max(-1, min(1,
+                    self._servo_velocity.get(2, 0.0) + float(rb - lb)))
 
+            # Button A -> gripper toggle (instant)
             btn_a = int(buttons.get(0, buttons.get("0", 0)))
             if btn_a:
                 self._gripper_open = not self._gripper_open
                 self._servo_positions[1] = 200.0 if self._gripper_open else 700.0
+                with self._arm_lock:
+                    if self._arm and self._arm.connected:
+                        self._arm.move_servo(1, int(self._servo_positions[1]),
+                                             GAMEPAD_SERVO_DURATION)
 
+            # Button Y -> smooth home (velocity loop moves to target)
             btn_y = int(buttons.get(3, buttons.get("3", 0)))
             if btn_y:
+                self._home_target = {sid: 500.0 for sid in range(1, 7)}
                 for sid in range(1, 7):
-                    self._servo_positions[sid] = 500.0
+                    self._servo_velocity[sid] = 0.0
 
-            moves = [(sid, int(self._servo_positions[sid])) for sid in range(1, 7)]
+    def _servo_velocity_loop(self):
+        """Background loop: smoothly move servos based on velocity targets at 50Hz."""
+        logger.info("Servo velocity loop started (%d Hz)", VELOCITY_LOOP_HZ)
+        while self._velocity_running and self._running:
+            if not self._gamepad_arm_enabled or not self._arm_connected:
+                time.sleep(0.1)
+                continue
 
-        with self._arm_lock:
-            if self._arm and self._arm.connected:
-                self._arm.move_servos(moves, GAMEPAD_SERVO_DURATION)
+            moved = False
+            with self._servo_lock:
+                # Smooth home: move toward target positions
+                if self._home_target is not None:
+                    all_reached = True
+                    for sid in range(1, 7):
+                        target = self._home_target[sid]
+                        pos = self._servo_positions[sid]
+                        if abs(pos - target) < 1.0:
+                            self._servo_positions[sid] = target
+                            continue
+                        all_reached = False
+                        speed = self._servo_speed.get(sid, 150.0)
+                        step = speed * VELOCITY_LOOP_DT
+                        if pos < target:
+                            self._servo_positions[sid] = min(target, pos + step)
+                        else:
+                            self._servo_positions[sid] = max(target, pos - step)
+                        moved = True
+                    if all_reached:
+                        self._home_target = None
+                        logger.info("Smooth home complete")
+                else:
+                    # Normal velocity control from gamepad
+                    for sid in range(1, 7):
+                        vel = self._servo_velocity.get(sid, 0.0)
+                        if abs(vel) < GAMEPAD_DEADZONE:
+                            continue
+                        speed = self._servo_speed.get(sid, 150.0)
+                        delta = vel * speed * VELOCITY_LOOP_DT
+                        old_pos = self._servo_positions[sid]
+                        new_pos = max(0, min(1000, old_pos + delta))
+                        if int(new_pos) != int(old_pos):
+                            self._servo_positions[sid] = new_pos
+                            moved = True
+
+            if moved:
+                with self._servo_lock:
+                    moves = [(sid, int(self._servo_positions[sid]))
+                             for sid in range(1, 7)]
+                with self._arm_lock:
+                    if self._arm and self._arm.connected:
+                        self._arm.move_servos(moves, GAMEPAD_SERVO_DURATION)
+
+            time.sleep(VELOCITY_LOOP_DT)
 
     def _handle_gpio_set(self, remote, payload):
         pin = payload.get("pin")
@@ -573,6 +660,22 @@ class XbeeResponderModule:
             },
         })
 
+    def _handle_gamepad_config(self, remote, payload):
+        """Receive stick axis mapping and coupling from sender."""
+        stick_map = payload.get("stick_map")
+        if stick_map:
+            self._stick_map = {k: str(v) for k, v in stick_map.items()}
+            logger.info("Stick map updated: %s", self._stick_map)
+        coupling = payload.get("coupling")
+        if coupling:
+            self._servo_coupling = coupling
+            logger.info("Servo coupling updated: %s", self._servo_coupling)
+        self._send_response(remote, {
+            "type": "gamepad_config_ack",
+            "payload": {"stick_map": self._stick_map,
+                        "coupling": self._servo_coupling},
+        })
+
     # -------------------------------------------------------------------
     # Binary command (0x02)
     # -------------------------------------------------------------------
@@ -646,6 +749,11 @@ class XbeeResponderModule:
         self._ack_running = True
         threading.Thread(target=self._ack_loop, daemon=True,
                          name="gamepad-ack").start()
+
+        # Start servo velocity loop
+        self._velocity_running = True
+        threading.Thread(target=self._servo_velocity_loop, daemon=True,
+                         name="servo-velocity").start()
 
         while self._running:
             time.sleep(1)
@@ -735,6 +843,7 @@ class XbeeResponderModule:
     def stop(self):
         self._running = False
         self._ack_running = False
+        self._velocity_running = False
         if self._device:
             try:
                 if self._device.is_open():
@@ -823,6 +932,7 @@ class XbeeResponderModule:
                         "left": list(self._stick_left),
                         "right": list(self._stick_right),
                     },
+                    "stick_map": self._stick_map,
                     "gamepad_count": self._gamepad_count,
                     "gamepad_arm_enabled": self._gamepad_arm_enabled,
                 })
@@ -848,6 +958,8 @@ class XbeeResponderModule:
                     "connected": arm_connected,
                     "gamepad_enabled": self._gamepad_arm_enabled,
                     "servos": {str(k): int(v) for k, v in servos.items()},
+                    "reverse": {str(k): v for k, v in self._servo_reverse.items()},
+                    "speed": {str(k): v for k, v in self._servo_speed.items()},
                 },
                 "gpio": {
                     "available": _gpio_available,
@@ -900,6 +1012,26 @@ class XbeeResponderModule:
             self._gamepad_arm_enabled = bool(
                 data.get("enabled", not self._gamepad_arm_enabled))
             return jsonify({"enabled": self._gamepad_arm_enabled})
+
+        @bp.route("/api/xbee/xarm-speed", methods=["POST"])
+        def xarm_speed():
+            """Set speed factor for a servo (units/sec at full stick)."""
+            data = request.json or {}
+            sid = data.get("servo")
+            speed = data.get("speed", 150)
+            if sid is not None:
+                self._servo_speed[int(sid)] = max(10, min(2000, float(speed)))
+            return jsonify({"speed": {str(k): v for k, v in self._servo_speed.items()}})
+
+        @bp.route("/api/xbee/xarm-reverse", methods=["POST"])
+        def xarm_reverse():
+            """Set reverse flag for a servo."""
+            data = request.json or {}
+            sid = data.get("servo")
+            rev = data.get("reverse", False)
+            if sid is not None:
+                self._servo_reverse[int(sid)] = bool(rev)
+            return jsonify({"reverse": {str(k): v for k, v in self._servo_reverse.items()}})
 
         @bp.route("/api/robot/status", methods=["GET", "POST"])
         def robot_status():

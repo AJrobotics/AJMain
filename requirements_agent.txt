@@ -3,3 +3,5 @@ flask>=3.0
 psutil>=5.9
 digi-xbee>=1.4
 pyserial>=3.5
+requests>=2.28
+opencv-python-headless>=4.8

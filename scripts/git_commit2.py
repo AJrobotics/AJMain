@@ -1,7 +1,7 @@
 """Commit recent changes: combined mode fix, training nav link, gdrive setup."""
 import subprocess, os
 
-REPO = r"C:\Users\Dream\My Drive\AJ_Robotics\AJMain"
+REPO = r"C:\Users\Dream\AJMain"
 GIT = r"c:\nrn901\mingw\usr\bin\git.exe"
 
 os.environ["GIT_DIR"] = os.path.join(REPO, ".git")
