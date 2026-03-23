@@ -426,6 +426,12 @@
             </div>
         </div>
         <div class="config-group">
+            <label>&nbsp;</label>
+            <button class="btn" id="btn-xyz" onclick="toggleXyzMode()" style="background:#1a5276; border:1px solid #2980b9; min-width:90px;">
+                <span id="xyz-label">SERVO</span>
+            </button>
+        </div>
+        <div class="config-group">
             <label>RY Couple</label>
             <div style="display:flex; gap:10px; align-items:center; font-size:12px;">
                 <label style="color:#888; cursor:pointer;"><input type="checkbox" id="couple-ry-s4" checked style="cursor:pointer;"> S4</label>
@@ -1279,6 +1285,36 @@ function toggleSend() {
         fetch(API.gamepadStop, { method: 'POST' });
         if (_sendInterval) { clearInterval(_sendInterval); _sendInterval = null; }
         _resetAccum();
+    }
+}
+
+// XYZ mode toggle
+let _xyzMode = false;
+function toggleXyzMode() {
+    _xyzMode = !_xyzMode;
+    const btn = document.getElementById('btn-xyz');
+    const label = document.getElementById('xyz-label');
+    if (_xyzMode) {
+        btn.style.background = '#0e6655';
+        btn.style.borderColor = '#1abc9c';
+        label.textContent = 'XYZ';
+        label.style.color = '#1abc9c';
+    } else {
+        btn.style.background = '#1a5276';
+        btn.style.borderColor = '#2980b9';
+        label.textContent = 'SERVO';
+        label.style.color = '';
+    }
+    // Send xyz_mode command to R1 via XBee
+    if (_sending) {
+        const target = document.getElementById('target-select').value;
+        const addr = XBEE_ADDRS[target] || null;
+        const msg = JSON.stringify({type: 'xyz_mode', payload: {enabled: _xyzMode}});
+        fetch(API.xbeeSend, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: msg, target_addr: addr })
+        });
     }
 }
 

@@ -606,6 +606,19 @@
                         <div style="display:flex; justify-content:space-between; font-size:10px; color:#555; margin-top:2px; padding:0 40px 0 48px;">
                             <span>0</span><span>250</span><span>500</span><span>750</span><span>1000</span>
                         </div>
+                        <!-- XYZ Position readout -->
+                        <div id="r1-xyz-readout" style="margin-top:8px; padding:6px 8px; background:#0a1628; border:1px solid #1a3a5a; border-radius:4px; font-family:Consolas,monospace; font-size:12px; display:none;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                <span style="color:#1abc9c; font-weight:bold;">XYZ Position</span>
+                                <span id="r1-ik-mode-badge" style="padding:2px 8px; border-radius:3px; font-size:10px; background:#1a5276; color:#3498db;">SERVO</span>
+                            </div>
+                            <div style="display:flex; gap:16px; color:#eee;">
+                                <span>X: <span id="r1-xyz-x" style="color:#e74c3c;">--</span>mm</span>
+                                <span>Y: <span id="r1-xyz-y" style="color:#2ecc71;">--</span>mm</span>
+                                <span>Z: <span id="r1-xyz-z" style="color:#3498db;">--</span>mm</span>
+                                <span style="color:#888;">WP: <span id="r1-wrist-pitch" style="color:#f39c12;">--</span></span>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <!-- GPIO -->
@@ -1444,6 +1457,36 @@
                         if (inp && inp !== document.activeElement) {
                             inp.value = Math.round(xarm.speed[String(i)] || 150);
                         }
+                    }
+                }
+
+                // XYZ / IK readout
+                const xyzDiv = document.getElementById('r1-xyz-readout');
+                if (xyzDiv) {
+                    if (xarm.ik_configured) {
+                        xyzDiv.style.display = '';
+                        const badge = document.getElementById('r1-ik-mode-badge');
+                        if (badge) {
+                            if (xarm.ik_mode) {
+                                badge.textContent = 'XYZ';
+                                badge.style.background = '#0e6655';
+                                badge.style.color = '#1abc9c';
+                            } else {
+                                badge.textContent = 'SERVO';
+                                badge.style.background = '#1a5276';
+                                badge.style.color = '#3498db';
+                            }
+                        }
+                        if (xarm.xyz) {
+                            document.getElementById('r1-xyz-x').textContent = xarm.xyz.x.toFixed(1);
+                            document.getElementById('r1-xyz-y').textContent = xarm.xyz.y.toFixed(1);
+                            document.getElementById('r1-xyz-z').textContent = xarm.xyz.z.toFixed(1);
+                        }
+                        if (xarm.wrist_pitch_deg !== undefined) {
+                            document.getElementById('r1-wrist-pitch').textContent = xarm.wrist_pitch_deg.toFixed(0) + '\u00b0';
+                        }
+                    } else {
+                        xyzDiv.style.display = 'none';
                     }
                 }
 

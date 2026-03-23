@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AJ Robotics - XArm Simulation</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#1a1a2e; color:#eee; font-family:'Segoe UI',sans-serif; padding:16px; }
+h1 { color:#4ecca3; font-size:22px; margin-bottom:4px; }
+.subtitle { color:#888; font-size:12px; margin-bottom:16px; }
+a { color:#4ecca3; text-decoration:none; }
+
+.toolbar {
+    display:flex; flex-wrap:wrap; gap:16px; align-items:center;
+    background:#16213e; border:1px solid #0f3460; border-radius:8px;
+    padding:12px 16px; margin-bottom:16px;
+}
+.toolbar label { color:#888; font-size:12px; }
+.toolbar input[type=number] {
+    width:60px; background:#0a1628; color:#eee; border:1px solid #1a4a8a;
+    border-radius:4px; padding:4px 6px; font-size:13px; font-family:Consolas,monospace;
+    text-align:center;
+}
+.toolbar .group { display:flex; align-items:center; gap:6px; }
+.toolbar .group .link-label {
+    font-size:11px; font-weight:bold; padding:2px 6px; border-radius:3px;
+    color:#fff; min-width:22px; text-align:center;
+}
+.btn {
+    background:#0e4d6e; color:#eee; border:1px solid #1a6a9a; border-radius:6px;
+    padding:6px 14px; cursor:pointer; font-size:12px;
+}
+.btn:hover { background:#126e94; }
+.btn.active { background:#0e6655; border-color:#1abc9c; color:#1abc9c; }
+
+.radio-group { display:flex; gap:12px; align-items:center; }
+.radio-group label { color:#aaa; font-size:12px; cursor:pointer; display:flex; align-items:center; gap:4px; }
+.radio-group input { cursor:pointer; }
+
+.canvas-grid {
+    display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;
+}
+@media (max-width:900px) { .canvas-grid { grid-template-columns:1fr; } }
+
+.canvas-card {
+    background:#16213e; border:1px solid #0f3460; border-radius:12px;
+    padding:16px; text-align:center;
+}
+.canvas-card h3 { color:#4ecca3; font-size:14px; margin-bottom:10px; }
+canvas { border:1px solid #0f3460; border-radius:4px; background:#0a1628; }
+
+.readout {
+    background:#16213e; border:1px solid #0f3460; border-radius:8px;
+    padding:12px 16px; font-family:Consolas,monospace; font-size:13px;
+    display:flex; flex-wrap:wrap; gap:24px;
+}
+.readout .section-label { color:#4ecca3; font-weight:bold; font-size:12px; margin-bottom:4px; }
+.readout .row { display:flex; gap:16px; flex-wrap:wrap; }
+.readout .val { color:#eee; }
+.readout .dim { color:#666; }
+
+.gamepad-status {
+    display:flex; align-items:center; gap:6px; font-size:12px; color:#888;
+}
+.dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+.dot.on { background:#4ecca3; }
+.dot.off { background:#555; }
+
+.lock-group { display:flex; align-items:center; gap:6px; }
+.lock-group input[type=number] {
+    width:50px; background:#0a1628; color:#eee; border:1px solid #1a4a8a;
+    border-radius:4px; padding:2px 4px; font-size:12px; font-family:Consolas,monospace;
+    text-align:center;
+}
+</style>
+</head>
+<body>
+
+<h1>AJ Robotics - XArm Simulation</h1>
+<div class="subtitle">Real-time stick-figure visualization &bull; R1 Agent</div>
+
+<!-- Toolbar: Link Lengths -->
+<div class="toolbar">
+    <div class="group">
+        <span class="link-label" style="background:#f39c12;">L1</span>
+        <label>Base</label>
+        <input type="number" id="len-L1" value="100" min="0" max="500" step="1">
+        <span class="dim">mm</span>
+    </div>
+    <div class="group">
+        <span class="link-label" style="background:#e74c3c;">L2</span>
+        <label>Upper</label>
+        <input type="number" id="len-L2" value="100" min="0" max="500" step="1">
+        <span class="dim">mm</span>
+    </div>
+    <div class="group">
+        <span class="link-label" style="background:#2ecc71;">L3</span>
+        <label>Forearm</label>
+        <input type="number" id="len-L3" value="100" min="0" max="500" step="1">
+        <span class="dim">mm</span>
+    </div>
+    <div class="group">
+        <span class="link-label" style="background:#3498db;">L4</span>
+        <label>Wrist</label>
+        <input type="number" id="len-L4" value="100" min="0" max="500" step="1">
+        <span class="dim">mm</span>
+    </div>
+    <button class="btn" id="btn-save" onclick="saveLinkLengths()">Save</button>
+</div>
+
+<!-- Toolbar: Input Source + Camera Lock -->
+<div class="toolbar">
+    <div class="radio-group">
+        <label><input type="radio" name="input-src" value="gamepad" checked> Local Gamepad</label>
+        <label><input type="radio" name="input-src" value="xbee"> XBee (Remote)</label>
+    </div>
+    <div class="gamepad-status">
+        <span class="dot off" id="gp-dot"></span>
+        <span id="gp-name">No gamepad</span>
+    </div>
+    <div style="flex:1;"></div>
+    <div class="lock-group">
+        <label style="color:#aaa; font-size:12px; cursor:pointer;">
+            <input type="checkbox" id="lock-camera" checked> Lock Camera Angle
+        </label>
+        <input type="number" id="lock-angle" value="-90" min="-180" max="180" step="5">
+        <span class="dim">&deg;</span>
+    </div>
+</div>
+
+<!-- Canvases -->
+<div class="canvas-grid">
+    <div class="canvas-card">
+        <h3>Side View (XZ Plane)</h3>
+        <canvas id="cv-side" width="500" height="500"></canvas>
+    </div>
+    <div class="canvas-card">
+        <h3>Top View (XY Plane)</h3>
+        <canvas id="cv-top" width="500" height="500"></canvas>
+    </div>
+</div>
+
+<!-- Readout -->
+<div class="readout">
+    <div>
+        <div class="section-label">Tip Position</div>
+        <div class="row">
+            <span>X: <span class="val" id="ro-x" style="color:#e74c3c;">0.0</span><span class="dim">mm</span></span>
+            <span>Y: <span class="val" id="ro-y" style="color:#2ecc71;">0.0</span><span class="dim">mm</span></span>
+            <span>Z: <span class="val" id="ro-z" style="color:#3498db;">0.0</span><span class="dim">mm</span></span>
+        </div>
+    </div>
+    <div>
+        <div class="section-label">Joint Angles</div>
+        <div class="row">
+            <span>S2: <span class="val" id="ro-a2">0</span><span class="dim">&deg;</span></span>
+            <span>S3: <span class="val" id="ro-a3">0</span><span class="dim">&deg;</span></span>
+            <span>S4: <span class="val" id="ro-a4">0</span><span class="dim">&deg;</span></span>
+            <span>S5: <span class="val" id="ro-a5">0</span><span class="dim">&deg;</span></span>
+        </div>
+    </div>
+    <div>
+        <div class="section-label">Servo Positions</div>
+        <div class="row">
+            <span>S2: <span class="val" id="ro-s2">500</span></span>
+            <span>S3: <span class="val" id="ro-s3">500</span></span>
+            <span>S4: <span class="val" id="ro-s4">500</span></span>
+            <span>S5: <span class="val" id="ro-s5">500</span></span>
+        </div>
+    </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------
+const LINK_COLORS = ['#f39c12', '#e74c3c', '#2ecc71', '#3498db'];
+const JOINT_COLOR = '#fff';
+const TIP_COLOR = '#1abc9c';
+const GRID_COLOR = '#1a3a5a';
+const WORKSPACE_COLOR = 'rgba(78,204,163,0.13)';
+const DEADZONE = 0.10;
+const SERVO_SPEED = 150; // units/sec at full stick
+const FPS = 60;
+const DT = 1.0 / FPS;
+
+let config = {
+    L1: 100, L2: 100, L3: 100, L4: 100,
+    calibration: {
+        2: {zero_offset_deg: 120, direction: 1},
+        3: {zero_offset_deg: 120, direction: 1},
+        4: {zero_offset_deg: 120, direction: 1},
+        5: {zero_offset_deg: 120, direction: 1},
+    }
+};
+
+// Servo state
+let servoPos = {2: 500, 3: 500, 4: 500, 5: 500, 6: 500};
+let servoVel = {2: 0, 3: 0, 4: 0, 5: 0, 6: 0};
+
+// Gamepad
+let gpConnected = false;
+let gpIndex = -1;
+
+// Input mode
+let inputMode = 'gamepad'; // 'gamepad' | 'xbee'
+
+// Axis map (same as Xbox 360 default)
+const AXIS_MAP = {0: 2, 1: 3, 2: 6, 3: 4};
+// Stick map for coupling
+let stickMap = {lx: 0, ly: 1, rx: 2, ry: 3};
+let coupling = {'3': [{servo: 4, reverse: false}, {servo: 5, reverse: false}]};
+
+// ---------------------------------------------------------------
+// Load config from server
+// ---------------------------------------------------------------
+async function loadConfig() {
+    try {
+        const r = await fetch('/api/xbee/hardware');
+        const d = await r.json();
+        if (d.xarm && d.xarm.servos) {
+            for (const [k, v] of Object.entries(d.xarm.servos)) {
+                servoPos[parseInt(k)] = v;
+            }
+        }
+    } catch(e) {}
+    // Load IK config
+    try {
+        const r = await fetch('/api/xbee/ik-config');
+        const d = await r.json();
+        if (d.link_lengths_mm) {
+            config.L1 = d.link_lengths_mm.L1 || 100;
+            config.L2 = d.link_lengths_mm.L2 || 100;
+            config.L3 = d.link_lengths_mm.L3 || 100;
+            config.L4 = d.link_lengths_mm.L4 || 100;
+            document.getElementById('len-L1').value = config.L1;
+            document.getElementById('len-L2').value = config.L2;
+            document.getElementById('len-L3').value = config.L3;
+            document.getElementById('len-L4').value = config.L4;
+        }
+        if (d.servo_calibration) {
+            for (const [k, v] of Object.entries(d.servo_calibration)) {
+                config.calibration[parseInt(k)] = v;
+            }
+        }
+    } catch(e) {}
+}
+
+// ---------------------------------------------------------------
+// FK (client-side)
+// ---------------------------------------------------------------
+function servoToAngle(sid, pos) {
+    const cal = config.calibration[sid] || {zero_offset_deg: 120, direction: 1};
+    const servoDeg = pos * 0.24;
+    const geoDeg = (servoDeg - cal.zero_offset_deg) * cal.direction;
+    return geoDeg * Math.PI / 180;
+}
+
+function angleToDeg(sid, pos) {
+    const cal = config.calibration[sid] || {zero_offset_deg: 120, direction: 1};
+    const servoDeg = pos * 0.24;
+    return (servoDeg - cal.zero_offset_deg) * cal.direction;
+}
+
+function forwardKinematics() {
+    const {L1, L2, L3, L4} = config;
+    const base = servoToAngle(2, servoPos[2]);
+    const t3 = servoToAngle(3, servoPos[3]);
+    const t4 = servoToAngle(4, servoPos[4]);
+    const t5 = servoToAngle(5, servoPos[5]);
+
+    // Joint positions in vertical plane (r=horizontal, z=vertical)
+    const joints = [{r: 0, z: 0}]; // ground
+    joints.push({r: 0, z: L1});    // shoulder
+
+    let a = t3;
+    joints.push({r: L2*Math.cos(a), z: L1 + L2*Math.sin(a)}); // elbow
+
+    a = t3 + t4;
+    joints.push({
+        r: joints[2].r + L3*Math.cos(a),
+        z: joints[2].z + L3*Math.sin(a)
+    }); // wrist
+
+    a = t3 + t4 + t5;
+    joints.push({
+        r: joints[3].r + L4*Math.cos(a),
+        z: joints[3].z + L4*Math.sin(a)
+    }); // tip
+
+    // 3D coordinates
+    return joints.map(j => ({
+        x: j.r * Math.cos(base),
+        y: j.r * Math.sin(base),
+        z: j.z,
+        r: j.r
+    }));
+}
+
+// ---------------------------------------------------------------
+// Drawing: Side View (XZ)
+// ---------------------------------------------------------------
+function drawSideView(joints) {
+    const c = document.getElementById('cv-side');
+    const ctx = c.getContext('2d');
+    const W = c.width, H = c.height;
+    const {L1, L2, L3, L4} = config;
+    const maxReach = L1 + L2 + L3 + L4;
+    const scale = (H * 0.8) / (maxReach || 400);
+    const ox = W * 0.4;    // origin x (base position)
+    const oy = H * 0.88;   // origin y (ground level)
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Grid
+    ctx.strokeStyle = GRID_COLOR;
+    ctx.lineWidth = 0.5;
+    const gridStep = 50; // mm
+    const gridPx = gridStep * scale;
+    for (let gx = -10; gx <= 10; gx++) {
+        const px = ox + gx * gridPx;
+        if (px >= 0 && px <= W) {
+            ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
+        }
+    }
+    for (let gz = -2; gz <= 10; gz++) {
+        const py = oy - gz * gridPx;
+        if (py >= 0 && py <= H) {
+            ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(W, py); ctx.stroke();
+        }
+    }
+
+    // Ground line
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(W, oy); ctx.stroke();
+
+    // Workspace arc
+    const maxR = (L2 + L3 + L4) * scale;
+    ctx.fillStyle = WORKSPACE_COLOR;
+    ctx.beginPath();
+    ctx.arc(ox, oy - L1*scale, maxR, -Math.PI, 0);
+    ctx.fill();
+
+    // Axis labels
+    ctx.fillStyle = '#555';
+    ctx.font = '10px Consolas';
+    ctx.fillText('r (mm)', W - 45, oy - 5);
+    ctx.fillText('z (mm)', ox + 5, 15);
+
+    // Scale numbers
+    ctx.fillStyle = '#444';
+    ctx.font = '9px Consolas';
+    for (let g = 0; g <= 8; g++) {
+        const val = g * gridStep;
+        ctx.fillText(val, ox + g*gridPx + 2, oy + 12);
+        if (val > 0) ctx.fillText(val, ox - 20, oy - g*gridPx + 3);
+    }
+
+    // Draw links
+    function toScreen(j) {
+        return {x: ox + j.r * scale, y: oy - j.z * scale};
+    }
+
+    const pts = joints.map(toScreen);
+    const linkColors = ['#888', ...LINK_COLORS]; // ground-base, L1, L2, L3, L4
+
+    for (let i = 0; i < pts.length - 1; i++) {
+        ctx.strokeStyle = linkColors[i] || '#888';
+        ctx.lineWidth = i === 0 ? 2 : 4;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(pts[i].x, pts[i].y);
+        ctx.lineTo(pts[i+1].x, pts[i+1].y);
+        ctx.stroke();
+    }
+
+    // Draw joints
+    for (let i = 0; i < pts.length; i++) {
+        ctx.fillStyle = i === pts.length - 1 ? TIP_COLOR : JOINT_COLOR;
+        ctx.beginPath();
+        ctx.arc(pts[i].x, pts[i].y, i === pts.length - 1 ? 7 : 5, 0, Math.PI*2);
+        ctx.fill();
+    }
+
+    // Camera/gripper angle indicator at tip
+    const tip = pts[pts.length - 1];
+    const wristAngle = servoToAngle(3, servoPos[3]) + servoToAngle(4, servoPos[4]) + servoToAngle(5, servoPos[5]);
+    const camLen = 20;
+    ctx.strokeStyle = '#f39c12';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(tip.x + camLen * Math.cos(-wristAngle), tip.y + camLen * Math.sin(-wristAngle));
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Link length labels
+    ctx.font = '10px Consolas';
+    for (let i = 0; i < pts.length - 1; i++) {
+        const mx = (pts[i].x + pts[i+1].x) / 2;
+        const my = (pts[i].y + pts[i+1].y) / 2;
+        const lengths = [0, config.L1, config.L2, config.L3, config.L4];
+        if (lengths[i] > 0) {
+            ctx.fillStyle = linkColors[i];
+            ctx.fillText(lengths[i] + 'mm', mx + 6, my - 4);
+        }
+    }
+
+    // Lock camera angle indicator
+    if (document.getElementById('lock-camera').checked) {
+        const lockDeg = parseFloat(document.getElementById('lock-angle').value) || -90;
+        const lockRad = lockDeg * Math.PI / 180;
+        ctx.strokeStyle = '#f39c1288';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 4]);
+        ctx.beginPath();
+        ctx.moveTo(tip.x, tip.y);
+        ctx.lineTo(tip.x + 40 * Math.cos(-lockRad), tip.y + 40 * Math.sin(-lockRad));
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+}
+
+// ---------------------------------------------------------------
+// Drawing: Top View (XY)
+// ---------------------------------------------------------------
+function drawTopView(joints) {
+    const c = document.getElementById('cv-top');
+    const ctx = c.getContext('2d');
+    const W = c.width, H = c.height;
+    const {L1, L2, L3, L4} = config;
+    const maxReach = L2 + L3 + L4;
+    const scale = (Math.min(W, H) * 0.35) / (maxReach || 300);
+    const ox = W / 2, oy = H / 2;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Grid
+    ctx.strokeStyle = GRID_COLOR;
+    ctx.lineWidth = 0.5;
+    const gridStep = 50;
+    const gridPx = gridStep * scale;
+    for (let g = -10; g <= 10; g++) {
+        const px = ox + g * gridPx;
+        if (px >= 0 && px <= W) { ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke(); }
+        const py = oy + g * gridPx;
+        if (py >= 0 && py <= H) { ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(W, py); ctx.stroke(); }
+    }
+
+    // Workspace circle
+    ctx.strokeStyle = '#4ecca344';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(ox, oy, maxReach * scale, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = WORKSPACE_COLOR;
+    ctx.fill();
+
+    // Axis labels
+    ctx.fillStyle = '#555';
+    ctx.font = '10px Consolas';
+    ctx.fillText('+X', W - 25, oy - 5);
+    ctx.fillText('-X', 5, oy - 5);
+    ctx.fillText('+Y', ox + 5, 15);
+    ctx.fillText('-Y', ox + 5, H - 5);
+
+    // Axes lines
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(W, oy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ox, 0); ctx.lineTo(ox, H); ctx.stroke();
+
+    // Draw arm projection (skip base and shoulder which are at origin in XY)
+    function toScreen(j) {
+        return {x: ox + j.x * scale, y: oy - j.y * scale};
+    }
+
+    // Arm chain from shoulder to tip (joints 1..4 have x,y data)
+    const armJoints = joints.slice(1); // skip ground
+    const pts = armJoints.map(toScreen);
+    const colors = LINK_COLORS; // L1(at origin), L2, L3, L4
+
+    // Base dot
+    ctx.fillStyle = '#888';
+    ctx.beginPath();
+    ctx.arc(ox, oy, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw links from shoulder outward
+    for (let i = 0; i < pts.length - 1; i++) {
+        ctx.strokeStyle = colors[i] || '#888';
+        ctx.lineWidth = i === 0 ? 2 : 4;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(pts[i].x, pts[i].y);
+        ctx.lineTo(pts[i+1].x, pts[i+1].y);
+        ctx.stroke();
+    }
+
+    // Draw joints
+    for (let i = 0; i < pts.length; i++) {
+        ctx.fillStyle = i === pts.length - 1 ? TIP_COLOR : JOINT_COLOR;
+        ctx.beginPath();
+        ctx.arc(pts[i].x, pts[i].y, i === pts.length - 1 ? 7 : 4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Base rotation angle arc
+    const baseAngle = servoToAngle(2, servoPos[2]);
+    if (Math.abs(baseAngle) > 0.01) {
+        ctx.strokeStyle = '#f39c1288';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(ox, oy, 30, 0, -baseAngle, baseAngle > 0);
+        ctx.stroke();
+        ctx.fillStyle = '#f39c12';
+        ctx.font = '10px Consolas';
+        ctx.fillText((baseAngle * 180 / Math.PI).toFixed(0) + '\u00b0', ox + 34, oy - 10);
+    }
+}
+
+// ---------------------------------------------------------------
+// Readout
+// ---------------------------------------------------------------
+function updateReadout(joints) {
+    const tip = joints[joints.length - 1];
+    document.getElementById('ro-x').textContent = tip.x.toFixed(1);
+    document.getElementById('ro-y').textContent = tip.y.toFixed(1);
+    document.getElementById('ro-z').textContent = tip.z.toFixed(1);
+
+    for (const sid of [2, 3, 4, 5]) {
+        document.getElementById('ro-a' + sid).textContent = angleToDeg(sid, servoPos[sid]).toFixed(0);
+        document.getElementById('ro-s' + sid).textContent = Math.round(servoPos[sid]);
+    }
+}
+
+// ---------------------------------------------------------------
+// Gamepad
+// ---------------------------------------------------------------
+window.addEventListener('gamepadconnected', e => {
+    gpConnected = true;
+    gpIndex = e.gamepad.index;
+    document.getElementById('gp-dot').className = 'dot on';
+    document.getElementById('gp-name').textContent = e.gamepad.id.substring(0, 40);
+});
+window.addEventListener('gamepaddisconnected', e => {
+    if (e.gamepad.index === gpIndex) {
+        gpConnected = false;
+        gpIndex = -1;
+        document.getElementById('gp-dot').className = 'dot off';
+        document.getElementById('gp-name').textContent = 'No gamepad';
+    }
+});
+
+function readGamepad() {
+    if (!gpConnected || inputMode !== 'gamepad') return;
+    const gps = navigator.getGamepads();
+    const gp = gps[gpIndex];
+    if (!gp) return;
+
+    const axes = Array.from(gp.axes);
+
+    // Map axes to servo velocities
+    for (const [axisIdx, servoId] of Object.entries(AXIS_MAP)) {
+        let val = axes[parseInt(axisIdx)] || 0;
+        if (Math.abs(val) < DEADZONE) val = 0;
+        servoVel[servoId] = val;
+    }
+
+    // Coupling: axis 3 (RY) -> servo 4 and 5
+    const ryVal = axes[3] || 0;
+    if (Math.abs(ryVal) >= DEADZONE) {
+        servoVel[4] = ryVal;
+        servoVel[5] = ryVal;
+    } else {
+        if (!AXIS_MAP[3] || AXIS_MAP[3] === 4) servoVel[4] = 0;
+        servoVel[5] = 0;
+    }
+
+    // Lock camera angle: adjust servo 5 to compensate
+    if (document.getElementById('lock-camera').checked) {
+        // Will be applied after position update
+    }
+}
+
+function updateServoPositions() {
+    if (inputMode !== 'gamepad') return;
+
+    for (const sid of [2, 3, 4, 5, 6]) {
+        const vel = servoVel[sid] || 0;
+        if (Math.abs(vel) < DEADZONE) continue;
+        const delta = vel * SERVO_SPEED * DT;
+        servoPos[sid] = Math.max(0, Math.min(1000, servoPos[sid] + delta));
+    }
+
+    // Lock camera angle: auto-adjust servo 5
+    if (document.getElementById('lock-camera').checked) {
+        const lockDeg = parseFloat(document.getElementById('lock-angle').value) || -90;
+        const lockRad = lockDeg * Math.PI / 180;
+        const t3 = servoToAngle(3, servoPos[3]);
+        const t4 = servoToAngle(4, servoPos[4]);
+        // wrist_pitch = t3 + t4 + t5 = lockRad
+        const needed_t5 = lockRad - t3 - t4;
+        // Convert back to servo position
+        const cal = config.calibration[5];
+        const geoDeg = needed_t5 * 180 / Math.PI;
+        const servoDeg = geoDeg * cal.direction + cal.zero_offset_deg;
+        const pos = servoDeg * (1000 / 240);
+        servoPos[5] = Math.max(0, Math.min(1000, pos));
+    }
+}
+
+// ---------------------------------------------------------------
+// XBee polling
+// ---------------------------------------------------------------
+let xbeePollTimer = null;
+async function pollXbee() {
+    if (inputMode !== 'xbee') return;
+    try {
+        const r = await fetch('/api/xbee/hardware');
+        const d = await r.json();
+        if (d.xarm && d.xarm.servos) {
+            for (const [k, v] of Object.entries(d.xarm.servos)) {
+                servoPos[parseInt(k)] = v;
+            }
+        }
+    } catch(e) {}
+}
+
+// Input mode switch
+document.querySelectorAll('input[name="input-src"]').forEach(el => {
+    el.addEventListener('change', e => {
+        inputMode = e.target.value;
+        if (inputMode === 'xbee') {
+            if (!xbeePollTimer) xbeePollTimer = setInterval(pollXbee, 200);
+        } else {
+            if (xbeePollTimer) { clearInterval(xbeePollTimer); xbeePollTimer = null; }
+        }
+    });
+});
+
+// Link length inputs -> immediate update
+for (const key of ['L1', 'L2', 'L3', 'L4']) {
+    document.getElementById('len-' + key).addEventListener('input', e => {
+        config[key] = parseFloat(e.target.value) || 0;
+    });
+}
+
+// ---------------------------------------------------------------
+// Save link lengths
+// ---------------------------------------------------------------
+async function saveLinkLengths() {
+    const btn = document.getElementById('btn-save');
+    try {
+        const r = await fetch('/api/xbee/ik-config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                link_lengths_mm: {L1: config.L1, L2: config.L2, L3: config.L3, L4: config.L4}
+            })
+        });
+        const d = await r.json();
+        btn.textContent = 'Saved!';
+        btn.style.background = '#0e6655';
+        setTimeout(() => { btn.textContent = 'Save'; btn.style.background = ''; }, 1500);
+    } catch(e) {
+        btn.textContent = 'Error';
+        setTimeout(() => { btn.textContent = 'Save'; }, 1500);
+    }
+}
+
+// ---------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------
+function mainLoop() {
+    readGamepad();
+    updateServoPositions();
+    const joints = forwardKinematics();
+    drawSideView(joints);
+    drawTopView(joints);
+    updateReadout(joints);
+    requestAnimationFrame(mainLoop);
+}
+
+// Init
+loadConfig().then(() => {
+    requestAnimationFrame(mainLoop);
+});
+</script>
+</body>
+</html>

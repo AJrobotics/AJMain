@@ -171,10 +171,35 @@ class XbeeResponderModule:
         # Servo coupling: axis -> [{servo, reverse}, ...]
         self._servo_coupling = {}
 
+        # IK / XYZ mode
+        self._ik_mode = False
+        self._xyz_velocity = [0.0, 0.0, 0.0]   # normalised dx, dy, dz
+        self._current_xyz = None                 # {x, y, z} in mm
+        self._wrist_pitch_deg = -90.0            # default: gripper down
+        self._kinematics = None
+        self._init_kinematics()
+
         # Ack sender
         self._last_remote = None
         self._last_rx_time = 0.0
         self._ack_running = False
+
+    def _init_kinematics(self):
+        """Load IK config if available."""
+        try:
+            from agent_modules.xarm_kinematics import XArmKinematics
+            cfg = os.path.join(os.path.dirname(__file__), "..",
+                               "configs", "xarm_kinematics.json")
+            self._kinematics = XArmKinematics(cfg)
+            if self._kinematics.is_configured():
+                logger.info("IK solver loaded (L2=%.1f L3=%.1f)",
+                            self._kinematics.L2, self._kinematics.L3)
+                self._wrist_pitch_deg = self._kinematics.default_wrist_pitch
+            else:
+                logger.info("IK solver loaded but link lengths not set")
+        except Exception as e:
+            logger.warning("IK solver not available: %s", e)
+            self._kinematics = None
 
     @property
     def is_running(self):
@@ -287,6 +312,7 @@ class XbeeResponderModule:
             "xarm_gamepad_toggle": self._handle_xarm_gamepad_toggle,
             "xarm_status": self._handle_xarm_status,
             "gamepad_config": self._handle_gamepad_config,
+            "xyz_mode": self._handle_xyz_mode,
         }
         handler = handlers.get(msg_type)
         if handler:
@@ -395,35 +421,70 @@ class XbeeResponderModule:
 
     def _gamepad_to_xarm(self, axes, buttons):
         """Store axis values as velocity targets. The velocity loop moves servos."""
+        sm = self._stick_map
+
         with self._servo_lock:
-            # Update velocity targets from stick axes
-            for axis_key, servo_id in GAMEPAD_AXIS_MAP.items():
-                val = float(axes.get(axis_key, axes.get(str(axis_key), 0.0)))
-                if abs(val) < GAMEPAD_DEADZONE:
-                    val = 0.0
-                if self._servo_reverse.get(servo_id):
-                    val = -val
-                self._servo_velocity[servo_id] = val
+            if self._ik_mode and self._kinematics and self._kinematics.is_configured():
+                # --- XYZ mode: sticks -> Cartesian velocity ---
+                rx_val = float(axes.get(sm["rx"], axes.get(str(sm["rx"]), 0.0)))
+                ry_val = float(axes.get(sm["ry"], axes.get(str(sm["ry"]), 0.0)))
+                lx_val = float(axes.get(sm["lx"], axes.get(str(sm["lx"]), 0.0)))
+                ly_val = float(axes.get(sm["ly"], axes.get(str(sm["ly"]), 0.0)))
 
-            # Apply servo coupling (e.g. RY drives both S4 and S5)
-            for axis_key_str, coupled in self._servo_coupling.items():
-                axis_key = int(axis_key_str) if axis_key_str.isdigit() else axis_key_str
-                val = float(axes.get(axis_key, axes.get(str(axis_key), 0.0)))
-                if abs(val) < GAMEPAD_DEADZONE:
-                    val = 0.0
-                for entry in coupled:
-                    sid = entry["servo"]
-                    cval = -val if entry.get("reverse") else val
-                    self._servo_velocity[sid] = cval
+                for v_list in [(rx_val,), (ry_val,), (lx_val,), (ly_val,)]:
+                    pass  # just reading
 
-            # LB/RB -> add to Servo 2 velocity (on top of any axis mapping)
-            lb = int(buttons.get(4, buttons.get("4", 0)))
-            rb = int(buttons.get(5, buttons.get("5", 0)))
-            if lb or rb:
-                self._servo_velocity[2] = max(-1, min(1,
-                    self._servo_velocity.get(2, 0.0) + float(rb - lb)))
+                # Apply deadzone
+                if abs(rx_val) < GAMEPAD_DEADZONE: rx_val = 0.0
+                if abs(ry_val) < GAMEPAD_DEADZONE: ry_val = 0.0
+                if abs(lx_val) < GAMEPAD_DEADZONE: lx_val = 0.0
+                if abs(ly_val) < GAMEPAD_DEADZONE: ly_val = 0.0
 
-            # Button A -> gripper toggle (instant)
+                # Right stick X -> X, Right stick Y -> Y, Left stick Y -> Z
+                self._xyz_velocity = [rx_val, ry_val, -ly_val]
+
+                # Left stick X -> wrist rotation (servo 6, direct)
+                if abs(lx_val) >= GAMEPAD_DEADZONE:
+                    self._servo_velocity[6] = lx_val
+                else:
+                    self._servo_velocity[6] = 0.0
+
+                # LB/RB -> wrist pitch adjustment
+                lb = int(buttons.get(4, buttons.get("4", 0)))
+                rb = int(buttons.get(5, buttons.get("5", 0)))
+                if lb or rb:
+                    self._wrist_pitch_deg += float(rb - lb) * 2.0
+                    self._wrist_pitch_deg = max(-180, min(180, self._wrist_pitch_deg))
+
+            else:
+                # --- Servo-direct mode ---
+                for axis_key, servo_id in GAMEPAD_AXIS_MAP.items():
+                    val = float(axes.get(axis_key, axes.get(str(axis_key), 0.0)))
+                    if abs(val) < GAMEPAD_DEADZONE:
+                        val = 0.0
+                    if self._servo_reverse.get(servo_id):
+                        val = -val
+                    self._servo_velocity[servo_id] = val
+
+                # Apply servo coupling
+                for axis_key_str, coupled in self._servo_coupling.items():
+                    axis_key = int(axis_key_str) if axis_key_str.isdigit() else axis_key_str
+                    val = float(axes.get(axis_key, axes.get(str(axis_key), 0.0)))
+                    if abs(val) < GAMEPAD_DEADZONE:
+                        val = 0.0
+                    for entry in coupled:
+                        sid = entry["servo"]
+                        cval = -val if entry.get("reverse") else val
+                        self._servo_velocity[sid] = cval
+
+                # LB/RB -> Servo 2
+                lb = int(buttons.get(4, buttons.get("4", 0)))
+                rb = int(buttons.get(5, buttons.get("5", 0)))
+                if lb or rb:
+                    self._servo_velocity[2] = max(-1, min(1,
+                        self._servo_velocity.get(2, 0.0) + float(rb - lb)))
+
+            # Button A -> gripper toggle (both modes)
             btn_a = int(buttons.get(0, buttons.get("0", 0)))
             if btn_a:
                 self._gripper_open = not self._gripper_open
@@ -433,12 +494,23 @@ class XbeeResponderModule:
                         self._arm.move_servo(1, int(self._servo_positions[1]),
                                              GAMEPAD_SERVO_DURATION)
 
-            # Button Y -> smooth home (velocity loop moves to target)
+            # Button Y -> smooth home (both modes)
             btn_y = int(buttons.get(3, buttons.get("3", 0)))
             if btn_y:
-                self._home_target = {sid: 500.0 for sid in range(1, 7)}
+                if self._ik_mode and self._kinematics:
+                    # Home to configured XYZ position
+                    hx, hy, hz = self._kinematics.home_xyz
+                    result = self._kinematics.inverse_kinematics(
+                        hx, hy, hz, self._wrist_pitch_deg)
+                    if result:
+                        self._home_target = dict(result)
+                        self._home_target[1] = 500.0  # gripper center
+                        self._home_target[6] = 500.0  # wrist rotation center
+                else:
+                    self._home_target = {sid: 500.0 for sid in range(1, 7)}
                 for sid in range(1, 7):
                     self._servo_velocity[sid] = 0.0
+                self._xyz_velocity = [0.0, 0.0, 0.0]
 
     def _servo_velocity_loop(self):
         """Background loop: smoothly move servos based on velocity targets at 50Hz."""
@@ -470,8 +542,54 @@ class XbeeResponderModule:
                     if all_reached:
                         self._home_target = None
                         logger.info("Smooth home complete")
+                elif self._ik_mode and self._kinematics and self._kinematics.is_configured():
+                    # --- XYZ velocity control via IK ---
+                    kin = self._kinematics
+                    speed = kin.xyz_speed  # mm/s at full stick
+
+                    dx = self._xyz_velocity[0] * speed * VELOCITY_LOOP_DT
+                    dy = self._xyz_velocity[1] * speed * VELOCITY_LOOP_DT
+                    dz = self._xyz_velocity[2] * speed * VELOCITY_LOOP_DT
+
+                    if abs(dx) > 0.01 or abs(dy) > 0.01 or abs(dz) > 0.01:
+                        # initialise current XYZ from FK if needed
+                        if self._current_xyz is None:
+                            fk = kin.forward_kinematics(self._servo_positions)
+                            if fk:
+                                self._current_xyz = fk
+                            else:
+                                self._current_xyz = {"x": 0, "y": 0,
+                                                     "z": kin.L1}
+
+                        nx = self._current_xyz["x"] + dx
+                        ny = self._current_xyz["y"] + dy
+                        nz = self._current_xyz["z"] + dz
+
+                        # clamp to workspace
+                        nx, ny, nz = kin.clamp_to_workspace(
+                            nx, ny, nz, self._wrist_pitch_deg)
+
+                        result = kin.inverse_kinematics(
+                            nx, ny, nz, self._wrist_pitch_deg)
+                        if result is not None:
+                            for sid, pos in result.items():
+                                self._servo_positions[sid] = float(pos)
+                            self._current_xyz = {"x": nx, "y": ny, "z": nz}
+                            moved = True
+
+                    # Servo 6 (wrist rotation) still direct velocity
+                    vel6 = self._servo_velocity.get(6, 0.0)
+                    if abs(vel6) >= GAMEPAD_DEADZONE:
+                        spd6 = self._servo_speed.get(6, 150.0)
+                        d6 = vel6 * spd6 * VELOCITY_LOOP_DT
+                        old6 = self._servo_positions[6]
+                        new6 = max(0, min(1000, old6 + d6))
+                        if int(new6) != int(old6):
+                            self._servo_positions[6] = new6
+                            moved = True
+
                 else:
-                    # Normal velocity control from gamepad
+                    # --- Normal servo-direct velocity control ---
                     for sid in range(1, 7):
                         vel = self._servo_velocity.get(sid, 0.0)
                         if abs(vel) < GAMEPAD_DEADZONE:
@@ -674,6 +792,29 @@ class XbeeResponderModule:
             "type": "gamepad_config_ack",
             "payload": {"stick_map": self._stick_map,
                         "coupling": self._servo_coupling},
+        })
+
+    def _handle_xyz_mode(self, remote, payload):
+        """Toggle XYZ (IK) mode from gamepad sender."""
+        enabled = payload.get("enabled", not self._ik_mode)
+        with self._servo_lock:
+            if enabled and self._kinematics and self._kinematics.is_configured():
+                self._ik_mode = True
+                # initialise current XYZ from FK
+                fk = self._kinematics.forward_kinematics(self._servo_positions)
+                if fk:
+                    self._current_xyz = fk
+                self._xyz_velocity = [0.0, 0.0, 0.0]
+                logger.info("XYZ (IK) mode ENABLED, pos=%s", self._current_xyz)
+            else:
+                self._ik_mode = False
+                self._xyz_velocity = [0.0, 0.0, 0.0]
+                for sid in range(1, 7):
+                    self._servo_velocity[sid] = 0.0
+                logger.info("XYZ (IK) mode DISABLED")
+        self._send_response(remote, {
+            "type": "xyz_mode_ack",
+            "payload": {"enabled": self._ik_mode},
         })
 
     # -------------------------------------------------------------------
@@ -952,6 +1093,13 @@ class XbeeResponderModule:
                                  if self._arm else False)
             with self._servo_lock:
                 servos = dict(self._servo_positions)
+            # IK state
+            ik_mode = self._ik_mode
+            xyz = self._current_xyz
+            wrist_pitch = self._wrist_pitch_deg
+            ik_configured = (self._kinematics.is_configured()
+                             if self._kinematics else False)
+
             return jsonify({
                 "xarm": {
                     "available": _xarm_class is not None,
@@ -960,6 +1108,10 @@ class XbeeResponderModule:
                     "servos": {str(k): int(v) for k, v in servos.items()},
                     "reverse": {str(k): v for k, v in self._servo_reverse.items()},
                     "speed": {str(k): v for k, v in self._servo_speed.items()},
+                    "ik_mode": ik_mode,
+                    "ik_configured": ik_configured,
+                    "xyz": xyz,
+                    "wrist_pitch_deg": wrist_pitch,
                 },
                 "gpio": {
                     "available": _gpio_available,
@@ -1013,6 +1165,28 @@ class XbeeResponderModule:
                 data.get("enabled", not self._gamepad_arm_enabled))
             return jsonify({"enabled": self._gamepad_arm_enabled})
 
+        @bp.route("/api/xbee/xyz-mode", methods=["POST"])
+        def xyz_mode_toggle():
+            """Toggle XYZ (IK) mode from dashboard."""
+            data = request.json or {}
+            enabled = data.get("enabled", not self._ik_mode)
+            with self._servo_lock:
+                if enabled and self._kinematics and self._kinematics.is_configured():
+                    self._ik_mode = True
+                    fk = self._kinematics.forward_kinematics(self._servo_positions)
+                    if fk:
+                        self._current_xyz = fk
+                    self._xyz_velocity = [0.0, 0.0, 0.0]
+                else:
+                    self._ik_mode = False
+                    self._xyz_velocity = [0.0, 0.0, 0.0]
+                    for sid in range(1, 7):
+                        self._servo_velocity[sid] = 0.0
+            return jsonify({
+                "enabled": self._ik_mode,
+                "xyz": self._current_xyz,
+            })
+
         @bp.route("/api/xbee/xarm-speed", methods=["POST"])
         def xarm_speed():
             """Set speed factor for a servo (units/sec at full stick)."""
@@ -1061,5 +1235,42 @@ class XbeeResponderModule:
                 "send_status": self._send_status,
                 "status_interval": self._status_interval,
             })
+
+        @bp.route("/simulation")
+        def xarm_simulation():
+            """Serve xArm simulation page."""
+            from flask import render_template
+            return render_template("xarm_simulation.html")
+
+        @bp.route("/api/xbee/ik-config", methods=["GET", "POST"])
+        def ik_config():
+            """Get or update IK configuration (link lengths)."""
+            cfg_path = os.path.join(os.path.dirname(__file__), "..",
+                                    "configs", "xarm_kinematics.json")
+            if request.method == "POST":
+                data = request.json or {}
+                # Load existing config
+                try:
+                    with open(cfg_path) as f:
+                        cfg = json.load(f)
+                except Exception:
+                    cfg = {}
+                # Update link lengths
+                if "link_lengths_mm" in data:
+                    cfg["link_lengths_mm"] = data["link_lengths_mm"]
+                # Save
+                with open(cfg_path, "w") as f:
+                    json.dump(cfg, f, indent=4)
+                # Reload kinematics if available
+                if self._kinematics:
+                    self._kinematics.load_config(cfg_path)
+                return jsonify({"ok": True, **cfg})
+            else:
+                try:
+                    with open(cfg_path) as f:
+                        cfg = json.load(f)
+                    return jsonify(cfg)
+                except Exception:
+                    return jsonify({})
 
         app.register_blueprint(bp)
