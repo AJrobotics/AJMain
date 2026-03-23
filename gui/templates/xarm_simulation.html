@@ -112,12 +112,16 @@ canvas { border:1px solid #0f3460; border-radius:4px; background:#0a1628; }
 <!-- Toolbar: Input Source + Camera Lock -->
 <div class="toolbar">
     <div class="radio-group">
-        <label><input type="radio" name="input-src" value="gamepad" checked> Local Gamepad</label>
+        <label><input type="radio" name="input-src" value="sim" checked> Simulation Only</label>
+        <label><input type="radio" name="input-src" value="local"> Local Gamepad</label>
         <label><input type="radio" name="input-src" value="xbee"> XBee (Remote)</label>
     </div>
     <div class="gamepad-status">
         <span class="dot off" id="gp-dot"></span>
-        <span id="gp-name">No gamepad</span>
+        <select id="gp-select" style="background:#0a1628; color:#eee; border:1px solid #1a4a8a; border-radius:4px; padding:4px 8px; font-size:12px; min-width:250px; cursor:pointer;">
+            <option value="">Scanning...</option>
+        </select>
+        <button class="btn" id="btn-gp-connect" onclick="toggleLocalGamepad()" style="font-size:11px; padding:4px 10px;">Connect</button>
     </div>
     <div style="flex:1;"></div>
     <div class="lock-group">
@@ -132,13 +136,107 @@ canvas { border:1px solid #0f3460; border-radius:4px; background:#0a1628; }
 <!-- Canvases -->
 <div class="canvas-grid">
     <div class="canvas-card">
-        <h3>Side View (XZ Plane)</h3>
+        <h3>Front View (XZ Plane)</h3>
         <canvas id="cv-side" width="500" height="500"></canvas>
     </div>
     <div class="canvas-card">
-        <h3>Top View (XY Plane)</h3>
+        <h3>Side View (YZ Plane)</h3>
         <canvas id="cv-top" width="500" height="500"></canvas>
+        <!-- Gamepad stick inputs -->
+        <div style="display:flex; gap:12px; margin-top:10px; justify-content:center;">
+            <div style="text-align:center;">
+                <div style="color:#888; font-size:10px; margin-bottom:4px;">Left Stick</div>
+                <canvas id="cv-stick-l" width="100" height="100" style="border:1px solid #0f3460; border-radius:4px; background:#0a1628;"></canvas>
+                <div style="color:#666; font-size:9px; font-family:Consolas;" id="stick-l-val">0.00, 0.00</div>
+            </div>
+            <div style="text-align:center;">
+                <div style="color:#888; font-size:10px; margin-bottom:4px;">Right Stick</div>
+                <canvas id="cv-stick-r" width="100" height="100" style="border:1px solid #0f3460; border-radius:4px; background:#0a1628;"></canvas>
+                <div style="color:#666; font-size:9px; font-family:Consolas;" id="stick-r-val">0.00, 0.00</div>
+            </div>
+        </div>
     </div>
+</div>
+
+<!-- Servo Bars -->
+<div class="canvas-card" style="margin-bottom:16px;">
+    <h3>Servo Positions
+        <span style="float:right; font-size:11px; font-weight:normal;">
+            <button class="btn" id="btn-ik-toggle" onclick="toggleIK()" style="font-size:10px; padding:3px 10px;">IK: OFF</button>
+            <button class="btn" id="btn-arm-toggle" onclick="toggleArm()" style="font-size:10px; padding:3px 10px;">GP→Arm: OFF</button>
+        </span>
+    </h3>
+    <div style="display:grid; grid-template-columns:40px 1fr 50px 60px 45px 50px; gap:4px 8px; align-items:center; font-family:Consolas; font-size:12px;">
+        <div style="color:#888;">Servo</div><div style="color:#888;">Position</div><div style="color:#888;">Value</div><div style="color:#888;">Angle (ROM)</div><div style="color:#888;">Speed</div><div style="color:#888;">Rev</div>
+        <div style="color:#f39c12;">S1 <span style="color:#666;font-size:9px;">Grip</span></div>
+        <div class="servo-drag-track" data-servo="1" style="position:relative; background:#0f3460; border-radius:3px; height:18px; overflow:hidden; cursor:pointer;">
+            <div id="sim-servo-bar-1" style="height:100%; background:#f39c12; border-radius:3px; width:50%; pointer-events:none;"></div>
+        </div>
+        <div id="sim-servo-val-1" style="color:#aaa; text-align:right;">500</div>
+        <div id="sim-servo-ang-1" style="color:#666; font-size:9px; text-align:center;">0.0°</div>
+        <input type="number" id="sim-servo-spd-1" value="150" min="10" max="2000" step="50" style="width:45px; background:#0a1628; color:#eee; border:1px solid #1a4a8a; border-radius:3px; padding:1px 3px; font-size:10px; font-family:Consolas; text-align:center;">
+        <label style="text-align:center; cursor:pointer;"><input type="checkbox" id="sim-servo-rev-1"></label>
+
+        <div style="color:#f39c12;">S2 <span style="color:#666;font-size:9px;">Roll</span></div>
+        <div class="servo-drag-track" data-servo="2" style="position:relative; background:#0f3460; border-radius:3px; height:18px; overflow:hidden; cursor:pointer;">
+            <div id="sim-servo-bar-2" style="height:100%; background:#e74c3c; border-radius:3px; width:50%; pointer-events:none;"></div>
+        </div>
+        <div id="sim-servo-val-2" style="color:#aaa; text-align:right;">500</div>
+        <div id="sim-servo-ang-2" style="color:#666; font-size:9px; text-align:center;">0.0°</div>
+        <input type="number" id="sim-servo-spd-2" value="150" min="10" max="2000" step="50" style="width:45px; background:#0a1628; color:#eee; border:1px solid #1a4a8a; border-radius:3px; padding:1px 3px; font-size:10px; font-family:Consolas; text-align:center;">
+        <label style="text-align:center; cursor:pointer;"><input type="checkbox" id="sim-servo-rev-2"></label>
+
+        <div style="color:#e74c3c;">S3 <span style="color:#666;font-size:9px;">Wrist</span></div>
+        <div class="servo-drag-track" data-servo="3" style="position:relative; background:#0f3460; border-radius:3px; height:18px; overflow:hidden; cursor:pointer;">
+            <div id="sim-servo-bar-3" style="height:100%; background:#2ecc71; border-radius:3px; width:50%; pointer-events:none;"></div>
+        </div>
+        <div id="sim-servo-val-3" style="color:#aaa; text-align:right;">500</div>
+        <div id="sim-servo-ang-3" style="color:#666; font-size:9px; text-align:center;">0.0°</div>
+        <input type="number" id="sim-servo-spd-3" value="150" min="10" max="2000" step="50" style="width:45px; background:#0a1628; color:#eee; border:1px solid #1a4a8a; border-radius:3px; padding:1px 3px; font-size:10px; font-family:Consolas; text-align:center;">
+        <label style="text-align:center; cursor:pointer;"><input type="checkbox" id="sim-servo-rev-3"></label>
+
+        <div style="color:#2ecc71;">S4 <span style="color:#666;font-size:9px;">Elbow</span></div>
+        <div class="servo-drag-track" data-servo="4" style="position:relative; background:#0f3460; border-radius:3px; height:18px; overflow:hidden; cursor:pointer;">
+            <div id="sim-servo-bar-4" style="height:100%; background:#3498db; border-radius:3px; width:50%; pointer-events:none;"></div>
+        </div>
+        <div id="sim-servo-val-4" style="color:#aaa; text-align:right;">500</div>
+        <div id="sim-servo-ang-4" style="color:#666; font-size:9px; text-align:center;">0.0°</div>
+        <input type="number" id="sim-servo-spd-4" value="150" min="10" max="2000" step="50" style="width:45px; background:#0a1628; color:#eee; border:1px solid #1a4a8a; border-radius:3px; padding:1px 3px; font-size:10px; font-family:Consolas; text-align:center;">
+        <label style="text-align:center; cursor:pointer;"><input type="checkbox" id="sim-servo-rev-4"></label>
+
+        <div style="color:#3498db;">S5 <span style="color:#666;font-size:9px;">Shoulder</span></div>
+        <div class="servo-drag-track" data-servo="5" style="position:relative; background:#0f3460; border-radius:3px; height:18px; overflow:hidden; cursor:pointer;">
+            <div id="sim-servo-bar-5" style="height:100%; background:#9b59b6; border-radius:3px; width:50%; pointer-events:none;"></div>
+        </div>
+        <div id="sim-servo-val-5" style="color:#aaa; text-align:right;">500</div>
+        <div id="sim-servo-ang-5" style="color:#666; font-size:9px; text-align:center;">0.0°</div>
+        <input type="number" id="sim-servo-spd-5" value="150" min="10" max="2000" step="50" style="width:45px; background:#0a1628; color:#eee; border:1px solid #1a4a8a; border-radius:3px; padding:1px 3px; font-size:10px; font-family:Consolas; text-align:center;">
+        <label style="text-align:center; cursor:pointer;"><input type="checkbox" id="sim-servo-rev-5"></label>
+
+        <div style="color:#9b59b6;">S6 <span style="color:#666;font-size:9px;">Base</span></div>
+        <div class="servo-drag-track" data-servo="6" style="position:relative; background:#0f3460; border-radius:3px; height:18px; overflow:hidden; cursor:pointer;">
+            <div id="sim-servo-bar-6" style="height:100%; background:#1abc9c; border-radius:3px; width:50%; pointer-events:none;"></div>
+        </div>
+        <div id="sim-servo-val-6" style="color:#aaa; text-align:right;">500</div>
+        <div id="sim-servo-ang-6" style="color:#666; font-size:9px; text-align:center;">0.0°</div>
+        <input type="number" id="sim-servo-spd-6" value="150" min="10" max="2000" step="50" style="width:45px; background:#0a1628; color:#eee; border:1px solid #1a4a8a; border-radius:3px; padding:1px 3px; font-size:10px; font-family:Consolas; text-align:center;">
+        <label style="text-align:center; cursor:pointer;"><input type="checkbox" id="sim-servo-rev-6"></label>
+    </div>
+    <div style="display:grid; grid-template-columns:40px 1fr 50px; gap:0 8px; font-size:9px; color:#555; margin-top:2px;">
+        <div></div>
+        <div style="display:flex; justify-content:space-between; padding:0 2px;"><span>0</span><span>250</span><span>500</span><span>750</span><span>1000</span></div>
+        <div></div>
+    </div>
+</div>
+
+<!-- Raw Gamepad Oscilloscope -->
+<div class="canvas-card" style="margin-bottom:16px;">
+    <h3>Gamepad Raw Data</h3>
+    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+        <canvas id="cv-scope" width="800" height="200" style="border:1px solid #0f3460; border-radius:4px; background:#0a1628; flex:1; min-width:400px;"></canvas>
+        <div id="scope-values" style="font-family:Consolas; font-size:11px; min-width:120px;"></div>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap;" id="scope-buttons"></div>
 </div>
 
 <!-- Readout -->
@@ -149,24 +247,25 @@ canvas { border:1px solid #0f3460; border-radius:4px; background:#0a1628; }
             <span>X: <span class="val" id="ro-x" style="color:#e74c3c;">0.0</span><span class="dim">mm</span></span>
             <span>Y: <span class="val" id="ro-y" style="color:#2ecc71;">0.0</span><span class="dim">mm</span></span>
             <span>Z: <span class="val" id="ro-z" style="color:#3498db;">0.0</span><span class="dim">mm</span></span>
+            <span>Cam: <span class="val" id="ro-cam" style="color:#f39c12;">-90</span><span class="dim">&deg;</span></span>
         </div>
     </div>
     <div>
         <div class="section-label">Joint Angles</div>
         <div class="row">
-            <span>S2: <span class="val" id="ro-a2">0</span><span class="dim">&deg;</span></span>
-            <span>S3: <span class="val" id="ro-a3">0</span><span class="dim">&deg;</span></span>
-            <span>S4: <span class="val" id="ro-a4">0</span><span class="dim">&deg;</span></span>
-            <span>S5: <span class="val" id="ro-a5">0</span><span class="dim">&deg;</span></span>
+            <span>S6 Base: <span class="val" id="ro-a6">0</span><span class="dim">&deg;</span></span>
+            <span>S5 Shld: <span class="val" id="ro-a5">0</span><span class="dim">&deg;</span></span>
+            <span>S4 Elb: <span class="val" id="ro-a4">0</span><span class="dim">&deg;</span></span>
+            <span>S3 Wrst: <span class="val" id="ro-a3">0</span><span class="dim">&deg;</span></span>
         </div>
     </div>
     <div>
         <div class="section-label">Servo Positions</div>
         <div class="row">
-            <span>S2: <span class="val" id="ro-s2">500</span></span>
-            <span>S3: <span class="val" id="ro-s3">500</span></span>
-            <span>S4: <span class="val" id="ro-s4">500</span></span>
+            <span>S6: <span class="val" id="ro-s6">500</span></span>
             <span>S5: <span class="val" id="ro-s5">500</span></span>
+            <span>S4: <span class="val" id="ro-s4">500</span></span>
+            <span>S3: <span class="val" id="ro-s3">500</span></span>
         </div>
     </div>
 </div>
@@ -204,7 +303,7 @@ let gpConnected = false;
 let gpIndex = -1;
 
 // Input mode
-let inputMode = 'gamepad'; // 'gamepad' | 'xbee'
+let inputMode = 'sim'; // 'sim' | 'local' | 'xbee'
 
 // Axis map (same as Xbox 360 default)
 const AXIS_MAP = {0: 2, 1: 3, 2: 6, 3: 4};
@@ -216,6 +315,18 @@ let coupling = {'3': [{servo: 4, reverse: false}, {servo: 5, reverse: false}]};
 // Load config from server
 // ---------------------------------------------------------------
 async function loadConfig() {
+    // Try to read actual positions from xArm hardware first
+    try {
+        const rr = await fetch('/api/xbee/xarm-read-positions', {method: 'POST'});
+        const dd = await rr.json();
+        if (dd.ok && dd.positions) {
+            for (const [k, v] of Object.entries(dd.positions)) {
+                servoPos[parseInt(k)] = v;
+            }
+            console.log('Loaded positions from xArm hardware:', dd.positions);
+        }
+    } catch(e) {}
+    // Fallback: read from software state
     try {
         const r = await fetch('/api/xbee/hardware');
         const d = await r.json();
@@ -265,10 +376,10 @@ function angleToDeg(sid, pos) {
 
 function forwardKinematics() {
     const {L1, L2, L3, L4} = config;
-    const base = servoToAngle(2, servoPos[2]);
-    const t3 = servoToAngle(3, servoPos[3]);
-    const t4 = servoToAngle(4, servoPos[4]);
-    const t5 = servoToAngle(5, servoPos[5]);
+    const base = servoToAngle(6, servoPos[6] || 500);  // S6 = base yaw
+    const t3 = servoToAngle(5, servoPos[5] || 500);    // S5 = shoulder
+    const t4 = servoToAngle(4, servoPos[4] || 500);    // S4 = elbow
+    const t5 = servoToAngle(3, servoPos[3] || 500);    // S3 = wrist pitch
 
     // Joint positions in vertical plane (r=horizontal, z=vertical)
     const joints = [{r: 0, z: 0}]; // ground
@@ -289,10 +400,10 @@ function forwardKinematics() {
         z: joints[3].z + L4*Math.sin(a)
     }); // tip
 
-    // 3D coordinates
+    // 3D coordinates (+Y is forward, +X is right)
     return joints.map(j => ({
-        x: j.r * Math.cos(base),
-        y: j.r * Math.sin(base),
+        x: -j.r * Math.sin(base),
+        y: j.r * Math.cos(base),
         z: j.z,
         r: j.r
     }));
@@ -301,6 +412,10 @@ function forwardKinematics() {
 // ---------------------------------------------------------------
 // Drawing: Side View (XZ)
 // ---------------------------------------------------------------
+// Store view params for mouse interaction
+let sideView = {scale: 1, ox: 0, oy: 0};
+let topView = {scale: 1, ox: 0, oy: 0};
+
 function drawSideView(joints) {
     const c = document.getElementById('cv-side');
     const ctx = c.getContext('2d');
@@ -308,8 +423,9 @@ function drawSideView(joints) {
     const {L1, L2, L3, L4} = config;
     const maxReach = L1 + L2 + L3 + L4;
     const scale = (H * 0.8) / (maxReach || 400);
-    const ox = W * 0.4;    // origin x (base position)
+    const ox = W * 0.5;    // origin x (center for X axis)
     const oy = H * 0.88;   // origin y (ground level)
+    sideView = {scale, ox, oy};
 
     ctx.clearRect(0, 0, W, H);
 
@@ -336,39 +452,41 @@ function drawSideView(joints) {
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(W, oy); ctx.stroke();
 
-    // Workspace arc
+    // Workspace arc (full circle, both sides)
     const maxR = (L2 + L3 + L4) * scale;
     ctx.fillStyle = WORKSPACE_COLOR;
     ctx.beginPath();
-    ctx.arc(ox, oy - L1*scale, maxR, -Math.PI, 0);
+    ctx.arc(ox, oy - L1*scale, maxR, 0, Math.PI * 2);
     ctx.fill();
 
     // Axis labels
     ctx.fillStyle = '#555';
     ctx.font = '10px Consolas';
-    ctx.fillText('r (mm)', W - 45, oy - 5);
+    ctx.fillText('+X', W - 20, oy - 5);
+    ctx.fillText('-X', 5, oy - 5);
     ctx.fillText('z (mm)', ox + 5, 15);
 
     // Scale numbers
     ctx.fillStyle = '#444';
     ctx.font = '9px Consolas';
-    for (let g = 0; g <= 8; g++) {
+    for (let g = -4; g <= 4; g++) {
         const val = g * gridStep;
         ctx.fillText(val, ox + g*gridPx + 2, oy + 12);
         if (val > 0) ctx.fillText(val, ox - 20, oy - g*gridPx + 3);
     }
 
-    // Draw links
+    // Draw links (XZ plane — X can be negative)
     function toScreen(j) {
-        return {x: ox + j.r * scale, y: oy - j.z * scale};
+        return {x: ox + j.x * scale, y: oy - j.z * scale};
     }
 
     const pts = joints.map(toScreen);
-    const linkColors = ['#888', ...LINK_COLORS]; // ground-base, L1, L2, L3, L4
+    // 4 segments: L1(orange), L2(red), L3(green), L4(blue)
+    const segDrawColors = ['#f39c12', '#e74c3c', '#2ecc71', '#3498db'];
 
     for (let i = 0; i < pts.length - 1; i++) {
-        ctx.strokeStyle = linkColors[i] || '#888';
-        ctx.lineWidth = i === 0 ? 2 : 4;
+        ctx.strokeStyle = segDrawColors[i] || '#888';
+        ctx.lineWidth = 4;
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(pts[i].x, pts[i].y);
@@ -385,31 +503,49 @@ function drawSideView(joints) {
     }
 
     // Camera/gripper angle indicator at tip
+    // Use direction from wrist to tip (L4 direction) extended beyond tip
+    const wrist = pts[pts.length - 2];
     const tip = pts[pts.length - 1];
-    const wristAngle = servoToAngle(3, servoPos[3]) + servoToAngle(4, servoPos[4]) + servoToAngle(5, servoPos[5]);
-    const camLen = 20;
+    const camLen = 40;
+    const cdx = tip.x - wrist.x;
+    const cdy = tip.y - wrist.y;
+    const cdist = Math.sqrt(cdx*cdx + cdy*cdy) || 1;
     ctx.strokeStyle = '#f39c12';
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 3]);
     ctx.beginPath();
     ctx.moveTo(tip.x, tip.y);
-    ctx.lineTo(tip.x + camLen * Math.cos(-wristAngle), tip.y + camLen * Math.sin(-wristAngle));
+    ctx.lineTo(tip.x + (cdx/cdist)*camLen, tip.y + (cdy/cdist)*camLen);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Link length labels
+    // Link length labels — show actual segment length computed from joint positions
+    // joints: [ground, shoulder, elbow, wrist, tip] = 5 points, 4 segments
+    // segments: 0→1 = L1 (base), 1→2 = L2 (upper), 2→3 = L3 (forearm), 3→4 = L4 (wrist)
     ctx.font = '10px Consolas';
+    const segNames  = ['L1', 'L2', 'L3', 'L4'];
+    const segColors = ['#f39c12', '#e74c3c', '#2ecc71', '#3498db'];
     for (let i = 0; i < pts.length - 1; i++) {
-        const mx = (pts[i].x + pts[i+1].x) / 2;
-        const my = (pts[i].y + pts[i+1].y) / 2;
-        const lengths = [0, config.L1, config.L2, config.L3, config.L4];
-        if (lengths[i] > 0) {
-            ctx.fillStyle = linkColors[i];
-            ctx.fillText(lengths[i] + 'mm', mx + 6, my - 4);
-        }
+        const dx = pts[i+1].x - pts[i].x;
+        const dy = pts[i+1].y - pts[i].y;
+        const segPx = Math.sqrt(dx*dx + dy*dy);
+        if (segPx < 2) continue;
+        // Actual mm length from joint coordinates
+        const dr = joints[i+1].r - joints[i].r;
+        const dz = joints[i+1].z - joints[i].z;
+        const segMm = Math.round(Math.sqrt(dr*dr + dz*dz));
+        // Perpendicular offset
+        const nx = -dy / segPx;
+        const ny = dx / segPx;
+        const offset = 14;
+        const lx = pts[i].x + nx * offset;
+        const ly = pts[i].y + ny * offset;
+        ctx.fillStyle = segColors[i] || '#888';
+        const label = segNames[i] + ':' + segMm + 'mm';
+        ctx.fillText(label, lx, ly);
     }
 
-    // Lock camera angle indicator
+    // Lock camera angle indicator (desired angle from horizontal)
     if (document.getElementById('lock-camera').checked) {
         const lockDeg = parseFloat(document.getElementById('lock-angle').value) || -90;
         const lockRad = lockDeg * Math.PI / 180;
@@ -417,24 +553,27 @@ function drawSideView(joints) {
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 4]);
         ctx.beginPath();
+        // Draw from tip in the locked direction (r=cos, z=-sin in screen coords)
         ctx.moveTo(tip.x, tip.y);
-        ctx.lineTo(tip.x + 40 * Math.cos(-lockRad), tip.y + 40 * Math.sin(-lockRad));
+        ctx.lineTo(tip.x + 40 * Math.cos(lockRad) * scale / scale, tip.y - 40 * Math.sin(lockRad));
         ctx.stroke();
         ctx.setLineDash([]);
     }
 }
 
 // ---------------------------------------------------------------
-// Drawing: Top View (XY)
+// Drawing: Side View (YZ)
 // ---------------------------------------------------------------
 function drawTopView(joints) {
     const c = document.getElementById('cv-top');
     const ctx = c.getContext('2d');
     const W = c.width, H = c.height;
     const {L1, L2, L3, L4} = config;
-    const maxReach = L2 + L3 + L4;
-    const scale = (Math.min(W, H) * 0.35) / (maxReach || 300);
-    const ox = W / 2, oy = H / 2;
+    const maxReach = L1 + L2 + L3 + L4;
+    const scale = (H * 0.8) / (maxReach || 400);
+    const ox = W * 0.3;     // Y axis origin (left side, Y goes right)
+    const oy = H * 0.88;    // ground level
+    topView = {scale, ox, oy};
 
     ctx.clearRect(0, 0, W, H);
 
@@ -443,56 +582,53 @@ function drawTopView(joints) {
     ctx.lineWidth = 0.5;
     const gridStep = 50;
     const gridPx = gridStep * scale;
-    for (let g = -10; g <= 10; g++) {
-        const px = ox + g * gridPx;
+    for (let gx = -2; gx <= 10; gx++) {
+        const px = ox + gx * gridPx;
         if (px >= 0 && px <= W) { ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke(); }
-        const py = oy + g * gridPx;
+    }
+    for (let gz = -2; gz <= 10; gz++) {
+        const py = oy - gz * gridPx;
         if (py >= 0 && py <= H) { ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(W, py); ctx.stroke(); }
     }
 
-    // Workspace circle
-    ctx.strokeStyle = '#4ecca344';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(ox, oy, maxReach * scale, 0, Math.PI * 2);
-    ctx.stroke();
+    // Ground line
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(W, oy); ctx.stroke();
+
+    // Workspace arc
+    const maxR = (L2 + L3 + L4) * scale;
     ctx.fillStyle = WORKSPACE_COLOR;
+    ctx.beginPath();
+    ctx.arc(ox, oy - L1 * scale, maxR, 0, Math.PI * 2);
     ctx.fill();
 
     // Axis labels
     ctx.fillStyle = '#555';
     ctx.font = '10px Consolas';
-    ctx.fillText('+X', W - 25, oy - 5);
-    ctx.fillText('-X', 5, oy - 5);
-    ctx.fillText('+Y', ox + 5, 15);
-    ctx.fillText('-Y', ox + 5, H - 5);
+    ctx.fillText('+Y', W - 20, oy - 5);
+    ctx.fillText('z (mm)', ox + 5, 15);
 
-    // Axes lines
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(W, oy); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(ox, 0); ctx.lineTo(ox, H); ctx.stroke();
-
-    // Draw arm projection (skip base and shoulder which are at origin in XY)
-    function toScreen(j) {
-        return {x: ox + j.x * scale, y: oy - j.y * scale};
+    // Scale numbers
+    ctx.fillStyle = '#444';
+    ctx.font = '9px Consolas';
+    for (let g = 0; g <= 6; g++) {
+        const val = g * gridStep;
+        ctx.fillText(val, ox + g * gridPx + 2, oy + 12);
+        if (val > 0) ctx.fillText(val, ox - 20, oy - g * gridPx + 3);
     }
 
-    // Arm chain from shoulder to tip (joints 1..4 have x,y data)
-    const armJoints = joints.slice(1); // skip ground
-    const pts = armJoints.map(toScreen);
-    const colors = LINK_COLORS; // L1(at origin), L2, L3, L4
+    // Draw arm using Y (horizontal) and Z (vertical)
+    function toScreen(j) {
+        return {x: ox + j.y * scale, y: oy - j.z * scale};
+    }
 
-    // Base dot
-    ctx.fillStyle = '#888';
-    ctx.beginPath();
-    ctx.arc(ox, oy, 6, 0, Math.PI * 2);
-    ctx.fill();
+    const pts = joints.map(toScreen);
+    const segDrawColors = ['#f39c12', '#e74c3c', '#2ecc71', '#3498db'];
 
-    // Draw links from shoulder outward
     for (let i = 0; i < pts.length - 1; i++) {
-        ctx.strokeStyle = colors[i] || '#888';
-        ctx.lineWidth = i === 0 ? 2 : 4;
+        ctx.strokeStyle = segDrawColors[i] || '#888';
+        ctx.lineWidth = 4;
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(pts[i].x, pts[i].y);
@@ -504,22 +640,25 @@ function drawTopView(joints) {
     for (let i = 0; i < pts.length; i++) {
         ctx.fillStyle = i === pts.length - 1 ? TIP_COLOR : JOINT_COLOR;
         ctx.beginPath();
-        ctx.arc(pts[i].x, pts[i].y, i === pts.length - 1 ? 7 : 4, 0, Math.PI * 2);
+        ctx.arc(pts[i].x, pts[i].y, i === pts.length - 1 ? 7 : 5, 0, Math.PI * 2);
         ctx.fill();
     }
 
-    // Base rotation angle arc
-    const baseAngle = servoToAngle(2, servoPos[2]);
-    if (Math.abs(baseAngle) > 0.01) {
-        ctx.strokeStyle = '#f39c1288';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(ox, oy, 30, 0, -baseAngle, baseAngle > 0);
-        ctx.stroke();
-        ctx.fillStyle = '#f39c12';
-        ctx.font = '10px Consolas';
-        ctx.fillText((baseAngle * 180 / Math.PI).toFixed(0) + '\u00b0', ox + 34, oy - 10);
-    }
+    // Camera angle indicator
+    const wrist = pts[pts.length - 2];
+    const tip = pts[pts.length - 1];
+    const camLen = 40;
+    const cdx = tip.x - wrist.x;
+    const cdy = tip.y - wrist.y;
+    const cdist = Math.sqrt(cdx * cdx + cdy * cdy) || 1;
+    ctx.strokeStyle = '#f39c12';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(tip.x + (cdx / cdist) * camLen, tip.y + (cdy / cdist) * camLen);
+    ctx.stroke();
+    ctx.setLineDash([]);
 }
 
 // ---------------------------------------------------------------
@@ -531,94 +670,123 @@ function updateReadout(joints) {
     document.getElementById('ro-y').textContent = tip.y.toFixed(1);
     document.getElementById('ro-z').textContent = tip.z.toFixed(1);
 
-    for (const sid of [2, 3, 4, 5]) {
-        document.getElementById('ro-a' + sid).textContent = angleToDeg(sid, servoPos[sid]).toFixed(0);
-        document.getElementById('ro-s' + sid).textContent = Math.round(servoPos[sid]);
+    // S6=base, S5=shoulder, S4=elbow, S3=wrist
+    const servoLabels = {6:'Base', 5:'Shld', 4:'Elbow', 3:'Wrst'};
+    for (const sid of [6, 5, 4, 3]) {
+        const el_a = document.getElementById('ro-a' + sid);
+        const el_s = document.getElementById('ro-s' + sid);
+        if (el_a) el_a.textContent = angleToDeg(sid, servoPos[sid] || 500).toFixed(0);
+        if (el_s) el_s.textContent = Math.round(servoPos[sid] || 500);
     }
+    // Camera angle = sum of shoulder + elbow + wrist (absolute wrist pitch)
+    const camAngle = angleToDeg(5, servoPos[5] || 500) + angleToDeg(4, servoPos[4] || 500) + angleToDeg(3, servoPos[3] || 500);
+    document.getElementById('ro-cam').textContent = camAngle.toFixed(0);
 }
 
 // ---------------------------------------------------------------
 // Gamepad
 // ---------------------------------------------------------------
-window.addEventListener('gamepadconnected', e => {
-    gpConnected = true;
-    gpIndex = e.gamepad.index;
-    document.getElementById('gp-dot').className = 'dot on';
-    document.getElementById('gp-name').textContent = e.gamepad.id.substring(0, 40);
-});
-window.addEventListener('gamepaddisconnected', e => {
-    if (e.gamepad.index === gpIndex) {
+// ---------------------------------------------------------------
+// Local gamepad (server-side /dev/input/js*)
+// ---------------------------------------------------------------
+let localGpRunning = false;
+
+async function refreshGamepadList() {
+    try {
+        const r = await fetch('/api/xbee/local-gamepad/list');
+        const d = await r.json();
+        const sel = document.getElementById('gp-select');
+        const prevVal = sel.value;
+        sel.innerHTML = '';
+        if (d.devices && d.devices.length > 0) {
+            for (const dev of d.devices) {
+                const opt = document.createElement('option');
+                opt.value = dev.path;
+                opt.textContent = dev.name + ' (' + dev.axes + ' axes, ' + dev.buttons + ' btns)';
+                sel.appendChild(opt);
+            }
+            if (prevVal && sel.querySelector('option[value="' + prevVal + '"]')) {
+                sel.value = prevVal;
+            }
+        } else {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No gamepad detected';
+            sel.appendChild(opt);
+        }
+        // Update active status
+        if (d.active) {
+            localGpRunning = true;
+            gpConnected = true;
+            document.getElementById('gp-dot').className = 'dot on';
+            document.getElementById('btn-gp-connect').textContent = 'Disconnect';
+            document.getElementById('btn-gp-connect').className = 'btn active';
+        }
+    } catch(e) {}
+}
+
+async function toggleLocalGamepad() {
+    const btn = document.getElementById('btn-gp-connect');
+    if (localGpRunning) {
+        // Stop
+        await fetch('/api/xbee/local-gamepad/stop', {method: 'POST'});
+        localGpRunning = false;
         gpConnected = false;
-        gpIndex = -1;
         document.getElementById('gp-dot').className = 'dot off';
-        document.getElementById('gp-name').textContent = 'No gamepad';
-    }
-});
-
-function readGamepad() {
-    if (!gpConnected || inputMode !== 'gamepad') return;
-    const gps = navigator.getGamepads();
-    const gp = gps[gpIndex];
-    if (!gp) return;
-
-    const axes = Array.from(gp.axes);
-
-    // Map axes to servo velocities
-    for (const [axisIdx, servoId] of Object.entries(AXIS_MAP)) {
-        let val = axes[parseInt(axisIdx)] || 0;
-        if (Math.abs(val) < DEADZONE) val = 0;
-        servoVel[servoId] = val;
-    }
-
-    // Coupling: axis 3 (RY) -> servo 4 and 5
-    const ryVal = axes[3] || 0;
-    if (Math.abs(ryVal) >= DEADZONE) {
-        servoVel[4] = ryVal;
-        servoVel[5] = ryVal;
+        btn.textContent = 'Connect';
+        btn.className = 'btn';
     } else {
-        if (!AXIS_MAP[3] || AXIS_MAP[3] === 4) servoVel[4] = 0;
-        servoVel[5] = 0;
-    }
-
-    // Lock camera angle: adjust servo 5 to compensate
-    if (document.getElementById('lock-camera').checked) {
-        // Will be applied after position update
+        // Start
+        const path = document.getElementById('gp-select').value;
+        if (!path) return;
+        const r = await fetch('/api/xbee/local-gamepad/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path: path})
+        });
+        const d = await r.json();
+        if (d.ok) {
+            localGpRunning = true;
+            gpConnected = true;
+            document.getElementById('gp-dot').className = 'dot on';
+            btn.textContent = 'Disconnect';
+            btn.className = 'btn active';
+        } else {
+            alert('Failed: ' + (d.error || 'unknown'));
+        }
     }
 }
 
+// Initial scan + periodic rescan
+refreshGamepadList();
+setInterval(refreshGamepadList, 5000);
+
+// In "local" mode, the server-side reader feeds data into the responder
+// which updates servo positions. We just poll /api/xbee/hardware.
+// No client-side velocity computation needed for local mode.
+
 function updateServoPositions() {
-    if (inputMode !== 'gamepad') return;
-
-    for (const sid of [2, 3, 4, 5, 6]) {
-        const vel = servoVel[sid] || 0;
-        if (Math.abs(vel) < DEADZONE) continue;
-        const delta = vel * SERVO_SPEED * DT;
-        servoPos[sid] = Math.max(0, Math.min(1000, servoPos[sid] + delta));
-    }
-
-    // Lock camera angle: auto-adjust servo 5
-    if (document.getElementById('lock-camera').checked) {
-        const lockDeg = parseFloat(document.getElementById('lock-angle').value) || -90;
-        const lockRad = lockDeg * Math.PI / 180;
-        const t3 = servoToAngle(3, servoPos[3]);
-        const t4 = servoToAngle(4, servoPos[4]);
-        // wrist_pitch = t3 + t4 + t5 = lockRad
-        const needed_t5 = lockRad - t3 - t4;
-        // Convert back to servo position
-        const cal = config.calibration[5];
-        const geoDeg = needed_t5 * 180 / Math.PI;
-        const servoDeg = geoDeg * cal.direction + cal.zero_offset_deg;
-        const pos = servoDeg * (1000 / 240);
-        servoPos[5] = Math.max(0, Math.min(1000, pos));
-    }
+    // Only used for lock camera angle when in local/xbee mode
+    if (inputMode !== 'local' && inputMode !== 'xbee') return;
+    // Lock camera is handled server-side or we override here visually
 }
 
 // ---------------------------------------------------------------
 // XBee polling
 // ---------------------------------------------------------------
-let xbeePollTimer = null;
-async function pollXbee() {
-    if (inputMode !== 'xbee') return;
+// Poll servo positions from server (works for both local gamepad and XBee)
+let servoPollTimer = null;
+async function pollServoState() {
+    // In simulation mode, just redraw from local servoPos — no API calls needed
+    if (inputMode === 'sim') {
+        updateServoBars();
+        const joints = forwardKinematics();
+        drawSideView(joints);
+        drawTopView(joints);
+        drawStickDots();
+        updateReadout(joints);
+        return;
+    }
     try {
         const r = await fetch('/api/xbee/hardware');
         const d = await r.json();
@@ -627,20 +795,99 @@ async function pollXbee() {
                 servoPos[parseInt(k)] = v;
             }
         }
+        // Sync IK and GP->Arm buttons
+        if (d.xarm) {
+            ikEnabled = d.xarm.ik_mode || false;
+            const ikBtn = document.getElementById('btn-ik-toggle');
+            if (ikBtn) {
+                ikBtn.textContent = 'IK: ' + (ikEnabled ? 'ON' : 'OFF');
+                ikBtn.className = ikEnabled ? 'btn active' : 'btn';
+            }
+            gpArmEnabled = d.xarm.gamepad_enabled || false;
+            const btn = document.getElementById('btn-arm-toggle');
+            if (btn) {
+                btn.textContent = 'GP\u2192Arm: ' + (gpArmEnabled ? 'ON' : 'OFF');
+                btn.className = gpArmEnabled ? 'btn active' : 'btn';
+            }
+            // Sync speed/reverse (only if not focused)
+            if (d.xarm.speed) {
+                for (let i = 1; i <= 6; i++) {
+                    const inp = document.getElementById('sim-servo-spd-' + i);
+                    if (inp && inp !== document.activeElement) {
+                        inp.value = Math.round(d.xarm.speed[String(i)] || 150);
+                    }
+                }
+            }
+            if (d.xarm.reverse) {
+                for (let i = 1; i <= 6; i++) {
+                    const cb = document.getElementById('sim-servo-rev-' + i);
+                    if (cb) cb.checked = d.xarm.reverse[String(i)] || false;
+                }
+            }
+        }
     } catch(e) {}
+    // Get gamepad raw state for scope and sticks
+    try {
+        const r = await fetch('/api/xbee/local-gamepad/status');
+        const d = await r.json();
+        if (d.running && d.state) {
+            const axes = d.state.axes || {};
+            const buttons = d.state.buttons || {};
+            pushScopeData(axes, buttons);
+            // Update stick dots from stick_map
+            const sm = {lx: '0', ly: '1', rx: '2', ry: '5'}; // will be updated
+            stickL = [parseFloat(axes[sm.lx] || 0), parseFloat(axes[sm.ly] || 0)];
+            stickR = [parseFloat(axes[sm.rx] || 0), parseFloat(axes[sm.ry] || 0)];
+        }
+    } catch(e) {}
+    // Also try scope endpoint for XBee mode
+    try {
+        const r = await fetch('/api/xbee/scope');
+        const d = await r.json();
+        if (d.sticks) {
+            if (inputMode === 'xbee') {
+                stickL = d.sticks.left || [0, 0];
+                stickR = d.sticks.right || [0, 0];
+            }
+        }
+        // Feed scope from latest gamepad data if available
+        if (d.latest && d.latest.axes && inputMode === 'xbee') {
+            pushScopeData(d.latest.axes, d.latest.buttons || {});
+        }
+    } catch(e) {}
+}
+
+function startPolling() {
+    if (!servoPollTimer) servoPollTimer = setInterval(pollServoState, 100);
+}
+function stopPolling() {
+    if (servoPollTimer) { clearInterval(servoPollTimer); servoPollTimer = null; }
 }
 
 // Input mode switch
 document.querySelectorAll('input[name="input-src"]').forEach(el => {
     el.addEventListener('change', e => {
         inputMode = e.target.value;
-        if (inputMode === 'xbee') {
-            if (!xbeePollTimer) xbeePollTimer = setInterval(pollXbee, 200);
+        if (inputMode === 'sim') {
+            // In sim mode, do a local redraw loop instead of polling server
+            startPolling();
         } else {
-            if (xbeePollTimer) { clearInterval(xbeePollTimer); xbeePollTimer = null; }
+            startPolling();
         }
     });
 });
+
+// Start polling immediately
+startPolling();
+
+// Initial draw for simulation mode
+setTimeout(() => {
+    updateServoBars();
+    const joints = forwardKinematics();
+    drawSideView(joints);
+    drawTopView(joints);
+    updateReadout(joints);
+}, 200);
 
 // Link length inputs -> immediate update
 for (const key of ['L1', 'L2', 'L3', 'L4']) {
@@ -675,15 +922,478 @@ async function saveLinkLengths() {
 // ---------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------
+// ---------------------------------------------------------------
+// Gamepad Raw Oscilloscope
+// ---------------------------------------------------------------
+const SCOPE_LEN = 200;
+const SCOPE_COLORS = [
+    '#e74c3c', '#2ecc71', '#3498db', '#f39c12',
+    '#9b59b6', '#1abc9c', '#e67e22', '#ecf0f1',
+    '#ff6b6b', '#48dbfb'
+];
+let scopeData = {};  // {channel: [values]}
+let scopeCursor = 0;
+let scopeChannels = []; // ordered list of channel names
+
+function pushScopeData(axes, buttons) {
+    // Add axis channels
+    for (const [k, v] of Object.entries(axes)) {
+        const ch = 'A' + k;
+        if (!scopeData[ch]) {
+            scopeData[ch] = new Array(SCOPE_LEN).fill(null);
+            scopeChannels = Object.keys(scopeData).sort((a, b) => {
+                const na = parseInt(a.slice(1)), nb = parseInt(b.slice(1));
+                if (a[0] !== b[0]) return a[0] === 'A' ? -1 : 1;
+                return na - nb;
+            });
+            updateScopeButtons();
+        }
+        scopeData[ch][scopeCursor] = parseFloat(v);
+    }
+    // Add button channels
+    for (const [k, v] of Object.entries(buttons)) {
+        const ch = 'B' + k;
+        if (!scopeData[ch]) {
+            scopeData[ch] = new Array(SCOPE_LEN).fill(null);
+            scopeChannels = Object.keys(scopeData).sort((a, b) => {
+                const na = parseInt(a.slice(1)), nb = parseInt(b.slice(1));
+                if (a[0] !== b[0]) return a[0] === 'A' ? -1 : 1;
+                return na - nb;
+            });
+            updateScopeButtons();
+        }
+        scopeData[ch][scopeCursor] = parseInt(v);
+    }
+    scopeCursor = (scopeCursor + 1) % SCOPE_LEN;
+}
+
+let scopeVisible = {}; // {channel: bool} — which traces to show
+function updateScopeButtons() {
+    const container = document.getElementById('scope-buttons');
+    container.innerHTML = '';
+    scopeChannels.forEach((ch, i) => {
+        if (scopeVisible[ch] === undefined) {
+            // Show axes by default, hide buttons
+            scopeVisible[ch] = ch.startsWith('A');
+        }
+        const btn = document.createElement('button');
+        btn.style.cssText = 'padding:2px 8px; border-radius:3px; font-size:10px; font-family:Consolas; cursor:pointer; border:1px solid;';
+        btn.style.color = SCOPE_COLORS[i % SCOPE_COLORS.length];
+        btn.style.borderColor = SCOPE_COLORS[i % SCOPE_COLORS.length];
+        btn.style.background = scopeVisible[ch] ? '#16213e' : '#0a0a15';
+        btn.style.opacity = scopeVisible[ch] ? '1' : '0.4';
+        btn.textContent = ch;
+        btn.onclick = () => {
+            scopeVisible[ch] = !scopeVisible[ch];
+            btn.style.background = scopeVisible[ch] ? '#16213e' : '#0a0a15';
+            btn.style.opacity = scopeVisible[ch] ? '1' : '0.4';
+        };
+        container.appendChild(btn);
+    });
+}
+
+function drawScope() {
+    const c = document.getElementById('cv-scope');
+    const ctx = c.getContext('2d');
+    const W = c.width, H = c.height;
+    const midY = H / 2;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Grid
+    ctx.strokeStyle = '#1a3a5a';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(W, midY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, H*0.25); ctx.lineTo(W, H*0.25); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, H*0.75); ctx.lineTo(W, H*0.75); ctx.stroke();
+
+    // Labels
+    ctx.fillStyle = '#444';
+    ctx.font = '9px Consolas';
+    ctx.fillText('+1.0', 2, H*0.25 - 2);
+    ctx.fillText(' 0.0', 2, midY - 2);
+    ctx.fillText('-1.0', 2, H*0.75 - 2);
+
+    // Cursor line
+    const curX = (scopeCursor / SCOPE_LEN) * W;
+    ctx.strokeStyle = '#ffffff44';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath(); ctx.moveTo(curX, 0); ctx.lineTo(curX, H); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Draw traces
+    const visibleChannels = scopeChannels.filter(ch => scopeVisible[ch]);
+    visibleChannels.forEach((ch, ci) => {
+        const data = scopeData[ch];
+        if (!data) return;
+        const color = SCOPE_COLORS[scopeChannels.indexOf(ch) % SCOPE_COLORS.length];
+        const isButton = ch.startsWith('B');
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = isButton ? 1 : 1.5;
+        ctx.beginPath();
+        let started = false;
+
+        for (let i = 0; i < SCOPE_LEN; i++) {
+            const idx = (scopeCursor + i) % SCOPE_LEN;
+            const val = data[idx];
+            if (val === null) continue;
+
+            const x = (i / SCOPE_LEN) * W;
+            let y;
+            if (isButton) {
+                // Buttons: 0 at bottom quarter, 1 at top quarter
+                y = midY - val * (H * 0.4);
+            } else {
+                // Axes: -1 to +1 mapped to bottom to top
+                y = midY - val * (H * 0.4);
+            }
+
+            if (!started) { ctx.moveTo(x, y); started = true; }
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    });
+
+    // Values panel
+    const valDiv = document.getElementById('scope-values');
+    let html = '';
+    scopeChannels.forEach((ch, i) => {
+        if (!scopeVisible[ch]) return;
+        const data = scopeData[ch];
+        const lastIdx = (scopeCursor - 1 + SCOPE_LEN) % SCOPE_LEN;
+        const val = data[lastIdx];
+        const color = SCOPE_COLORS[i % SCOPE_COLORS.length];
+        const display = val !== null ? (ch.startsWith('B') ? val : val.toFixed(3)) : '--';
+        const highlight = val !== null && Math.abs(val) > 0.05 ? 'font-weight:bold;' : '';
+        html += '<div style="color:' + color + ';' + highlight + '">' + ch + ': ' + display + '</div>';
+    });
+    valDiv.innerHTML = html;
+}
+
+// ---------------------------------------------------------------
+// Servo bars update
+// ---------------------------------------------------------------
+function updateServoBars() {
+    // Servo ROM: min/max angles for each servo based on calibration
+    const romLabels = {
+        1: 'Gripper',
+        2: 'Roll',
+        3: 'Wrist pitch',
+        4: 'Elbow pitch',
+        5: 'Shoulder pitch',
+        6: 'Base yaw'
+    };
+    for (let i = 1; i <= 6; i++) {
+        if (_servoDragging === i) continue; // skip while dragging
+        const pos = Math.round(servoPos[i] || 500);
+        const bar = document.getElementById('sim-servo-bar-' + i);
+        const val = document.getElementById('sim-servo-val-' + i);
+        const ang = document.getElementById('sim-servo-ang-' + i);
+        if (bar) bar.style.width = (pos / 10) + '%';
+        if (val) val.textContent = pos;
+        if (ang) {
+            const cal = config.calibration[i] || {zero_offset_deg: 120, direction: 1, min_pos: 0, max_pos: 1000};
+            const curDeg = angleToDeg(i, pos);
+            const minPos = cal.min_pos || 0;
+            const maxPos = cal.max_pos || 1000;
+            const minDeg = angleToDeg(i, minPos);
+            const maxDeg = angleToDeg(i, maxPos);
+            const lo = Math.min(minDeg, maxDeg);
+            const hi = Math.max(minDeg, maxDeg);
+            ang.innerHTML = curDeg.toFixed(1) + '&deg;<br><span style="color:#555;font-size:8px;">[' + lo.toFixed(0) + '&deg;..' + hi.toFixed(0) + '&deg;]</span>';
+        }
+    }
+}
+
+// Servo bar drag
+let _servoDragging = null; // servo id being dragged
+
+function servoBarDragPos(track, e) {
+    const rect = track.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    return Math.max(0, Math.min(1000, Math.round((x / rect.width) * 1000)));
+}
+
+async function sendServoPos(sid, pos) {
+    servoPos[sid] = pos;
+    // In simulation mode, just update locally and redraw
+    if (inputMode === 'sim') {
+        updateServoBars();
+        const joints = forwardKinematics();
+        drawSideView(joints);
+        drawTopView(joints);
+        updateReadout(joints);
+        return;
+    }
+    try {
+        await fetch('/api/xbee/xarm-move', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({servo: sid, position: pos, duration: 100})
+        });
+    } catch(e) {}
+}
+
+document.querySelectorAll('.servo-drag-track').forEach(track => {
+    const sid = parseInt(track.dataset.servo);
+
+    track.addEventListener('mousedown', e => {
+        _servoDragging = sid;
+        const pos = servoBarDragPos(track, e);
+        sendServoPos(sid, pos);
+        e.preventDefault();
+    });
+
+    track.addEventListener('mousemove', e => {
+        if (_servoDragging === sid) {
+            const pos = servoBarDragPos(track, e);
+            sendServoPos(sid, pos);
+            e.preventDefault();
+        }
+    });
+});
+
+document.addEventListener('mouseup', () => { _servoDragging = null; });
+document.addEventListener('mouseleave', () => { _servoDragging = null; });
+
+let ikEnabled = false;
+async function toggleIK() {
+    ikEnabled = !ikEnabled;
+    try {
+        const r = await fetch('/api/xbee/xyz-mode', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enabled: ikEnabled})
+        });
+        const d = await r.json();
+        ikEnabled = d.enabled;
+    } catch(e) {}
+    const btn = document.getElementById('btn-ik-toggle');
+    btn.textContent = 'IK: ' + (ikEnabled ? 'ON' : 'OFF');
+    btn.className = ikEnabled ? 'btn active' : 'btn';
+}
+
+let gpArmEnabled = false;
+async function toggleArm() {
+    gpArmEnabled = !gpArmEnabled;
+    try {
+        const r = await fetch('/api/xbee/xarm-toggle', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enabled: gpArmEnabled})
+        });
+        const d = await r.json();
+        gpArmEnabled = d.enabled;
+    } catch(e) {}
+    const btn = document.getElementById('btn-arm-toggle');
+    btn.textContent = 'GP\u2192Arm: ' + (gpArmEnabled ? 'ON' : 'OFF');
+    btn.className = gpArmEnabled ? 'btn active' : 'btn';
+}
+
+// Reverse checkboxes -> send to server
+for (let i = 1; i <= 6; i++) {
+    const cb = document.getElementById('sim-servo-rev-' + i);
+    if (cb) cb.addEventListener('change', async () => {
+        try {
+            await fetch('/api/xbee/xarm-reverse', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({servo: i, reverse: cb.checked})
+            });
+        } catch(e) {}
+    });
+}
+
+// Speed inputs -> send to server
+for (let i = 1; i <= 6; i++) {
+    const inp = document.getElementById('sim-servo-spd-' + i);
+    if (inp) inp.addEventListener('change', async () => {
+        try {
+            await fetch('/api/xbee/xarm-speed', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({servo: i, speed: parseFloat(inp.value)})
+            });
+        } catch(e) {}
+    });
+}
+
+// ---------------------------------------------------------------
+// Draw gamepad stick input dots
+// ---------------------------------------------------------------
+let stickL = [0, 0], stickR = [0, 0];
+
+function drawStickInput(canvasId, x, y, color) {
+    const c = document.getElementById(canvasId);
+    const ctx = c.getContext('2d');
+    const W = c.width, H = c.height;
+    const cx = W/2, cy = H/2, r = W/2 - 8;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Crosshairs
+    ctx.strokeStyle = '#1a3a5a';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(cx, 2); ctx.lineTo(cx, H-2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(2, cy); ctx.lineTo(W-2, cy); ctx.stroke();
+
+    // Deadzone circle
+    ctx.strokeStyle = '#333';
+    ctx.beginPath(); ctx.arc(cx, cy, r * DEADZONE, 0, Math.PI*2); ctx.stroke();
+
+    // Boundary circle
+    ctx.strokeStyle = '#0f3460';
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
+
+    // Dot
+    const dx = cx + x * r;
+    const dy = cy + y * r;
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.arc(dx, dy, 6, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+}
+
 function mainLoop() {
-    readGamepad();
-    updateServoPositions();
     const joints = forwardKinematics();
     drawSideView(joints);
     drawTopView(joints);
     updateReadout(joints);
+
+    // Draw stick inputs, servo bars, and scope
+    drawStickInput('cv-stick-l', stickL[0], stickL[1], '#29b6f6');
+    drawStickInput('cv-stick-r', stickR[0], stickR[1], '#ef5350');
+    updateServoBars();
+    drawScope();
+    document.getElementById('stick-l-val').textContent = stickL[0].toFixed(2) + ', ' + stickL[1].toFixed(2);
+    document.getElementById('stick-r-val').textContent = stickR[0].toFixed(2) + ', ' + stickR[1].toFixed(2);
+
     requestAnimationFrame(mainLoop);
 }
+
+// Init
+// ---------------------------------------------------------------
+// Drag-to-move tip on canvas
+// ---------------------------------------------------------------
+let dragTarget = null; // 'side' or 'top'
+let dragging = false;
+let lastDragXYZ = null; // track target position during drag
+
+function canvasToMm_side(canvasX, canvasY) {
+    // Front view: screen -> (x, z) in mm
+    const x = (canvasX - sideView.ox) / sideView.scale;
+    const z = (sideView.oy - canvasY) / sideView.scale;
+    return {x, z};
+}
+
+function canvasToMm_top(canvasX, canvasY) {
+    // Side view YZ: screen -> (y, z) in mm
+    const y = (canvasX - topView.ox) / topView.scale;
+    const z = (topView.oy - canvasY) / topView.scale;
+    return {y, z};
+}
+
+function isNearTip(canvasX, canvasY, canvas) {
+    const joints = forwardKinematics();
+    const tip = joints[joints.length - 1];
+    if (canvas === 'cv-side') {
+        const tipSx = sideView.ox + tip.x * sideView.scale;
+        const tipSy = sideView.oy - tip.z * sideView.scale;
+        const dist = Math.hypot(canvasX - tipSx, canvasY - tipSy);
+        return dist < 20;
+    } else {
+        const tipSx = topView.ox + tip.y * topView.scale;
+        const tipSy = topView.oy - tip.z * topView.scale;
+        const dist = Math.hypot(canvasX - tipSx, canvasY - tipSy);
+        return dist < 20;
+    }
+}
+
+async function sendIKTarget(x, y, z) {
+    // Send target position to IK solver on R1
+    try {
+        await fetch('/api/xbee/xarm-ik-goto', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({x, y, z, wrist_pitch_deg: parseFloat(document.getElementById('lock-angle').value) || -90})
+        });
+    } catch(e) {}
+}
+
+function getCanvasCoords(e, canvas) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY
+    };
+}
+
+// Side view drag: changes r (horizontal reach) and z
+['cv-side', 'cv-top'].forEach(canvasId => {
+    const canvas = document.getElementById(canvasId);
+    canvas.style.cursor = 'default';
+
+    canvas.addEventListener('mousedown', e => {
+        const coords = getCanvasCoords(e, canvas);
+        if (isNearTip(coords.x, coords.y, canvasId)) {
+            dragging = true;
+            dragTarget = canvasId;
+            canvas.style.cursor = 'grabbing';
+            // Get current tip position
+            const joints = forwardKinematics();
+            const tip = joints[joints.length - 1];
+            lastDragXYZ = {x: tip.x, y: tip.y, z: tip.z};
+            e.preventDefault();
+        }
+    });
+
+    canvas.addEventListener('mousemove', e => {
+        const coords = getCanvasCoords(e, canvas);
+        if (dragging && dragTarget === canvasId) {
+            if (canvasId === 'cv-side') {
+                const mm = canvasToMm_side(coords.x, coords.y);
+                // Front view: drag changes X and Z, keep Y
+                lastDragXYZ.x = mm.x;
+                lastDragXYZ.z = mm.z;
+            } else {
+                const mm = canvasToMm_top(coords.x, coords.y);
+                // Side view YZ: drag changes Y and Z, keep X
+                lastDragXYZ.y = mm.y;
+                lastDragXYZ.z = mm.z;
+            }
+            sendIKTarget(lastDragXYZ.x, lastDragXYZ.y, lastDragXYZ.z);
+            e.preventDefault();
+        } else {
+            // Hover: show grab cursor near tip
+            if (isNearTip(coords.x, coords.y, canvasId)) {
+                canvas.style.cursor = 'grab';
+            } else {
+                canvas.style.cursor = 'default';
+            }
+        }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+        if (dragging) {
+            dragging = false;
+            dragTarget = null;
+            canvas.style.cursor = 'default';
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (dragging && dragTarget === canvasId) {
+            dragging = false;
+            dragTarget = null;
+            canvas.style.cursor = 'default';
+        }
+    });
+});
 
 // Init
 loadConfig().then(() => {

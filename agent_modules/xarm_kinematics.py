@@ -3,11 +3,11 @@ Inverse / Forward Kinematics for HiWonder xArm 1S (6-DOF).
 
 Joint layout
   Servo 1  Gripper        (not used by IK)
-  Servo 2  Base yaw       (rotation around Z axis)
-  Servo 3  Shoulder pitch
+  Servo 2  Wrist roll     (not used by IK)
+  Servo 3  Wrist pitch
   Servo 4  Elbow pitch
-  Servo 5  Wrist pitch
-  Servo 6  Wrist roll     (not used by IK)
+  Servo 5  Shoulder pitch
+  Servo 6  Base yaw       (rotation around Z axis)
 
 Coordinate frame
   Origin = base rotation axis at ground level
@@ -54,11 +54,11 @@ class XArmKinematics:
         self.L3 = 0.0   # forearm
         self.L4 = 0.0   # wrist to tip
 
-        # per-servo calibration
+        # per-servo calibration (IK servos: 6=base, 5=shoulder, 4=elbow, 3=wrist)
         self.calibration: Dict[int, dict] = {
             sid: {"zero_offset_deg": 120.0, "direction": 1,
                   "min_pos": 0, "max_pos": 1000}
-            for sid in (2, 3, 4, 5)
+            for sid in (3, 4, 5, 6)
         }
 
         self.home_xyz = (150.0, 0.0, 150.0)
@@ -134,14 +134,14 @@ class XArmKinematics:
     # ------------------------------------------------------------------
 
     def forward_kinematics(self, servo_positions: Dict[int, float]) -> Optional[dict]:
-        """Compute tip (x,y,z) from servo positions {2:p, 3:p, 4:p, 5:p}."""
+        """Compute tip (x,y,z) from servo positions {6:base, 5:shoulder, 4:elbow, 3:wrist}."""
         if not self.is_configured():
             return None
 
-        base  = self.servo_to_angle(2, servo_positions.get(2, 500))
-        theta3 = self.servo_to_angle(3, servo_positions.get(3, 500))
-        theta4 = self.servo_to_angle(4, servo_positions.get(4, 500))
-        theta5 = self.servo_to_angle(5, servo_positions.get(5, 500))
+        base   = self.servo_to_angle(6, servo_positions.get(6, 500))
+        theta3 = self.servo_to_angle(5, servo_positions.get(5, 500))  # shoulder
+        theta4 = self.servo_to_angle(4, servo_positions.get(4, 500))  # elbow
+        theta5 = self.servo_to_angle(3, servo_positions.get(3, 500))  # wrist pitch
 
         # cumulative angles in the vertical plane
         a_shoulder = theta3                        # from horizontal
@@ -156,8 +156,9 @@ class XArmKinematics:
                  + self.L3 * math.sin(a_elbow)
                  + self.L4 * math.sin(a_wrist))
 
-        x = r_tip * math.cos(base)
-        y = r_tip * math.sin(base)
+        # +Y is forward (arm center), +X is right
+        x = -r_tip * math.sin(base)
+        y = r_tip * math.cos(base)
         z = z_tip + self.L1
 
         return {
@@ -173,7 +174,7 @@ class XArmKinematics:
         self, x: float, y: float, z: float,
         wrist_pitch_deg: Optional[float] = None,
     ) -> Optional[Dict[int, float]]:
-        """Compute servo positions {2:p, 3:p, 4:p, 5:p} for tip at (x,y,z).
+        """Compute servo positions {6:base, 5:shoulder, 4:elbow, 3:wrist} for tip at (x,y,z).
 
         Returns None if unreachable.
         """
@@ -183,9 +184,9 @@ class XArmKinematics:
             wrist_pitch_deg = self.default_wrist_pitch
         wp = math.radians(wrist_pitch_deg)
 
-        # --- base ---
+        # --- base (servo 6) --- (+Y is forward, +X is right)
         r = math.hypot(x, y)
-        base = math.atan2(y, x) if r >= 1.0 else 0.0
+        base = math.atan2(-x, y) if r >= 1.0 else 0.0
 
         # --- vertical plane ---
         z_eff = z - self.L1
@@ -215,14 +216,14 @@ class XArmKinematics:
         # wrist = desired pitch - shoulder - elbow
         theta5 = wp - theta3 - theta4
 
-        # --- convert to servo ---
-        pos2 = self.angle_to_servo(2, base)
-        pos3 = self.angle_to_servo(3, theta3)
-        pos4 = self.angle_to_servo(4, theta4)
-        pos5 = self.angle_to_servo(5, theta5)
+        # --- convert to servo (6=base, 5=shoulder, 4=elbow, 3=wrist) ---
+        pos6 = self.angle_to_servo(6, base)
+        pos5 = self.angle_to_servo(5, theta3)   # shoulder
+        pos4 = self.angle_to_servo(4, theta4)   # elbow
+        pos3 = self.angle_to_servo(3, theta5)   # wrist pitch
 
-        return {2: round(pos2, 1), 3: round(pos3, 1),
-                4: round(pos4, 1), 5: round(pos5, 1)}
+        return {6: round(pos6, 1), 5: round(pos5, 1),
+                4: round(pos4, 1), 3: round(pos3, 1)}
 
     # ------------------------------------------------------------------
     # workspace helpers

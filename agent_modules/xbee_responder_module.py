@@ -179,6 +179,11 @@ class XbeeResponderModule:
         self._kinematics = None
         self._init_kinematics()
 
+        # Local gamepad reader
+        self._local_gamepad = None
+        self._local_gamepad_enabled = False
+        self._init_local_gamepad()
+
         # Ack sender
         self._last_remote = None
         self._last_rx_time = 0.0
@@ -200,6 +205,85 @@ class XbeeResponderModule:
         except Exception as e:
             logger.warning("IK solver not available: %s", e)
             self._kinematics = None
+
+    def _init_local_gamepad(self):
+        """Initialise local gamepad reader if available."""
+        try:
+            from agent_modules.local_gamepad import LocalGamepadReader, list_gamepads
+            self._local_gamepad_class = LocalGamepadReader
+            self._list_gamepads_fn = list_gamepads
+            devices = list_gamepads()
+            if devices:
+                logger.info("Local gamepads found: %s",
+                            [d["name"] for d in devices])
+            else:
+                logger.info("No local gamepads detected")
+        except Exception as e:
+            logger.info("Local gamepad not available: %s", e)
+            self._local_gamepad_class = None
+            self._list_gamepads_fn = None
+
+    def _load_gamepad_profile(self, device_name):
+        """Load gamepad profile from gamepads.json based on device name."""
+        try:
+            cfg_path = os.path.join(os.path.dirname(__file__), "..",
+                                    "configs", "gamepads.json")
+            with open(cfg_path) as f:
+                cfg = json.load(f)
+            gamepads = cfg.get("gamepads", {})
+            # Match by partial name (normalize whitespace)
+            matched = None
+            dev_norm = " ".join(device_name.lower().split())
+            dev_words = set(dev_norm.split())
+            for key, profile in gamepads.items():
+                pname = profile.get("name", key)
+                key_norm = " ".join(key.lower().split())
+                pname_norm = " ".join(pname.lower().split())
+                # Extract alpha-only words (skip vendor:product IDs)
+                key_words = {w for w in key_norm.split()
+                             if len(w) > 2 and w.isalpha()}
+                # Match if all key words appear in device name
+                if key_words and key_words.issubset(dev_words):
+                    matched = profile
+                    logger.info("Gamepad profile matched: %s", key)
+                    break
+                # Also try substring matches
+                if (key_norm in dev_norm or dev_norm in key_norm or
+                    pname_norm in dev_norm or dev_norm in pname_norm):
+                    matched = profile
+                    logger.info("Gamepad profile matched: %s", key)
+                    break
+            if not matched:
+                logger.info("No gamepad profile for '%s'", device_name)
+                return
+            # Apply stick map
+            sm = matched.get("stick_map")
+            if sm:
+                self._stick_map = {k: str(v) for k, v in sm.items()}
+                logger.info("Stick map set: %s", self._stick_map)
+            # Apply servo map (axis -> servo)
+            smap = matched.get("servo_map")
+            if smap:
+                global GAMEPAD_AXIS_MAP
+                GAMEPAD_AXIS_MAP = {int(k): int(v) for k, v in smap.items()}
+                logger.info("Servo map set: %s", GAMEPAD_AXIS_MAP)
+            # Apply coupling
+            coup = matched.get("coupling")
+            if coup:
+                self._servo_coupling = coup
+                logger.info("Coupling set: %s", coup)
+            # Apply speeds
+            speeds = matched.get("servo_speed")
+            if speeds:
+                for k, v in speeds.items():
+                    self._servo_speed[int(k)] = float(v)
+        except Exception as e:
+            logger.warning("Failed to load gamepad profile: %s", e)
+
+    def _local_gamepad_callback(self, state):
+        """Called by LocalGamepadReader at 50Hz with gamepad state."""
+        # Feed into the same pipeline as XBee gamepad data
+        self._handle_gamepad(None, state)
 
     @property
     def is_running(self):
@@ -370,8 +454,8 @@ class XbeeResponderModule:
             float(axes.get(sm["ry"], axes.get(str(sm["ry"]), 0.0))),
         ]
 
-        # Gamepad -> xArm
-        if self._gamepad_arm_enabled and self._arm_connected:
+        # Gamepad -> xArm (or simulation)
+        if self._gamepad_arm_enabled or self._local_gamepad_enabled:
             self._gamepad_to_xarm(axes, buttons)
 
     def _push_scope(self, axes, buttons, hats):
@@ -431,23 +515,22 @@ class XbeeResponderModule:
                 lx_val = float(axes.get(sm["lx"], axes.get(str(sm["lx"]), 0.0)))
                 ly_val = float(axes.get(sm["ly"], axes.get(str(sm["ly"]), 0.0)))
 
-                for v_list in [(rx_val,), (ry_val,), (lx_val,), (ly_val,)]:
-                    pass  # just reading
-
                 # Apply deadzone
                 if abs(rx_val) < GAMEPAD_DEADZONE: rx_val = 0.0
                 if abs(ry_val) < GAMEPAD_DEADZONE: ry_val = 0.0
                 if abs(lx_val) < GAMEPAD_DEADZONE: lx_val = 0.0
                 if abs(ly_val) < GAMEPAD_DEADZONE: ly_val = 0.0
 
-                # Right stick X -> X, Right stick Y -> Y, Left stick Y -> Z
-                self._xyz_velocity = [rx_val, ry_val, -ly_val]
+                # Left stick X -> X (left/right)
+                # Left stick Y -> Y (forward/back, along +Y axis)
+                # Right stick Y -> Z (up/down)
+                self._xyz_velocity = [lx_val, -ly_val, -ry_val]
 
-                # Left stick X -> wrist rotation (servo 6, direct)
-                if abs(lx_val) >= GAMEPAD_DEADZONE:
-                    self._servo_velocity[6] = lx_val
+                # Right stick X -> wrist rotation (servo 2, direct)
+                if abs(rx_val) >= GAMEPAD_DEADZONE:
+                    self._servo_velocity[2] = rx_val
                 else:
-                    self._servo_velocity[6] = 0.0
+                    self._servo_velocity[2] = 0.0
 
                 # LB/RB -> wrist pitch adjustment
                 lb = int(buttons.get(4, buttons.get("4", 0)))
@@ -505,7 +588,7 @@ class XbeeResponderModule:
                     if result:
                         self._home_target = dict(result)
                         self._home_target[1] = 500.0  # gripper center
-                        self._home_target[6] = 500.0  # wrist rotation center
+                        self._home_target[2] = 500.0  # wrist rotation center
                 else:
                     self._home_target = {sid: 500.0 for sid in range(1, 7)}
                 for sid in range(1, 7):
@@ -516,7 +599,8 @@ class XbeeResponderModule:
         """Background loop: smoothly move servos based on velocity targets at 50Hz."""
         logger.info("Servo velocity loop started (%d Hz)", VELOCITY_LOOP_HZ)
         while self._velocity_running and self._running:
-            if not self._gamepad_arm_enabled or not self._arm_connected:
+            sim_only = self._local_gamepad_enabled and not self._gamepad_arm_enabled
+            if not self._gamepad_arm_enabled and not sim_only:
                 time.sleep(0.1)
                 continue
 
@@ -565,27 +649,40 @@ class XbeeResponderModule:
                         ny = self._current_xyz["y"] + dy
                         nz = self._current_xyz["z"] + dz
 
-                        # clamp to workspace
-                        nx, ny, nz = kin.clamp_to_workspace(
-                            nx, ny, nz, self._wrist_pitch_deg)
-
-                        result = kin.inverse_kinematics(
-                            nx, ny, nz, self._wrist_pitch_deg)
+                        # Try IK with current wrist pitch, then try
+                        # auto-adjusting pitch if unreachable
+                        wp = self._wrist_pitch_deg
+                        result = kin.inverse_kinematics(nx, ny, nz, wp)
+                        if result is None:
+                            # Try multiple wrist pitches to find reachable
+                            for try_wp in [0, -45, 45, -90, 90, -30, 30,
+                                           -60, 60, -120, 120]:
+                                result = kin.inverse_kinematics(
+                                    nx, ny, nz, try_wp)
+                                if result is not None:
+                                    wp = try_wp
+                                    break
+                        if result is None:
+                            # Still unreachable, clamp position
+                            nx, ny, nz = kin.clamp_to_workspace(
+                                nx, ny, nz, self._wrist_pitch_deg)
+                            result = kin.inverse_kinematics(
+                                nx, ny, nz, self._wrist_pitch_deg)
                         if result is not None:
                             for sid, pos in result.items():
                                 self._servo_positions[sid] = float(pos)
                             self._current_xyz = {"x": nx, "y": ny, "z": nz}
                             moved = True
 
-                    # Servo 6 (wrist rotation) still direct velocity
-                    vel6 = self._servo_velocity.get(6, 0.0)
-                    if abs(vel6) >= GAMEPAD_DEADZONE:
-                        spd6 = self._servo_speed.get(6, 150.0)
-                        d6 = vel6 * spd6 * VELOCITY_LOOP_DT
-                        old6 = self._servo_positions[6]
-                        new6 = max(0, min(1000, old6 + d6))
-                        if int(new6) != int(old6):
-                            self._servo_positions[6] = new6
+                    # Servo 2 (wrist rotation) still direct velocity
+                    vel2 = self._servo_velocity.get(2, 0.0)
+                    if abs(vel2) >= GAMEPAD_DEADZONE:
+                        spd2 = self._servo_speed.get(2, 150.0)
+                        d2 = vel2 * spd2 * VELOCITY_LOOP_DT
+                        old2 = self._servo_positions[2]
+                        new2 = max(0, min(1000, old2 + d2))
+                        if int(new2) != int(old2):
+                            self._servo_positions[2] = new2
                             moved = True
 
                 else:
@@ -606,9 +703,11 @@ class XbeeResponderModule:
                 with self._servo_lock:
                     moves = [(sid, int(self._servo_positions[sid]))
                              for sid in range(1, 7)]
-                with self._arm_lock:
-                    if self._arm and self._arm.connected:
-                        self._arm.move_servos(moves, GAMEPAD_SERVO_DURATION)
+                # Only send to physical arm if GP->Arm enabled
+                if self._gamepad_arm_enabled:
+                    with self._arm_lock:
+                        if self._arm and self._arm.connected:
+                            self._arm.move_servos(moves, GAMEPAD_SERVO_DURATION)
 
             time.sleep(VELOCITY_LOOP_DT)
 
@@ -794,18 +893,32 @@ class XbeeResponderModule:
                         "coupling": self._servo_coupling},
         })
 
+    def _enable_ik_mode(self):
+        """Enable IK mode and initialise arm to home XYZ position."""
+        self._ik_mode = True
+        kin = self._kinematics
+        # Move to home XYZ (along +Y)
+        hx, hy, hz = kin.home_xyz
+        result = kin.inverse_kinematics(hx, hy, hz, kin.default_wrist_pitch)
+        if result:
+            for sid, pos in result.items():
+                self._servo_positions[sid] = float(pos)
+            self._current_xyz = {"x": hx, "y": hy, "z": hz}
+        else:
+            # Fallback: read current position
+            fk = kin.forward_kinematics(self._servo_positions)
+            if fk:
+                self._current_xyz = fk
+        self._wrist_pitch_deg = kin.default_wrist_pitch
+        self._xyz_velocity = [0.0, 0.0, 0.0]
+        logger.info("XYZ (IK) mode ENABLED, pos=%s", self._current_xyz)
+
     def _handle_xyz_mode(self, remote, payload):
         """Toggle XYZ (IK) mode from gamepad sender."""
         enabled = payload.get("enabled", not self._ik_mode)
         with self._servo_lock:
             if enabled and self._kinematics and self._kinematics.is_configured():
-                self._ik_mode = True
-                # initialise current XYZ from FK
-                fk = self._kinematics.forward_kinematics(self._servo_positions)
-                if fk:
-                    self._current_xyz = fk
-                self._xyz_velocity = [0.0, 0.0, 0.0]
-                logger.info("XYZ (IK) mode ENABLED, pos=%s", self._current_xyz)
+                self._enable_ik_mode()
             else:
                 self._ik_mode = False
                 self._xyz_velocity = [0.0, 0.0, 0.0]
@@ -927,6 +1040,17 @@ class XbeeResponderModule:
                         logger.info("xArm connected")
                         with self._arm_lock:
                             self._arm_connected = True
+                        # Read actual servo positions from hardware
+                        try:
+                            positions = self._arm.read_all_positions()
+                            if positions:
+                                with self._servo_lock:
+                                    for sid, pos in positions.items():
+                                        self._servo_positions[int(sid)] = float(pos)
+                                logger.info("xArm positions read: %s",
+                                            {k: int(v) for k, v in positions.items()})
+                        except Exception as e:
+                            logger.warning("Failed to read xArm positions: %s", e)
                         return
                 logger.info("xArm connect failed, retry in %ds", delay)
                 end = time.time() + delay
@@ -1172,11 +1296,7 @@ class XbeeResponderModule:
             enabled = data.get("enabled", not self._ik_mode)
             with self._servo_lock:
                 if enabled and self._kinematics and self._kinematics.is_configured():
-                    self._ik_mode = True
-                    fk = self._kinematics.forward_kinematics(self._servo_positions)
-                    if fk:
-                        self._current_xyz = fk
-                    self._xyz_velocity = [0.0, 0.0, 0.0]
+                    self._enable_ik_mode()
                 else:
                     self._ik_mode = False
                     self._xyz_velocity = [0.0, 0.0, 0.0]
@@ -1186,6 +1306,63 @@ class XbeeResponderModule:
                 "enabled": self._ik_mode,
                 "xyz": self._current_xyz,
             })
+
+        @bp.route("/api/xbee/xarm-read-positions", methods=["POST"])
+        def xarm_read_positions():
+            """Read actual servo positions from xArm hardware."""
+            with self._arm_lock:
+                if not self._arm or not self._arm.connected:
+                    return jsonify({"error": "xArm not connected"}), 503
+                try:
+                    positions = self._arm.read_all_positions()
+                    if positions:
+                        with self._servo_lock:
+                            for sid, pos in positions.items():
+                                self._servo_positions[int(sid)] = float(pos)
+                        return jsonify({"ok": True, "positions": {
+                            str(k): int(v) for k, v in positions.items()}})
+                    return jsonify({"error": "no data"}), 500
+                except Exception as e:
+                    return jsonify({"error": str(e)}), 500
+
+        @bp.route("/api/xbee/xarm-ik-goto", methods=["POST"])
+        def xarm_ik_goto():
+            """Move arm tip to target XYZ position via IK."""
+            if not self._kinematics or not self._kinematics.is_configured():
+                return jsonify({"error": "IK not configured"}), 503
+            data = request.json or {}
+            x = float(data.get("x", 0))
+            y = float(data.get("y", 0))
+            z = float(data.get("z", 0))
+            wp = float(data.get("wrist_pitch_deg",
+                                self._wrist_pitch_deg))
+            result = self._kinematics.inverse_kinematics(x, y, z, wp)
+            if result is None:
+                # Try multiple wrist pitches
+                for try_wp in [0, -45, 45, -90, 90, -30, 30, -60, 60]:
+                    result = self._kinematics.inverse_kinematics(x, y, z, try_wp)
+                    if result is not None:
+                        wp = try_wp
+                        break
+            if result is None:
+                # Try clamped position
+                cx, cy, cz = self._kinematics.clamp_to_workspace(x, y, z, wp)
+                result = self._kinematics.inverse_kinematics(cx, cy, cz, wp)
+                if result is None:
+                    return jsonify({"error": "unreachable"}), 400
+                x, y, z = cx, cy, cz
+            with self._servo_lock:
+                for sid, pos in result.items():
+                    self._servo_positions[sid] = float(pos)
+                self._current_xyz = {"x": x, "y": y, "z": z}
+            # Send to physical arm if enabled
+            if self._gamepad_arm_enabled:
+                moves = [(sid, int(pos)) for sid, pos in result.items()]
+                with self._arm_lock:
+                    if self._arm and self._arm.connected:
+                        self._arm.move_servos(moves, 100)
+            return jsonify({"ok": True, "x": x, "y": y, "z": z,
+                            "servos": result})
 
         @bp.route("/api/xbee/xarm-speed", methods=["POST"])
         def xarm_speed():
@@ -1199,12 +1376,18 @@ class XbeeResponderModule:
 
         @bp.route("/api/xbee/xarm-reverse", methods=["POST"])
         def xarm_reverse():
-            """Set reverse flag for a servo."""
+            """Set reverse flag for a servo. Also updates IK calibration direction."""
             data = request.json or {}
             sid = data.get("servo")
             rev = data.get("reverse", False)
             if sid is not None:
-                self._servo_reverse[int(sid)] = bool(rev)
+                sid = int(sid)
+                self._servo_reverse[sid] = bool(rev)
+                # Update IK calibration direction for IK servos
+                if self._kinematics and sid in self._kinematics.calibration:
+                    self._kinematics.calibration[sid]["direction"] = -1 if rev else 1
+                    logger.info("Servo %d IK direction set to %d",
+                                sid, self._kinematics.calibration[sid]["direction"])
             return jsonify({"reverse": {str(k): v for k, v in self._servo_reverse.items()}})
 
         @bp.route("/api/robot/status", methods=["GET", "POST"])
@@ -1234,6 +1417,64 @@ class XbeeResponderModule:
                 "status_flags": self._status_flags,
                 "send_status": self._send_status,
                 "status_interval": self._status_interval,
+            })
+
+        @bp.route("/api/xbee/local-gamepad/list")
+        def local_gamepad_list():
+            """List available local joystick devices."""
+            if not self._list_gamepads_fn:
+                return jsonify({"devices": [], "error": "not available"})
+            devices = self._list_gamepads_fn()
+            active = None
+            if self._local_gamepad and self._local_gamepad.is_running:
+                active = self._local_gamepad.device_path
+            return jsonify({"devices": devices, "active": active})
+
+        @bp.route("/api/xbee/local-gamepad/start", methods=["POST"])
+        def local_gamepad_start():
+            """Start reading from a local joystick device."""
+            if not self._local_gamepad_class:
+                return jsonify({"error": "local gamepad not available"}), 503
+            data = request.json or {}
+            path = data.get("path", "/dev/input/js0")
+            # Stop existing if running
+            if self._local_gamepad and self._local_gamepad.is_running:
+                self._local_gamepad.stop()
+            self._local_gamepad = self._local_gamepad_class(
+                callback=self._local_gamepad_callback, rate_hz=50)
+            ok = self._local_gamepad.start(path)
+            if ok:
+                self._local_gamepad_enabled = True
+                # Auto-load gamepad profile based on device name
+                self._load_gamepad_profile(self._local_gamepad.device_name)
+                # Ensure velocity loop is running for simulation
+                if not self._velocity_running:
+                    self._running = True
+                    self._velocity_running = True
+                    threading.Thread(target=self._servo_velocity_loop,
+                                     daemon=True, name="servo-velocity").start()
+                return jsonify({"ok": True, "path": path,
+                                "name": self._local_gamepad.device_name})
+            return jsonify({"error": f"Cannot open {path}"}), 400
+
+        @bp.route("/api/xbee/local-gamepad/stop", methods=["POST"])
+        def local_gamepad_stop():
+            """Stop the local gamepad reader."""
+            if self._local_gamepad and self._local_gamepad.is_running:
+                self._local_gamepad.stop()
+            self._local_gamepad_enabled = False
+            return jsonify({"ok": True})
+
+        @bp.route("/api/xbee/local-gamepad/status")
+        def local_gamepad_status():
+            """Get local gamepad status and current state."""
+            if not self._local_gamepad or not self._local_gamepad.is_running:
+                return jsonify({"running": False, "path": None, "name": ""})
+            return jsonify({
+                "running": True,
+                "path": self._local_gamepad.device_path,
+                "name": self._local_gamepad.device_name,
+                "state": self._local_gamepad.get_state(),
             })
 
         @bp.route("/simulation")
