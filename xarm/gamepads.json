@@ -1,0 +1,133 @@
+{
+    "gamepads": {
+        "USB Joystick 0079:0006": {
+            "name": "USB Joystick (Vendor: 0079, Product: 0006)",
+            "axes": 10,
+            "buttons": 12,
+            "stick_map": {
+                "lx": 0,
+                "ly": 1,
+                "rx": 2,
+                "ry": 5
+            },
+            "servo_map": {
+                "0": 4,
+                "2": 6,
+                "5": 5
+            },
+            "servo_speed": {
+                "1": 150,
+                "2": 150,
+                "3": 150,
+                "4": 150,
+                "5": 150,
+                "6": 150
+            },
+            "servo_reverse": {
+                "1": false,
+                "2": false,
+                "3": false,
+                "4": false,
+                "5": false,
+                "6": false
+            },
+            "button_map": {
+                "0": "gripper_toggle",
+                "3": "home_all",
+                "4": "servo2_down",
+                "5": "servo2_up"
+            },
+            "notes": "10-axis USB joystick. Right stick Y is axis 5 (not 3). Axis 9 has constant +3.29 offset."
+        },
+        "Wireless Gamepad 0079:181c": {
+            "name": "Wireless Gamepad (Vendor: 0079, Product: 181c)",
+            "axes": 10,
+            "buttons": 15,
+            "stick_map": {
+                "lx": 0,
+                "ly": 1,
+                "rx": 2,
+                "ry": 3
+            },
+            "servo_map": {
+                "0": 4,
+                "2": 6,
+                "3": 5
+            },
+            "servo_speed": {
+                "1": 150,
+                "2": 150,
+                "3": 150,
+                "4": 150,
+                "5": 150,
+                "6": 150
+            },
+            "servo_reverse": {
+                "1": false,
+                "2": false,
+                "3": false,
+                "4": false,
+                "5": false,
+                "6": false
+            },
+            "button_map": {
+                "0": "gripper_toggle",
+                "3": "home_all",
+                "4": "servo2_down",
+                "5": "servo2_up"
+            },
+            "coupling": {
+                "3": [
+                    {"servo": 4, "reverse": false},
+                    {"servo": 5, "reverse": false}
+                ]
+            },
+            "notes": "0079 vendor wireless Xbox-style gamepad. 10 axes, 15 buttons. RX=A2, RY=A3. A3 and A4 idle at -1.0 (need offset correction). Coupling on axis 3 (RY)."
+        },
+        "Xbox 360 Controller": {
+            "name": "Xbox 360 Controller",
+            "stick_map": {
+                "lx": 0,
+                "ly": 1,
+                "rx": 2,
+                "ry": 3
+            },
+            "servo_map": {
+                "0": 2,
+                "1": 3,
+                "2": 6,
+                "3": 4
+            },
+            "servo_speed": {
+                "1": 150,
+                "2": 150,
+                "3": 150,
+                "4": 150,
+                "5": 150,
+                "6": 150
+            },
+            "servo_reverse": {
+                "1": false,
+                "2": false,
+                "3": false,
+                "4": false,
+                "5": false,
+                "6": false
+            },
+            "button_map": {
+                "0": "gripper_toggle",
+                "3": "home_all",
+                "4": "servo2_down",
+                "5": "servo2_up"
+            },
+            "coupling": {
+                "3": [
+                    {"servo": 4, "reverse": false},
+                    {"servo": 5, "reverse": false}
+                ]
+            },
+            "notes": "Standard Xbox 360 layout. LX=0, LY=1, RX=2, RY=3. RY couples S4+S5."
+        }
+    },
+    "active": "Xbox 360 Controller"
+}

@@ -1,0 +1,12 @@
+# Stock watchlist for YOLO chart pattern analysis
+# One ticker per line, lines starting with # are ignored
+AAPL
+MSFT
+GOOGL
+AMZN
+TSLA
+NVDA
+META
+JPM
+V
+MA

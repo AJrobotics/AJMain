@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Chart Analyzer - AJ Robotics</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
+
+        .topbar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 24px; background: #16213e; border-bottom: 1px solid #0f3460;
+        }
+        .topbar h1 { color: #e94560; font-size: 20px; }
+        .topbar .subtitle { color: #888; font-size: 13px; margin-left: 10px; }
+        .topbar a { color: #4ecca3; text-decoration: none; font-size: 14px; }
+        .topbar a:hover { text-decoration: underline; }
+        .topbar .right { display: flex; align-items: center; gap: 16px; }
+        .status-badge {
+            padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;
+        }
+        .status-online { background: #4ecca333; color: #4ecca3; border: 1px solid #4ecca3; }
+        .status-offline { background: #e9456033; color: #e94560; border: 1px solid #e94560; }
+
+        .content { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+        /* Controls Bar */
+        .controls {
+            display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+            margin-bottom: 20px; padding: 16px; background: #16213e;
+            border: 1px solid #0f3460; border-radius: 8px;
+        }
+        .controls label { color: #8892b0; font-size: 13px; }
+        .controls input, .controls select {
+            background: #0a1929; color: #e0e0e0; border: 1px solid #0f3460;
+            padding: 6px 12px; border-radius: 4px; font-size: 13px;
+        }
+        .controls input:focus, .controls select:focus { outline: none; border-color: #4ecca3; }
+
+        .btn {
+            padding: 8px 20px; border: none; border-radius: 4px; cursor: pointer;
+            font-size: 13px; font-weight: bold; transition: all 0.2s;
+        }
+        .btn-run { background: #4ecca3; color: #1a1a2e; }
+        .btn-run:hover { background: #3db892; }
+        .btn-run:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-outline { background: transparent; color: #00e5ff; border: 1px solid #00e5ff; }
+        .btn-outline:hover { background: #00e5ff22; }
+        .btn-danger { background: transparent; color: #e94560; border: 1px solid #e94560; }
+        .btn-danger:hover { background: #e9456022; }
+
+        .spacer { flex: 1; }
+
+        /* Results Grid */
+        .section-header {
+            display: flex; align-items: center; gap: 12px;
+            margin: 24px 0 12px 0; padding-bottom: 8px;
+            border-bottom: 2px solid #0f3460;
+        }
+        .section-header h2 { color: #e0e0e0; font-size: 18px; }
+        .section-header .count { color: #4ecca3; font-size: 14px; }
+
+        .results-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+            gap: 16px; margin-top: 12px;
+        }
+
+        .result-card {
+            background: #16213e; border: 1px solid #0f3460; border-radius: 8px;
+            overflow: hidden; transition: border-color 0.2s;
+        }
+        .result-card:hover { border-color: #4ecca3; }
+        .result-card.has-pattern { border-left: 3px solid #4ecca3; }
+        .result-card.no-pattern { border-left: 3px solid #555; }
+
+        .card-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 16px; background: #1a2744; border-bottom: 1px solid #0f3460;
+        }
+        .card-header .ticker { color: #00e5ff; font-size: 16px; font-weight: bold; }
+        .card-header .pattern-count { font-size: 12px; }
+        .pattern-found { color: #4ecca3; }
+        .pattern-none { color: #555; }
+
+        .card-image {
+            width: 100%; aspect-ratio: 1; object-fit: contain;
+            background: #0a1929; cursor: pointer;
+        }
+        .card-image:hover { opacity: 0.9; }
+
+        .card-detections { padding: 10px 16px; }
+        .detection-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 4px 0; border-bottom: 1px solid #0f346033;
+        }
+        .detection-item:last-child { border-bottom: none; }
+        .detection-name { font-size: 13px; }
+        .detection-conf {
+            font-size: 12px; padding: 2px 8px; border-radius: 10px;
+            font-weight: bold;
+        }
+        .conf-high { background: #4ecca333; color: #4ecca3; }
+        .conf-mid { background: #f0a50033; color: #f0a500; }
+        .conf-low { background: #e9456033; color: #e94560; }
+
+        /* History sidebar */
+        .layout { display: flex; gap: 20px; }
+        .main-area { flex: 1; min-width: 0; }
+        .sidebar {
+            width: 220px; flex-shrink: 0;
+        }
+        .history-panel {
+            background: #16213e; border: 1px solid #0f3460; border-radius: 8px;
+            padding: 16px; position: sticky; top: 80px;
+        }
+        .history-panel h3 { color: #8892b0; font-size: 14px; margin-bottom: 12px; }
+        .history-date {
+            display: block; padding: 6px 10px; color: #888; font-size: 13px;
+            text-decoration: none; border-radius: 4px; cursor: pointer;
+            border: none; background: none; width: 100%; text-align: left;
+        }
+        .history-date:hover { background: #0f3460; color: #e0e0e0; }
+        .history-date.active { background: #0f3460; color: #4ecca3; font-weight: bold; }
+        .history-date .count-badge {
+            float: right; background: #0a1929; color: #4ecca3; padding: 1px 6px;
+            border-radius: 8px; font-size: 11px;
+        }
+
+        /* Watchlist editor */
+        .watchlist-editor {
+            background: #16213e; border: 1px solid #0f3460; border-radius: 8px;
+            padding: 16px; margin-top: 12px;
+        }
+        .watchlist-editor h3 { color: #8892b0; font-size: 14px; margin-bottom: 8px; }
+        .watchlist-editor textarea {
+            width: 100%; min-height: 120px; background: #0a1929; color: #e0e0e0;
+            border: 1px solid #0f3460; border-radius: 4px; padding: 8px;
+            font-family: 'Consolas', monospace; font-size: 13px; resize: vertical;
+        }
+        .watchlist-editor textarea:focus { outline: none; border-color: #4ecca3; }
+        .watchlist-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+        /* Summary bar */
+        .summary-bar {
+            display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap;
+        }
+        .summary-stat {
+            background: #16213e; border: 1px solid #0f3460; border-radius: 8px;
+            padding: 12px 20px; text-align: center; min-width: 120px;
+        }
+        .summary-stat .value { font-size: 28px; font-weight: bold; }
+        .summary-stat .label { font-size: 12px; color: #8892b0; margin-top: 2px; }
+        .stat-total .value { color: #00e5ff; }
+        .stat-patterns .value { color: #4ecca3; }
+        .stat-conf .value { color: #f0a500; }
+
+        /* Log area */
+        .log-area {
+            background: #0a1929; border: 1px solid #0f3460; border-radius: 8px;
+            padding: 12px; margin-top: 16px; max-height: 200px; overflow-y: auto;
+            font-family: 'Consolas', monospace; font-size: 12px; color: #8892b0;
+            display: none;
+        }
+        .log-area.visible { display: block; }
+        .log-line { padding: 1px 0; }
+        .log-line.highlight { color: #4ecca3; font-weight: bold; }
+        .log-line.error { color: #e94560; }
+
+        /* Lightbox */
+        .lightbox {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center;
+            align-items: center; cursor: pointer;
+        }
+        .lightbox.active { display: flex; }
+        .lightbox img { max-width: 90%; max-height: 90%; border-radius: 8px; }
+
+        /* Spinner */
+        .spinner {
+            display: inline-block; width: 16px; height: 16px;
+            border: 2px solid #4ecca333; border-top: 2px solid #4ecca3;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+            margin-right: 6px; vertical-align: middle;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        @media (max-width: 900px) {
+            .layout { flex-direction: column-reverse; }
+            .sidebar { width: 100%; }
+            .results-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div style="display:flex;align-items:center;">
+            <h1>YOLO Chart Analyzer</h1>
+            <span class="subtitle">foduucom/YOLOv8 Pattern Detection</span>
+        </div>
+        <div class="right">
+            <span id="model-status" class="status-badge status-offline">Model: checking...</span>
+            <a href="/">Dashboard</a>
+        </div>
+    </div>
+
+    <div class="content">
+        <!-- Controls -->
+        <div class="controls">
+            <label>Ticker(s):</label>
+            <input type="text" id="ticker-input" placeholder="AAPL, TSLA, ... or 'watchlist'" value="watchlist" style="width:240px;">
+            <label>Days:</label>
+            <select id="days-select">
+                <option value="60">60</option>
+                <option value="120" selected>120</option>
+                <option value="200">200</option>
+            </select>
+            <label>Confidence:</label>
+            <select id="conf-select">
+                <option value="0.2">0.2</option>
+                <option value="0.3" selected>0.3</option>
+                <option value="0.4">0.4</option>
+                <option value="0.5">0.5</option>
+            </select>
+            <button class="btn btn-run" id="btn-run" onclick="runAnalysis()">Run Analysis</button>
+            <button class="btn btn-outline" onclick="toggleLog()">Log</button>
+            <span class="spacer"></span>
+            <span id="run-status" style="font-size:13px;color:#888;"></span>
+        </div>
+
+        <!-- Summary -->
+        <div class="summary-bar" id="summary-bar" style="display:none;">
+            <div class="summary-stat stat-total"><div class="value" id="stat-total">0</div><div class="label">Analyzed</div></div>
+            <div class="summary-stat stat-patterns"><div class="value" id="stat-patterns">0</div><div class="label">Patterns Found</div></div>
+            <div class="summary-stat stat-conf"><div class="value" id="stat-conf">-</div><div class="label">Top Confidence</div></div>
+        </div>
+
+        <!-- Log -->
+        <div class="log-area" id="log-area"></div>
+
+        <!-- Main layout -->
+        <div class="layout">
+            <div class="main-area">
+                <div class="section-header">
+                    <h2>Detection Results</h2>
+                    <span class="count" id="results-count"></span>
+                </div>
+                <div class="results-grid" id="results-grid">
+                    <div style="color:#555;font-style:italic;padding:40px;text-align:center;grid-column:1/-1;">
+                        Run an analysis or select a date from history to view results.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar">
+                <div class="history-panel">
+                    <h3>History</h3>
+                    <div id="history-list">
+                        <div style="color:#555;font-size:12px;">Loading...</div>
+                    </div>
+                </div>
+                <div class="watchlist-editor">
+                    <h3>Watchlist</h3>
+                    <textarea id="watchlist-text" placeholder="Loading..."></textarea>
+                    <div class="watchlist-actions">
+                        <button class="btn btn-outline" onclick="saveWatchlist()" style="font-size:12px;padding:4px 12px;">Save</button>
+                        <span id="watchlist-status" style="font-size:12px;color:#888;"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lightbox -->
+    <div class="lightbox" id="lightbox" onclick="this.classList.remove('active')">
+        <img id="lightbox-img" src="">
+    </div>
+
+<script>
+const API = '/api/yolo';
+
+// --- Check model status ---
+async function checkStatus() {
+    try {
+        const r = await fetch(`${API}/status`);
+        const d = await r.json();
+        const el = document.getElementById('model-status');
+        if (d.online) {
+            el.textContent = 'Model: Ready';
+            el.className = 'status-badge status-online';
+        } else {
+            el.textContent = 'Model: Not Found';
+            el.className = 'status-badge status-offline';
+        }
+    } catch(e) {
+        document.getElementById('model-status').textContent = 'Model: Error';
+    }
+}
+
+// --- Load history dates ---
+async function loadHistory() {
+    try {
+        const r = await fetch(`${API}/history`);
+        const d = await r.json();
+        const el = document.getElementById('history-list');
+        if (!d.dates || d.dates.length === 0) {
+            el.innerHTML = '<div style="color:#555;font-size:12px;">No results yet</div>';
+            return;
+        }
+        el.innerHTML = d.dates.map(item =>
+            `<button class="history-date" onclick="loadResults('${item.date}')">
+                ${item.date}
+                <span class="count-badge">${item.patterns_found}</span>
+            </button>`
+        ).join('');
+    } catch(e) {
+        document.getElementById('history-list').innerHTML = '<div style="color:#e94560;font-size:12px;">Failed to load</div>';
+    }
+}
+
+// --- Load watchlist ---
+async function loadWatchlist() {
+    try {
+        const r = await fetch(`${API}/watchlist`);
+        const d = await r.json();
+        document.getElementById('watchlist-text').value = d.tickers.join('\n');
+    } catch(e) {}
+}
+
+// --- Save watchlist ---
+async function saveWatchlist() {
+    const text = document.getElementById('watchlist-text').value;
+    const tickers = text.split('\n').map(t => t.trim()).filter(t => t && !t.startsWith('#'));
+    try {
+        const r = await fetch(`${API}/watchlist`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({tickers})
+        });
+        const d = await r.json();
+        document.getElementById('watchlist-status').textContent = d.status === 'ok' ? 'Saved' : 'Error';
+        setTimeout(() => document.getElementById('watchlist-status').textContent = '', 2000);
+    } catch(e) {
+        document.getElementById('watchlist-status').textContent = 'Failed';
+    }
+}
+
+// --- Run analysis ---
+let running = false;
+async function runAnalysis() {
+    if (running) return;
+    running = true;
+    const btn = document.getElementById('btn-run');
+    const statusEl = document.getElementById('run-status');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Running...';
+    statusEl.textContent = '';
+
+    const tickerInput = document.getElementById('ticker-input').value.trim();
+    const days = document.getElementById('days-select').value;
+    const confidence = document.getElementById('conf-select').value;
+
+    // Show log
+    const logArea = document.getElementById('log-area');
+    logArea.classList.add('visible');
+    logArea.innerHTML = '<div class="log-line">Starting analysis...</div>';
+
+    try {
+        const r = await fetch(`${API}/run`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({tickers: tickerInput, days: parseInt(days), confidence: parseFloat(confidence)})
+        });
+        const d = await r.json();
+
+        if (d.status === 'ok') {
+            // Show log output
+            if (d.log) {
+                logArea.innerHTML = d.log.split('\n').map(line => {
+                    let cls = 'log-line';
+                    if (line.includes('**') || line.includes('pattern')) cls += ' highlight';
+                    if (line.includes('ERROR') || line.includes('error')) cls += ' error';
+                    return `<div class="${cls}">${escapeHtml(line)}</div>`;
+                }).join('');
+            }
+            statusEl.textContent = `Completed - ${d.summary?.tickers_with_patterns || 0} patterns found`;
+            statusEl.style.color = '#4ecca3';
+            loadResults(d.date);
+            loadHistory();
+        } else {
+            statusEl.textContent = 'Error: ' + (d.error || 'unknown');
+            statusEl.style.color = '#e94560';
+            logArea.innerHTML += `<div class="log-line error">${escapeHtml(d.error || 'Unknown error')}</div>`;
+        }
+    } catch(e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#e94560';
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Run Analysis';
+    running = false;
+}
+
+// --- Load results for a date ---
+async function loadResults(date) {
+    // Highlight active history item
+    document.querySelectorAll('.history-date').forEach(el => {
+        el.classList.toggle('active', el.textContent.trim().startsWith(date));
+    });
+
+    try {
+        const r = await fetch(`${API}/results/${date}`);
+        const d = await r.json();
+
+        if (!d.summary) {
+            document.getElementById('results-grid').innerHTML = '<div style="color:#e94560;">Failed to load results</div>';
+            return;
+        }
+
+        const summary = d.summary;
+
+        // Update summary bar
+        document.getElementById('summary-bar').style.display = 'flex';
+        document.getElementById('stat-total').textContent = summary.tickers_analyzed;
+        document.getElementById('stat-patterns').textContent = summary.tickers_with_patterns;
+        const topConf = summary.highlights.length > 0
+            ? (summary.highlights[0].confidence * 100).toFixed(0) + '%'
+            : '-';
+        document.getElementById('stat-conf').textContent = topConf;
+        document.getElementById('results-count').textContent = `${date}`;
+
+        // Render cards - patterns first, then no-patterns
+        const results = summary.all_results || [];
+        const withPatterns = results.filter(r => (r.num_detections || 0) > 0);
+        const noPatterns = results.filter(r => (r.num_detections || 0) === 0 && r.status === 'ok');
+        const failed = results.filter(r => r.status !== 'ok');
+        const sorted = [...withPatterns, ...noPatterns, ...failed];
+
+        const grid = document.getElementById('results-grid');
+        grid.innerHTML = sorted.map(r => {
+            const hasPat = (r.num_detections || 0) > 0;
+            const imgUrl = hasPat ? `${API}/image/${date}/${r.ticker}_detected.jpg` : `${API}/image/${date}/${r.ticker}_detected.jpg`;
+
+            let detectionsHtml = '';
+            if (r.detections && r.detections.length > 0) {
+                detectionsHtml = '<div class="card-detections">' + r.detections.map(det => {
+                    const confPct = (det.confidence * 100).toFixed(0);
+                    const confClass = det.confidence >= 0.7 ? 'conf-high' : det.confidence >= 0.5 ? 'conf-mid' : 'conf-low';
+                    return `<div class="detection-item">
+                        <span class="detection-name">${escapeHtml(det.class_name)}</span>
+                        <span class="detection-conf ${confClass}">${confPct}%</span>
+                    </div>`;
+                }).join('') + '</div>';
+            }
+
+            return `<div class="result-card ${hasPat ? 'has-pattern' : 'no-pattern'}">
+                <div class="card-header">
+                    <span class="ticker">${escapeHtml(r.ticker)}</span>
+                    <span class="pattern-count ${hasPat ? 'pattern-found' : 'pattern-none'}">
+                        ${hasPat ? r.num_detections + ' pattern(s)' : r.status !== 'ok' ? r.status : 'no patterns'}
+                    </span>
+                </div>
+                ${r.status === 'ok' ? `<img class="card-image" src="${imgUrl}" onclick="openLightbox(this.src)" onerror="this.style.display='none'" loading="lazy">` : ''}
+                ${detectionsHtml}
+            </div>`;
+        }).join('');
+
+    } catch(e) {
+        document.getElementById('results-grid').innerHTML = `<div style="color:#e94560;">Error: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+// --- Lightbox ---
+function openLightbox(src) {
+    document.getElementById('lightbox-img').src = src;
+    document.getElementById('lightbox').classList.add('active');
+}
+
+// --- Toggle log ---
+function toggleLog() {
+    document.getElementById('log-area').classList.toggle('visible');
+}
+
+// --- Utils ---
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// --- Init ---
+checkStatus();
+loadHistory();
+loadWatchlist();
+setInterval(checkStatus, 30000);
+</script>
+</body>
+</html>

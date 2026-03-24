@@ -475,7 +475,34 @@ def create_app(machine_name: str, modules: list | None = None) -> Flask:
 
     @app.route("/")
     def index():
+        # CashCow: show machine detail as home (trading-focused)
+        if machine_name == "CashCow":
+            info = find_machine("CashCow")
+            return render_template("machine_detail.html",
+                                   machine_name="CashCow",
+                                   machine_info=info or {},
+                                   local_machine=machine_name)
         return render_template("agent_dashboard.html", local_machine=machine_name)
+
+    @app.route("/today")
+    def today_page():
+        return render_template("today.html", local_machine=machine_name)
+
+    @app.route("/trader")
+    def trader_page():
+        return render_template("trader.html", local_machine=machine_name)
+
+    @app.route("/politician")
+    def politician_page():
+        return render_template("politician.html", local_machine=machine_name)
+
+    @app.route("/machines")
+    def machines_page():
+        return render_template("machines.html", local_machine=machine_name)
+
+    @app.route("/deploy")
+    def deploy_page():
+        return render_template("deploy.html", local_machine=machine_name)
 
     @app.route("/gamepad")
     def gamepad_page():
@@ -570,6 +597,12 @@ def create_app(machine_name: str, modules: list | None = None) -> Flask:
             return jsonify({"error": f"{target} unreachable: {e}"}), 503
 
     app.register_blueprint(proxy_bp)
+
+    # ------ YOLO Chart Analyzer (CashCow only) ------
+    if machine_name == "CashCow":
+        from agent.yolo_blueprint import yolo_bp
+        app.register_blueprint(yolo_bp)
+        log_event("YOLO Chart Analyzer registered")
 
     # ------ Register machine-specific modules ------
     if modules:

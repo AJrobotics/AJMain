@@ -25,6 +25,13 @@
         .topbar h1 { color: #00e5ff; font-size: 20px; }
         .topbar .back { color: #00e5ff; text-decoration: none; font-size: 14px; }
         .topbar .back:hover { text-decoration: underline; }
+        .topbar .nav { display: flex; align-items: center; gap: 4px; margin-left: 24px; }
+        .topbar .nav a {
+            color: #888; text-decoration: none; font-size: 13px;
+            padding: 5px 14px; border-radius: 6px; transition: all 0.2s;
+        }
+        .topbar .nav a:hover { color: #00e5ff; background: #0f3460; }
+        .topbar .nav a.active { color: #00e5ff; background: #0f3460; font-weight: bold; }
         .topbar .status-badge {
             padding: 4px 14px;
             border-radius: 20px;
@@ -695,9 +702,23 @@
 <body>
     <!-- Top Bar -->
     <div class="topbar">
-        <div>
+        <div style="display:flex; align-items:center;">
+            {% if local_machine == machine_name %}
+            <h1>{{ machine_name }}</h1>
+            <nav class="nav">
+                <a href="/" class="active">Home</a>
+                <a href="/trader">Trader</a>
+                <a href="/today">Today</a>
+                <a href="/politician">Politician</a>
+                <a href="/machines">Machines</a>
+                <a href="/deploy">Deploy</a>
+                <a href="/yolo">YOLO Analyzer</a>
+                <a href="//{{ request.host.split(':')[0] }}:5001/simulation" target="_blank">XArm Sim</a>
+            </nav>
+            {% else %}
             <a href="/" class="back">&larr; Dashboard</a>
             <h1 style="display:inline; margin-left: 16px;">{{ machine_name }}</h1>
+            {% endif %}
         </div>
         <span class="status-badge status-offline" id="status-badge">Checking...</span>
     </div>
@@ -1006,6 +1027,49 @@
                 </div>
             </div>
 
+            <!-- CashCow: Portfolio Overview (prominently displayed) -->
+            <div id="portfolio-section" style="display:none;margin-bottom:20px;">
+                <div class="card" style="border-color:#00e5ff;padding:20px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                        <h3 style="color:#00e5ff;font-size:18px;">IB Portfolio</h3>
+                        <div style="display:flex;gap:16px;align-items:center;">
+                            <div style="text-align:right;">
+                                <div style="color:#888;font-size:11px;">Net Liquidation</div>
+                                <div id="pf-net-liq" style="color:#00e676;font-size:22px;font-weight:bold;">--</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="color:#888;font-size:11px;">Cash</div>
+                                <div id="pf-cash" style="color:#4ecca3;font-size:16px;font-weight:bold;">--</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="color:#888;font-size:11px;">Unrealized P&L</div>
+                                <div id="pf-pnl" style="font-size:16px;font-weight:bold;">--</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="color:#888;font-size:11px;">Today Commission</div>
+                                <div id="pf-comm" style="color:#ffc107;font-size:14px;">--</div>
+                            </div>
+                        </div>
+                    </div>
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead>
+                            <tr style="border-bottom:2px solid #0f3460;color:#888;">
+                                <th style="text-align:left;padding:8px 6px;">Symbol</th>
+                                <th style="text-align:right;padding:8px 6px;">Qty</th>
+                                <th style="text-align:right;padding:8px 6px;">Avg Cost</th>
+                                <th style="text-align:right;padding:8px 6px;">Mkt Price</th>
+                                <th style="text-align:right;padding:8px 6px;">Mkt Value</th>
+                                <th style="text-align:right;padding:8px 6px;">P&L</th>
+                                <th style="text-align:right;padding:8px 6px;">P&L %</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pf-positions-body">
+                            <tr><td colspan="7" style="text-align:center;color:#555;padding:20px;">Loading portfolio...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- CashCow: Smart Trader + Trading Log (left) | Daily Picks (right) -->
             <div id="trader-section" style="display:none;">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
@@ -1086,18 +1150,22 @@
                         </div>
                     </div>
 
-                    <!-- Right: Daily Picks -->
+                    <!-- Right: Day Trader Status -->
                     <div class="card trader-card" style="align-self:start;">
-                        <h3>Daily Picks (Screener)</h3>
-                        <div style="overflow-x:auto;">
-                            <table class="picks-table">
-                                <thead>
-                                    <tr><th>#</th><th>Symbol</th><th>Score</th><th>Signal</th></tr>
-                                </thead>
-                                <tbody id="picks-body">
-                                    <tr><td colspan="4" style="color:#555">Loading...</td></tr>
-                                </tbody>
-                            </table>
+                        <h3>
+                            <span style="color:#ffab40;">&#9889; Day Trader</span>
+                            <span class="status-badge" id="day-badge" style="margin-left:auto;font-size:10px;padding:3px 10px;border-radius:10px;background:#55555533;color:#888;">Checking...</span>
+                        </h3>
+                        <div class="info-row"><span class="label">Status</span><span class="value" id="day-status">--</span></div>
+                        <div class="info-row"><span class="label">Mode</span><span class="value" id="day-mode">--</span></div>
+                        <div class="info-row"><span class="label">PID</span><span class="value" id="day-pid">--</span></div>
+                        <div class="info-row"><span class="label">Strategy</span><span class="value" style="font-size:10px;">VWAP + EMA + Vol + RSI/MACD</span></div>
+                        <div class="info-row"><span class="label">Last Signal</span><span class="value" id="day-last-signal">--</span></div>
+                        <div class="info-row"><span class="label">Watchlist</span><span class="value" id="day-watchlist">--</span></div>
+
+                        <div style="margin-top:12px;">
+                            <h3 style="font-size:12px;color:#ffab40;margin-bottom:6px;">Day Trader Log (Recent)</h3>
+                            <div class="log-box" id="day-log-box" style="max-height:250px;">No day trader log</div>
                         </div>
                     </div>
                 </div>
@@ -1528,6 +1596,98 @@
             });
         }
 
+        // Portfolio (CashCow only)
+        function loadPortfolio() {
+            if (MACHINE !== 'CashCow') return;
+            document.getElementById('portfolio-section').style.display = '';
+
+            // Fetch portfolio + status (for daily picks & day trader info) in parallel
+            Promise.all([
+                fetch('/api/trader/portfolio').then(r => r.json()),
+                fetch('/api/trader/status').then(r => r.json()),
+            ]).then(([d, status]) => {
+                if (!d.connected) {
+                    document.getElementById('pf-net-liq').textContent = 'Disconnected';
+                    document.getElementById('pf-net-liq').style.color = '#e94560';
+                    return;
+                }
+                const a = d.account || {};
+                const fmt = v => v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '--';
+
+                document.getElementById('pf-net-liq').textContent = fmt(a.NetLiquidation);
+                document.getElementById('pf-net-liq').style.color = '#00e676';
+                document.getElementById('pf-cash').textContent = fmt(a.TotalCashValue);
+                const upnl = a.UnrealizedPnL || 0;
+                document.getElementById('pf-pnl').textContent = (upnl >= 0 ? '+' : '') + fmt(Math.abs(upnl));
+                document.getElementById('pf-pnl').style.color = upnl >= 0 ? '#00e676' : '#e94560';
+                document.getElementById('pf-comm').textContent = fmt(d.today_commission || 0);
+
+                // Build trader ownership map
+                const smartSymbols = new Set();
+                const daySymbols = new Set();
+                // Smart Trader: from daily_picks
+                if (status.daily_picks && status.daily_picks.picks) {
+                    status.daily_picks.picks.forEach(p => smartSymbols.add(p.symbol));
+                }
+                // Day Trader: from day log (BUY lines)
+                if (status.day_log_lines) {
+                    status.day_log_lines.forEach(l => {
+                        const m = l.match(/BUY 주문 전송!\s+(\w+)/);
+                        if (m) daySymbols.add(m[1]);
+                        const m2 = l.match(/(\w+)\s+x\s+\d+\s+@\s+\$/);
+                        if (m2) daySymbols.add(m2[1]);
+                    });
+                }
+                // Also check trade_details from IB fills
+                if (d.trade_details) {
+                    d.trade_details.forEach(t => {
+                        if (t.side === 'BOT') daySymbols.add(t.symbol);
+                    });
+                }
+
+                const positions = d.positions || [];
+                const tbody = document.getElementById('pf-positions-body');
+                if (positions.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#555;padding:20px;">No open positions</td></tr>';
+                    return;
+                }
+                positions.sort((a, b) => Math.abs(b.marketValue) - Math.abs(a.marketValue));
+                tbody.innerHTML = positions.map(p => {
+                    const pnl = p.unrealizedPNL || 0;
+                    const pnlPct = p.avgCost > 0 ? ((p.marketPrice - p.avgCost) / p.avgCost * 100) : 0;
+                    const pnlColor = pnl >= 0 ? '#00e676' : '#e94560';
+                    const qtyColor = p.quantity >= 0 ? '#00e676' : '#e94560';
+                    const symColor = p.quantity < 0 ? '#e94560' : '#00e5ff';
+
+                    // Determine trader tag
+                    let traderTag = '';
+                    const inSmart = smartSymbols.has(p.symbol);
+                    const inDay = daySymbols.has(p.symbol);
+                    if (inSmart && inDay) {
+                        traderTag = '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#7c4dff33;color:#b388ff;border:1px solid #7c4dff;margin-left:4px;">S</span>' +
+                                    '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#ff6d0033;color:#ffab40;border:1px solid #ff6d00;margin-left:2px;">D</span>';
+                    } else if (inSmart) {
+                        traderTag = '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#7c4dff33;color:#b388ff;border:1px solid #7c4dff;margin-left:4px;">Smart</span>';
+                    } else if (inDay) {
+                        traderTag = '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#ff6d0033;color:#ffab40;border:1px solid #ff6d00;margin-left:4px;">Day</span>';
+                    } else if (p.quantity < 0) {
+                        traderTag = '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#e9456033;color:#e94560;border:1px solid #e94560;margin-left:4px;">Bug</span>';
+                    }
+
+                    return '<tr style="border-bottom:1px solid #0f3460;">' +
+                        '<td style="padding:6px;color:' + symColor + ';font-weight:bold;">' + p.symbol + traderTag + '</td>' +
+                        '<td style="padding:6px;text-align:right;color:' + qtyColor + ';">' + (p.quantity > 0 ? '+' : '') + p.quantity + '</td>' +
+                        '<td style="padding:6px;text-align:right;">$' + p.avgCost.toFixed(2) + '</td>' +
+                        '<td style="padding:6px;text-align:right;">$' + p.marketPrice.toFixed(2) + '</td>' +
+                        '<td style="padding:6px;text-align:right;">$' + p.marketValue.toLocaleString('en-US', {minimumFractionDigits:0}) + '</td>' +
+                        '<td style="padding:6px;text-align:right;color:' + pnlColor + ';font-weight:bold;">' + (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(0) + '</td>' +
+                        '<td style="padding:6px;text-align:right;color:' + pnlColor + ';">' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(1) + '%</td>' +
+                    '</tr>';
+                }).join('');
+            })
+            .catch(err => console.error('Portfolio load failed:', err));
+        }
+
         // Smart Trader (CashCow only)
         let _lastTraderLogHash = '';
         function loadTraderStatus() {
@@ -1536,20 +1696,29 @@
             document.getElementById('trader-section').style.display = '';
             document.getElementById('trader-logs-section').style.display = '';
 
-            fetch('/api/machine/' + MACHINE + '/trader-status')
+            fetch('/api/trader/status')
                 .then(r => r.json())
                 .then(d => {
                     // Update status badges with market awareness
-                    const label = d.status_label || (d.running ? 'Running' : 'Stopped');
-                    let badgeClass;
-                    if (d.running && d.market_open) {
-                        badgeClass = 'trader-badge trading';
-                    } else if (d.running && !d.market_open) {
-                        badgeClass = 'trader-badge running';
-                    } else if (!d.running && d.market_open) {
-                        badgeClass = 'trader-badge stopped';
+                    const ms = d.market_status || 'closed';
+                    let label, badgeClass;
+                    if (d.running) {
+                        if (ms === 'open' || ms === 'trading') {
+                            label = 'Trading'; badgeClass = 'trader-badge trading';
+                        } else if (ms === 'pre-market') {
+                            label = 'Pre-Market'; badgeClass = 'trader-badge running';
+                        } else if (ms === 'after-hours') {
+                            label = 'After-Hours'; badgeClass = 'trader-badge alert';
+                        } else {
+                            label = 'Idle (' + ms.replace('-',' ').replace(/\b\w/g, c => c.toUpperCase()) + ')';
+                            badgeClass = 'trader-badge idle';
+                        }
                     } else {
-                        badgeClass = 'trader-badge idle';
+                        if (ms === 'open' || ms === 'trading') {
+                            label = 'Stopped (Market Open!)'; badgeClass = 'trader-badge stopped';
+                        } else {
+                            label = 'Stopped'; badgeClass = 'trader-badge stopped';
+                        }
                     }
                     setBadge('trader-badge', label, badgeClass);
 
@@ -1629,8 +1798,8 @@
                     }
                 })
                 .catch(err => {
-                    setBadge('trader-badge', 'ERROR', 'trader-badge stopped');
                     console.error('Trader status error:', err);
+                    // Don't show ERROR badge on transient fetch failures - keep last state
                 });
         }
 
@@ -1724,7 +1893,7 @@
         function loadIBGatewayStatus() {
             if (MACHINE !== 'CashCow') return;
 
-            fetch('/api/cashcow/ib-gateway-status')
+            fetch('/api/trader/portfolio')
                 .then(r => r.json())
                 .then(d => {
                     const dot = document.getElementById('ib-gw-dot');
@@ -1747,18 +1916,9 @@
                         text.style.color = '#888';
                     }
 
-                    setText('ib-gw-port', d.port_open ? 'Open' : 'Closed');
-                    document.getElementById('ib-gw-port').style.color = d.port_open ? '#00e676' : '#e94560';
-                    setText('ib-gw-time', d.last_check || '--');
-
-                    // SMS alert info
-                    const smsRow = document.getElementById('ib-sms-row');
-                    if (d.sms_sent_today) {
-                        smsRow.style.display = '';
-                        setText('ib-sms-info', 'Sent at ' + (d.sms_last_sent || '--'));
-                    } else {
-                        smsRow.style.display = 'none';
-                    }
+                    setText('ib-gw-port', d.connected ? 'Open (7497)' : 'Closed');
+                    document.getElementById('ib-gw-port').style.color = d.connected ? '#00e676' : '#e94560';
+                    setText('ib-gw-time', new Date().toLocaleTimeString());
                 })
                 .catch(() => {});
         }
@@ -2169,6 +2329,60 @@
                 });
         }
 
+        // Day Trader Panel (CashCow machine detail page)
+        function loadDayTraderPanel() {
+            if (MACHINE !== 'CashCow') return;
+            const base = '';  // local on CashCow
+            fetch(base + '/api/trader/status')
+                .then(r => r.json())
+                .then(d => {
+                    const badge = document.getElementById('day-badge');
+                    if (d.day_running) {
+                        badge.textContent = 'Trading'; badge.style.cssText = 'margin-left:auto;font-size:10px;padding:3px 10px;border-radius:10px;background:#00e67633;color:#00e676;border:1px solid #00e676;font-weight:bold;';
+                        const dp = (d.processes||[]).find(p => p.trader_type==='day');
+                        setText('day-status', 'Running');
+                        document.getElementById('day-status').style.color = '#00e676';
+                        setText('day-mode', dp ? dp.mode : '--');
+                        setText('day-pid', dp ? dp.pid : '--');
+                    } else {
+                        badge.textContent = 'Stopped'; badge.style.cssText = 'margin-left:auto;font-size:10px;padding:3px 10px;border-radius:10px;background:#e9456033;color:#e94560;border:1px solid #e94560;font-weight:bold;';
+                        setText('day-status', 'Stopped');
+                        document.getElementById('day-status').style.color = '#e94560';
+                        setText('day-mode', '--');
+                        setText('day-pid', '--');
+                    }
+                    // Day trader log
+                    const dayLogBox = document.getElementById('day-log-box');
+                    if (dayLogBox && d.day_log_lines && d.day_log_lines.length > 0) {
+                        dayLogBox.innerHTML = d.day_log_lines.slice(-25).map(l => {
+                            let style = '';
+                            if (l.includes('BUY') && !l.includes('HOLD')) style = 'color:#00e676';
+                            else if (l.includes('SELL')) style = 'color:#e94560';
+                            else if (l.includes('HOLD') && l.includes('합의')) style = 'color:#ffc107';
+                            return '<div style="' + style + '">' + l.replace(/</g,'&lt;') + '</div>';
+                        }).join('');
+                        dayLogBox.scrollTop = dayLogBox.scrollHeight;
+                    }
+                    // Parse last signal and watchlist from log
+                    if (d.day_log_lines && d.day_log_lines.length > 0) {
+                        const lines = d.day_log_lines;
+                        const sigLine = [...lines].reverse().find(l => l.includes('BUY:') || l.includes('SELL:'));
+                        if (sigLine) {
+                            const m = sigLine.match(/(\w+)\s*\|\s*.*?(HOLD|BUY|SELL)/);
+                            setText('day-last-signal', m ? m[1] + ' → ' + m[2] : '--');
+                        }
+                        const wlLine = [...lines].reverse().find(l => l.includes('워치리스트'));
+                        if (wlLine) {
+                            const wm = wlLine.match(/(\d+)개/);
+                            setText('day-watchlist', wm ? wm[1] + ' stocks' : '--');
+                        }
+                    }
+                })
+                .catch(() => {
+                    setText('day-status', 'Error');
+                });
+        }
+
         // CashCow Panel (Christy right-side)
         function loadCashCowPanel() {
             if (MACHINE !== 'Christy') return;
@@ -2190,45 +2404,72 @@
                 })
                 .catch(() => { setText('cc-gateway', 'Unknown'); });
 
-            fetch('/api/machine/CashCow/trader-status')
+            fetch('http://192.168.1.91:5000/api/trader/status')
                 .then(r => r.json())
                 .then(d => {
                     const badge = document.getElementById('cc-badge');
-                    const label = d.status_label || (d.running ? 'Running' : 'Stopped');
-                    badge.textContent = label;
-                    if (d.running && d.market_open) {
-                        badge.className = 'panel-badge badge-ok';
-                    } else if (d.running && !d.market_open) {
-                        badge.className = 'panel-badge badge-ok';
-                    } else if (!d.running && d.market_open) {
-                        badge.className = 'panel-badge badge-err';
+                    const ms = d.market_status || 'closed';
+                    let label, badgeCls;
+                    if (d.running) {
+                        if (ms === 'open' || ms === 'trading') {
+                            label = 'Trading'; badgeCls = 'panel-badge badge-ok';
+                        } else if (ms === 'pre-market') {
+                            label = 'Pre-Market'; badgeCls = 'panel-badge'; badge.style.background = '#42a5f5'; badge.style.color = '#fff';
+                        } else if (ms === 'after-hours') {
+                            label = 'After-Hours'; badgeCls = 'panel-badge'; badge.style.background = '#ffa726'; badge.style.color = '#000';
+                        } else {
+                            label = 'Idle (' + ms.replace('-',' ').replace(/\b\w/g, c => c.toUpperCase()) + ')';
+                            badgeCls = 'panel-badge badge-warn';
+                        }
                     } else {
-                        badge.className = 'panel-badge badge-warn';
+                        if (ms === 'open' || ms === 'trading') {
+                            label = 'Stopped (Market Open!)'; badgeCls = 'panel-badge badge-err';
+                        } else {
+                            label = 'Stopped'; badgeCls = 'panel-badge badge-warn';
+                        }
                     }
+                    badge.textContent = label;
+                    badge.className = badgeCls;
                     setText('cc-trader', d.running ? 'Running (' + (d.mode || '--') + ')' : 'Not Running');
-
-                    // Positions, portfolio, P&L — placeholders until API provides them
-                    setText('cc-positions', d.daily_picks ? (Array.isArray(d.daily_picks) ? d.daily_picks.length : '--') + ' picks' : '--');
-                    setText('cc-portfolio', '--');
-                    setText('cc-pnl', '--');
-
-                    // Top holding from picks
-                    let topHold = '--';
-                    let picksArr = null;
-                    if (d.daily_picks) {
-                        if (Array.isArray(d.daily_picks)) picksArr = d.daily_picks;
-                        else if (d.daily_picks.all_scores) picksArr = d.daily_picks.all_scores;
-                        else if (d.daily_picks.picks) picksArr = d.daily_picks.picks;
-                    }
-                    if (picksArr && picksArr.length > 0) {
-                        const top = picksArr[0];
-                        topHold = (top.symbol || top.ticker || '??') + ' (' + (top.signal || top.action || '--') + ')';
-                    }
-                    setText('cc-top-hold', topHold);
 
                     // Last check time
                     const now = new Date();
                     setText('cc-last-check', now.toLocaleTimeString());
+
+                    // Fetch portfolio from CashCow agent directly
+                    fetch('/api/cashcow/portfolio')
+                        .then(pr => pr.json())
+                        .then(p => {
+                            if (p.connected) {
+                                const a = p.account || {};
+                                const fmt = v => v != null ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : '--';
+                                setText('cc-portfolio', fmt(a.NetLiquidation));
+                                document.getElementById('cc-portfolio').style.color = '#00e676';
+
+                                const upnl = a.UnrealizedPnL || 0;
+                                setText('cc-pnl', fmt(upnl));
+                                document.getElementById('cc-pnl').style.color = upnl >= 0 ? '#00e676' : '#e94560';
+
+                                if (p.positions && p.positions.length > 0) {
+                                    setText('cc-positions', p.positions.length + ' stocks');
+                                    const top = p.positions.reduce((a, b) => Math.abs(b.marketValue) > Math.abs(a.marketValue) ? b : a);
+                                    const pnlSign = top.unrealizedPNL >= 0 ? '+' : '';
+                                    setText('cc-top-hold', top.symbol + ' ' + top.quantity + 'x $' + top.marketPrice + ' (' + pnlSign + '$' + top.unrealizedPNL.toFixed(0) + ')');
+                                } else {
+                                    setText('cc-positions', '0');
+                                    setText('cc-top-hold', '--');
+                                }
+                            } else {
+                                setText('cc-portfolio', '--');
+                                setText('cc-pnl', '--');
+                                setText('cc-positions', '--');
+                                setText('cc-top-hold', '--');
+                            }
+                        })
+                        .catch(() => {
+                            setText('cc-portfolio', '--');
+                            setText('cc-pnl', '--');
+                        });
                 })
                 .catch(err => {
                     const badge = document.getElementById('cc-badge');
@@ -2755,8 +2996,10 @@
             detectGramLocal();
         }
         if (MACHINE === 'CashCow') {
+            loadPortfolio();
             loadTraderStatus();
             loadIBGatewayStatus();
+            setInterval(loadPortfolio, 30000);
             setInterval(loadTraderStatus, 30000);
             setInterval(loadIBGatewayStatus, 30000);
         }
@@ -2766,10 +3009,12 @@
             loadResponders();
             loadLogFile();
             loadCashCowPanel();
+            loadDayTraderPanel();
             initCameraDashboard();
             setInterval(loadXbeeStatus, 15000);
             setInterval(loadResponders, 15000);
             setInterval(loadCashCowPanel, 30000);
+            setInterval(loadDayTraderPanel, 15000);
         }
         setInterval(loadInfo, 30000);
     </script>

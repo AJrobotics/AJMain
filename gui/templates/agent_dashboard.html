@@ -22,6 +22,13 @@
             position: sticky; top: 0; z-index: 100;
         }
         .topbar h1 { font-size: 20px; color: #e94560; }
+        .topbar .nav { display: flex; align-items: center; gap: 4px; margin-left: 24px; }
+        .topbar .nav a {
+            color: #888; text-decoration: none; font-size: 13px;
+            padding: 5px 14px; border-radius: 6px; transition: all 0.2s;
+        }
+        .topbar .nav a:hover { color: #4ecca3; background: #0f3460; }
+        .topbar .nav a.active { color: #4ecca3; background: #0f3460; font-weight: bold; }
         .topbar .right { display: flex; align-items: center; gap: 12px; }
         .summary-badge {
             background: #0f3460; color: #4ecca3;
@@ -302,37 +309,126 @@
 </head>
 <body>
     <div class="topbar">
-        <h1>AJ Robotics - {{ local_machine }}</h1>
-        <div class="right">
-            {% if local_machine in ['Dreamer', 'Gram', 'R1'] %}
-            <a href="/gamepad" style="color:#4ecca3; text-decoration:none; font-size:13px; background:#0f3460; padding:4px 14px; border-radius:20px;">Gamepad</a>
+        <h1>{{ local_machine }}</h1>
+        <nav class="nav">
+            <a href="/" id="nav-home">Dashboard</a>
+            {% if local_machine == 'CashCow' %}
+            <a href="/trader" id="nav-trader">Trader</a>
+            <a href="/today" id="nav-today">Today</a>
+            <a href="/politician" id="nav-politician">Politician</a>
             {% endif %}
+            <a href="/machines" id="nav-machines">Machines</a>
+            {% if local_machine in ['CashCow', 'Christy'] %}
+            <a href="/deploy" id="nav-deploy">Deploy</a>
+            {% endif %}
+            {% if local_machine in ['Dreamer', 'Gram', 'R1'] %}
+            <a href="/gamepad" id="nav-gamepad">Gamepad</a>
+            <a href="//{{ request.host.split(':')[0] }}:5001/simulation" target="_blank" id="nav-xarm">XArm Sim</a>
+            {% endif %}
+            {% if local_machine in ['Christy', 'CashCow'] %}
+            <a href="/vision" id="nav-vision">Vision</a>
+            {% endif %}
+        </nav>
+        <div class="right">
             <span class="summary-badge" id="online-badge">--/-- Online</span>
         </div>
     </div>
+    <script>
+    // Highlight active nav link
+    (function(){
+        const path = window.location.pathname;
+        document.querySelectorAll('.nav a').forEach(a => {
+            if (path === a.getAttribute('href') || (path === '/' && a.id === 'nav-home')) a.classList.add('active');
+        });
+    })();
+    </script>
 
     <div class="container">
         <!-- Trader Panel (CashCow local OR Christy remote monitor) -->
         {% if local_machine in ['CashCow', 'Christy'] %}
-        <div class="section" id="trader-section">
-            <div class="section-title">Smart Trader {% if local_machine == 'Christy' %}<span style="color:#888; font-size:13px">(CashCow Remote)</span>{% endif %}</div>
-            <div class="trader-panel">
-                <div class="trader-header">
-                    <div>
-                        <span class="trader-status stopped" id="trader-badge">Checking...</span>
-                        <span style="color:#666; font-size:12px; margin-left:10px" id="trader-mode"></span>
-                    </div>
-                    <div class="trader-btns">
-                        <button onclick="traderAction('start')" id="trader-start-btn">Start</button>
-                        <button class="stop" onclick="traderAction('stop')" id="trader-stop-btn">Stop</button>
-                    </div>
+        <style>
+            .t-panel { background:#0f1f35; border:1px solid #1a3a5c; border-radius:10px; padding:16px 20px; }
+            .t-panel h3 { font-size:14px; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid #1a3a5c; display:flex; align-items:center; gap:8px; }
+            .t-panel h3 .t-icon { font-size:18px; }
+            .t-panel h3 .t-badge { font-size:10px; padding:3px 10px; border-radius:10px; margin-left:auto; font-weight:bold; }
+            .t-badge-run { background:#00e67633; color:#00e676; border:1px solid #00e676; }
+            .t-badge-stop { background:#e9456033; color:#e94560; border:1px solid #e94560; }
+            .t-badge-check { background:#55555533; color:#888; }
+            .t-row { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid #0a192f; font-size:12px; }
+            .t-row:last-child { border-bottom:none; }
+            .t-row .t-label { color:#888; }
+            .t-row .t-val { color:#e0e0e0; font-family:'Consolas',monospace; font-size:11px; }
+            .t-val.pos { color:#00e676; }
+            .t-val.neg { color:#e94560; }
+            .t-btns { display:flex; gap:6px; margin-top:10px; justify-content:center; }
+            .t-btns button { padding:6px 16px; border:1px solid #1a3a5c; background:transparent; color:#00e5ff; border-radius:5px; cursor:pointer; font-size:11px; }
+            .t-btns button:hover { background:#00e5ff22; }
+            .t-btns button.t-stop { border-color:#e94560; color:#e94560; }
+            .t-btns button.t-stop:hover { background:#e9456022; }
+            .t-log { background:#0a192f; border-radius:6px; padding:8px; font-family:'Consolas',monospace; font-size:10px; color:#aaa; max-height:200px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; line-height:1.4; margin-top:8px; }
+            .t-log .line { padding:1px 0; }
+        </style>
+
+        <!-- Smart Trader + Day Trader side by side -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;" id="trader-dual-section">
+            <!-- LEFT: Smart Trader -->
+            <div class="t-panel" id="smart-panel">
+                <h3>
+                    <span class="t-icon">&#128176;</span>
+                    <span style="color:#b388ff;">Smart Trader</span>
+                    <span class="t-badge t-badge-check" id="smart-badge">Checking...</span>
+                </h3>
+                <div class="t-row"><span class="t-label">IB Gateway</span><span class="t-val" id="ib-conn-status">--</span></div>
+                <div class="t-row"><span class="t-label">Status</span><span class="t-val" id="smart-status-val">--</span></div>
+                <div class="t-row"><span class="t-label">Open Positions</span><span class="t-val" id="smart-pos-count">--</span></div>
+                <div class="t-row"><span class="t-label">Portfolio Value</span><span class="t-val" id="ib-net-liq">--</span></div>
+                <div class="t-row"><span class="t-label">Cash</span><span class="t-val" id="ib-cash">--</span></div>
+                <div class="t-row"><span class="t-label">Unrealized P&L</span><span class="t-val" id="ib-unrealized">--</span></div>
+                <div class="t-row"><span class="t-label">Top Holding</span><span class="t-val" id="smart-top-hold">--</span></div>
+                <div class="t-row"><span class="t-label">Daily Picks</span><span class="t-val" id="smart-picks-summary">--</span></div>
+                <div class="t-row"><span class="t-label">Last Check</span><span class="t-val" id="smart-last-check">--</span></div>
+                <div class="t-btns">
+                    <button onclick="traderAction('start')" id="trader-start-btn">Start</button>
+                    <button class="t-stop" onclick="traderAction('stop','smart')" id="trader-stop-btn" style="display:none;">Stop</button>
                 </div>
-                <div class="trader-info-grid" id="trader-info"></div>
-                <div class="trader-picks" id="trader-picks"></div>
-                <div style="margin-top:12px">
-                    <div class="section-title" style="font-size:13px; margin-bottom:6px">Trader Log</div>
-                    <div class="trader-log" id="trader-log"></div>
+                <!-- Positions table -->
+                <div id="smart-positions" style="margin-top:8px;font-size:11px;"></div>
+                <div style="margin-top:10px;font-size:12px;color:#b388ff;border-bottom:1px solid #1a3a5c;padding-bottom:4px;">Trading Log (Recent)</div>
+                <div class="t-log" id="trader-log" style="max-height:300px;"></div>
+            </div>
+
+            <!-- RIGHT: Day Trader -->
+            <div class="t-panel" id="day-panel">
+                <h3>
+                    <span class="t-icon">&#9889;</span>
+                    <span style="color:#ffab40;">Day Trader</span>
+                    <span class="t-badge t-badge-check" id="day-badge">Checking...</span>
+                </h3>
+                <div class="t-row"><span class="t-label">Status</span><span class="t-val" id="day-status-val">--</span></div>
+                <div class="t-row"><span class="t-label">Strategy</span><span class="t-val">VWAP + EMA + Vol + RSI/MACD</span></div>
+                <div class="t-row">
+                    <span class="t-label">Max Capital</span>
+                    <span class="t-val">
+                        <input type="number" id="day-capital" value="50000" min="10000" max="500000" step="10000"
+                            style="width:100px;background:#0a192f;color:#ffab40;border:1px solid #1a3a5c;border-radius:4px;padding:3px 6px;font-family:'Consolas',monospace;font-size:11px;text-align:right;"
+                            onchange="updateDayCapital(this.value)">
+                    </span>
                 </div>
+                <div class="t-row"><span class="t-label">Watchlist</span><span class="t-val" id="day-watchlist">--</span></div>
+                <div class="t-row"><span class="t-label">Open Positions</span><span class="t-val" id="day-pos-count">0</span></div>
+                <div class="t-row"><span class="t-label">Trades Today</span><span class="t-val" id="day-trades">0</span></div>
+                <div class="t-row"><span class="t-label">Commission</span><span class="t-val" id="day-commission">$0.00</span></div>
+                <div class="t-row"><span class="t-label">Daily P&L</span><span class="t-val" id="day-pnl">--</span></div>
+                <div class="t-row"><span class="t-label">Last Signal</span><span class="t-val" id="day-last-signal">--</span></div>
+                <div class="t-row"><span class="t-label">Last Check</span><span class="t-val" id="day-last-check">--</span></div>
+                <div class="t-btns">
+                    <button onclick="traderAction('start',true)" id="day-start-btn">Start</button>
+                    <button class="t-stop" onclick="traderAction('stop','day')" id="day-stop-btn" style="display:none;">Stop</button>
+                </div>
+                <!-- Day Trader Positions table -->
+                <div id="day-positions" style="margin-top:8px;font-size:11px;"></div>
+                <div style="margin-top:10px;font-size:12px;color:#ffab40;border-bottom:1px solid #1a3a5c;padding-bottom:4px;">Trading Log (Recent)</div>
+                <div class="t-log" id="day-trader-log" style="max-height:300px;"></div>
             </div>
         </div>
         {% endif %}
@@ -713,12 +809,6 @@
             </div>
         </div>
 
-        <!-- Network Machines -->
-        <div class="section">
-            <div class="section-title">Network Machines</div>
-            <div class="machine-grid" id="machines"></div>
-        </div>
-
         <!-- Module-specific content injected here by modules -->
         <div id="module-content"></div>
 
@@ -958,72 +1048,290 @@
 
         // --- Trader functions (CashCow local or Christy remote) ---
         const TRADER_API_BASE = LOCAL_MACHINE === 'Christy' ? 'http://192.168.1.91:5000' : '';
+
+        function fmt$(v) { return v != null ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : '--'; }
+
+        async function refreshIBPortfolio() {
+            if (LOCAL_MACHINE !== 'CashCow' && LOCAL_MACHINE !== 'Christy') return;
+            try {
+                const [portRes, statusRes] = await Promise.all([
+                    fetch(TRADER_API_BASE + '/api/trader/portfolio'),
+                    fetch(TRADER_API_BASE + '/api/trader/status')
+                ]);
+                const d = await portRes.json();
+                const st = await statusRes.json();
+                const connEl = document.getElementById('ib-conn-status');
+                if (d.connected) {
+                    connEl.textContent = 'Connected'; connEl.className = 't-val pos';
+                    const a = d.account || {};
+                    const nlEl = document.getElementById('ib-net-liq');
+                    nlEl.textContent = fmt$(a.NetLiquidation); nlEl.className = 't-val pos';
+                    const cashEl = document.getElementById('ib-cash');
+                    cashEl.textContent = fmt$(a.TotalCashValue); cashEl.className = 't-val pos';
+                    const upnl = a.UnrealizedPnL || 0;
+                    const upEl = document.getElementById('ib-unrealized');
+                    upEl.textContent = fmt$(upnl); upEl.className = 't-val ' + (upnl >= 0 ? 'pos' : 'neg');
+
+                    // Build set of Smart Trader symbols from daily picks
+                    const smartSymbols = new Set();
+                    if (st.daily_picks && st.daily_picks.picks) {
+                        for (const pick of st.daily_picks.picks) {
+                            if (pick.symbol) smartSymbols.add(pick.symbol.toUpperCase());
+                        }
+                    }
+
+                    // Separate positions: smart vs day trader
+                    const allPos = d.positions || [];
+                    const smartPos = [];
+                    const dayPos = [];
+                    for (const p of allPos) {
+                        if (smartSymbols.has(p.symbol.toUpperCase())) {
+                            smartPos.push(p);
+                        } else {
+                            dayPos.push(p);
+                        }
+                    }
+
+                    // Smart Trader positions
+                    if (smartPos.length > 0) {
+                        document.getElementById('smart-pos-count').textContent = smartPos.length + ' stocks';
+                        const top = smartPos.reduce((a, b) => Math.abs(b.marketValue) > Math.abs(a.marketValue) ? b : a);
+                        const topPnl = top.unrealizedPNL >= 0 ? 'pos' : 'neg';
+                        document.getElementById('smart-top-hold').innerHTML =
+                            '<span style="color:#00e676">' + top.symbol + '</span> ' +
+                            top.quantity + 'x $' + top.marketPrice +
+                            ' <span class="' + topPnl + '">(' + (top.unrealizedPNL >= 0 ? '+' : '') + '$' + top.unrealizedPNL.toFixed(0) + ')</span>';
+
+                        let html = '<table style="width:100%;font-size:10px;border-spacing:0;"><tr style="color:#555;"><th style="text-align:left;padding:2px 4px;">Symbol</th><th>Qty</th><th>Price</th><th>P&L</th></tr>';
+                        for (const p of smartPos) {
+                            const pc = p.unrealizedPNL >= 0 ? '#00e676' : '#e94560';
+                            html += '<tr><td style="color:#00e676;padding:2px 4px;">' + p.symbol + '</td>';
+                            html += '<td style="text-align:center;">' + p.quantity + '</td>';
+                            html += '<td style="text-align:center;">$' + p.marketPrice + '</td>';
+                            html += '<td style="text-align:center;color:' + pc + ';">$' + p.unrealizedPNL.toFixed(0) + '</td></tr>';
+                        }
+                        html += '</table>';
+                        document.getElementById('smart-positions').innerHTML = html;
+                    } else {
+                        document.getElementById('smart-pos-count').textContent = '0';
+                        document.getElementById('smart-top-hold').textContent = '--';
+                        document.getElementById('smart-positions').innerHTML = '';
+                    }
+
+                    // Day Trader positions table
+                    const dayPosEl = document.getElementById('day-positions');
+                    if (dayPosEl && dayPos.length > 0) {
+                        let dhtml = '<table style="width:100%;font-size:10px;border-spacing:0;"><tr style="color:#555;"><th style="text-align:left;padding:2px 4px;">Symbol</th><th>Qty</th><th>Price</th><th>P&L</th></tr>';
+                        for (const p of dayPos) {
+                            const pc = p.unrealizedPNL >= 0 ? '#00e676' : '#e94560';
+                            dhtml += '<tr><td style="color:#ffab40;padding:2px 4px;">' + p.symbol + '</td>';
+                            dhtml += '<td style="text-align:center;">' + p.quantity + '</td>';
+                            dhtml += '<td style="text-align:center;">$' + p.marketPrice + '</td>';
+                            dhtml += '<td style="text-align:center;color:' + pc + ';">$' + p.unrealizedPNL.toFixed(0) + '</td></tr>';
+                        }
+                        dhtml += '</table>';
+                        dayPosEl.innerHTML = dhtml;
+                    } else if (dayPosEl) {
+                        dayPosEl.innerHTML = '';
+                    }
+
+                    // Commission from IB (applies to all trades)
+                    if (d.today_commission != null) {
+                        const commEl = document.getElementById('day-commission');
+                        commEl.textContent = '$' + d.today_commission.toFixed(2);
+                        commEl.className = 't-val' + (d.today_commission > 0 ? ' neg' : '');
+                    }
+                } else {
+                    connEl.textContent = 'Disconnected'; connEl.className = 't-val neg';
+                }
+            } catch(e) { console.error('Portfolio fetch failed', e); }
+        }
+
         async function refreshTrader() {
             if (LOCAL_MACHINE !== 'CashCow' && LOCAL_MACHINE !== 'Christy') return;
+            const now = new Date().toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
             try {
                 const r = await fetch(TRADER_API_BASE + '/api/trader/status');
                 const d = await r.json();
-                const badge = document.getElementById('trader-badge');
-                const mode = document.getElementById('trader-mode');
-                const startBtn = document.getElementById('trader-start-btn');
-                const stopBtn = document.getElementById('trader-stop-btn');
 
-                if (d.running) {
-                    badge.textContent = 'RUNNING';
-                    badge.className = 'trader-status running';
-                    mode.textContent = 'Mode: ' + (d.mode || 'UNKNOWN') + (d.pid ? ' (PID: ' + d.pid + ')' : '');
-                    startBtn.style.display = 'none';
-                    stopBtn.style.display = '';
-                } else {
-                    badge.textContent = 'STOPPED';
-                    badge.className = 'trader-status stopped';
-                    mode.textContent = '';
-                    startBtn.style.display = '';
-                    stopBtn.style.display = 'none';
-                }
+                // Smart Trader
+                const smartBadge = document.getElementById('smart-badge');
+                const smartStart = document.getElementById('trader-start-btn');
+                const smartStop = document.getElementById('trader-stop-btn');
+                const smartStatusVal = document.getElementById('smart-status-val');
 
-                // Daily picks
-                const picksEl = document.getElementById('trader-picks');
-                if (d.daily_picks && d.daily_picks.picks && d.daily_picks.picks.length > 0) {
-                    const picks = d.daily_picks.picks;
-                    let html = '<div class="section-title" style="font-size:13px; margin-bottom:6px">Daily Picks (' + (d.daily_picks.date || '') + ')</div>';
-                    html += '<table><tr><th>Symbol</th><th>Signal</th><th>Score</th><th>Price</th></tr>';
-                    for (const p of picks.slice(0, 10)) {
-                        const cls = (p.signal === 'BUY' || p.direction === 'long') ? 'bullish' : 'bearish';
-                        html += '<tr>';
-                        html += '<td class="' + cls + '">' + (p.symbol || p.ticker || '') + '</td>';
-                        html += '<td>' + (p.signal || p.direction || '') + '</td>';
-                        html += '<td>' + (p.score != null ? p.score : '') + '</td>';
-                        html += '<td>' + (p.price != null ? '$' + p.price : '') + '</td>';
-                        html += '</tr>';
+                if (d.smart_running) {
+                    const sp = (d.processes||[]).find(p => p.trader_type==='smart');
+                    const ms = d.market_status || 'trading';
+                    if (ms === 'trading') {
+                        smartBadge.textContent = 'Trading'; smartBadge.className = 't-badge t-badge-run';
+                    } else if (ms === 'pre-market') {
+                        smartBadge.textContent = 'Pre-Market'; smartBadge.className = 't-badge'; smartBadge.style.background = '#42a5f5'; smartBadge.style.color = '#fff';
+                    } else if (ms === 'after-hours') {
+                        smartBadge.textContent = 'After-Hours'; smartBadge.className = 't-badge'; smartBadge.style.background = '#ffa726'; smartBadge.style.color = '#000';
+                    } else {
+                        smartBadge.textContent = 'Closed'; smartBadge.className = 't-badge'; smartBadge.style.background = '#78909c'; smartBadge.style.color = '#fff';
                     }
-                    html += '</table>';
-                    picksEl.innerHTML = html;
+                    smartStatusVal.innerHTML = '<span class="pos">Running (' + (sp?sp.mode:'AUTO') + ')</span>';
+                    smartStart.style.display = 'none'; smartStop.style.display = '';
                 } else {
-                    picksEl.innerHTML = '<div style="color:#555; font-size:12px">No daily picks</div>';
+                    smartBadge.textContent = 'Stopped'; smartBadge.className = 't-badge t-badge-stop';
+                    smartBadge.style.background = ''; smartBadge.style.color = '';
+                    smartStatusVal.textContent = 'Stopped';
+                    smartStart.style.display = ''; smartStop.style.display = 'none';
+                }
+                document.getElementById('smart-last-check').textContent = now;
+
+                // Daily picks summary
+                if (d.daily_picks && d.daily_picks.picks) {
+                    const picks = d.daily_picks.picks;
+                    const buys = picks.filter(p => p.signal && p.signal.includes('BUY'));
+                    document.getElementById('smart-picks-summary').innerHTML =
+                        '<span class="pos">' + buys.length + ' BUY</span> / ' + picks.length + ' picks';
                 }
 
-                // Log lines
-                const logEl = document.getElementById('trader-log');
-                if (d.log_lines && d.log_lines.length > 0) {
-                    logEl.innerHTML = d.log_lines.slice(-30).map(l =>
-                        '<div class="line">' + l.replace(/</g,'&lt;') + '</div>'
-                    ).join('');
-                    logEl.scrollTop = logEl.scrollHeight;
+                // Day Trader
+                const dayBadge = document.getElementById('day-badge');
+                const dayStart = document.getElementById('day-start-btn');
+                const dayStop = document.getElementById('day-stop-btn');
+                const dayStatusVal = document.getElementById('day-status-val');
+
+                if (d.day_running) {
+                    const dp = (d.processes||[]).find(p => p.trader_type==='day');
+                    const ms = d.market_status || 'trading';
+                    if (ms === 'trading') {
+                        dayBadge.textContent = 'Trading'; dayBadge.className = 't-badge t-badge-run';
+                    } else if (ms === 'pre-market') {
+                        dayBadge.textContent = 'Pre-Market'; dayBadge.className = 't-badge'; dayBadge.style.background = '#42a5f5'; dayBadge.style.color = '#fff';
+                    } else if (ms === 'after-hours') {
+                        dayBadge.textContent = 'After-Hours'; dayBadge.className = 't-badge'; dayBadge.style.background = '#ffa726'; dayBadge.style.color = '#000';
+                    } else {
+                        dayBadge.textContent = 'Closed'; dayBadge.className = 't-badge'; dayBadge.style.background = '#78909c'; dayBadge.style.color = '#fff';
+                    }
+                    dayStatusVal.innerHTML = '<span class="pos">Running (' + (dp?dp.mode:'AUTO') + ')</span>';
+                    dayStart.style.display = 'none'; dayStop.style.display = '';
                 } else {
+                    dayBadge.textContent = 'Stopped'; dayBadge.className = 't-badge t-badge-stop';
+                    dayBadge.style.background = ''; dayBadge.style.color = '';
+                    dayStatusVal.textContent = 'Stopped';
+                    dayStart.style.display = ''; dayStop.style.display = 'none';
+                }
+                document.getElementById('day-last-check').textContent = now;
+
+                // Parse day log for positions, trades, PnL, signals, watchlist
+                if (d.day_log_lines && d.day_log_lines.length > 0) {
+                    const lines = d.day_log_lines;
+                    // Find last signal
+                    const sigLine = [...lines].reverse().find(l => l.includes('BUY:') || l.includes('SELL:'));
+                    if (sigLine) {
+                        const m = sigLine.match(/(\w+)\s*\|\s*.*?(HOLD|BUY|SELL)/);
+                        document.getElementById('day-last-signal').textContent = m ? m[1] + ' → ' + m[2] : sigLine.substring(0, 40);
+                    }
+                    // Watchlist from scan cycle
+                    const wlLine = [...lines].reverse().find(l => l.includes('워치리스트'));
+                    if (wlLine) {
+                        const wm = wlLine.match(/(\d+)개/);
+                        document.getElementById('day-watchlist').textContent = wm ? wm[1] + ' stocks' : '--';
+                    }
+                    // Position count: "포지션: X/Y"
+                    const posLine = [...lines].reverse().find(l => l.includes('포지션:'));
+                    if (posLine) {
+                        const pm = posLine.match(/포지션:\s*(\d+)\/(\d+)/);
+                        if (pm) {
+                            document.getElementById('day-pos-count').textContent = pm[1] + ' / ' + pm[2];
+                        }
+                    }
+                    // Trade count: "매매: N회"
+                    const tradeLine = [...lines].reverse().find(l => l.includes('매매:'));
+                    if (tradeLine) {
+                        const tm = tradeLine.match(/매매:\s*(\d+)회/);
+                        if (tm) {
+                            document.getElementById('day-trades').textContent = tm[1];
+                        }
+                    }
+                    // Daily PnL: "PnL: $X.XX" or "PnL: $-X.XX (percent%)"
+                    const pnlLine = [...lines].reverse().find(l => l.includes('PnL:'));
+                    if (pnlLine) {
+                        const pnlM = pnlLine.match(/PnL:\s*\$([-\d,.]+)\s*(\(.*?\))?/);
+                        if (pnlM) {
+                            const pnlVal = parseFloat(pnlM[1].replace(/,/g, ''));
+                            const pnlEl = document.getElementById('day-pnl');
+                            const pctStr = pnlM[2] ? ' ' + pnlM[2] : '';
+                            pnlEl.textContent = '$' + pnlVal.toFixed(2) + pctStr;
+                            pnlEl.className = 't-val ' + (pnlVal >= 0 ? 'pos' : 'neg');
+                        }
+                    }
+                }
+
+                // Smart Trader log
+                const logEl = document.getElementById('trader-log');
+                if (logEl && d.log_lines && d.log_lines.length > 0) {
+                    logEl.innerHTML = d.log_lines.slice(-30).map(l => {
+                        let cls = '';
+                        if (l.includes('BUY') && !l.includes('HOLD')) cls = ' style="color:#00e676"';
+                        else if (l.includes('SELL')) cls = ' style="color:#e94560"';
+                        else if (l.includes('HOLD') && l.includes('앙상블')) cls = ' style="color:#ffc107"';
+                        return '<div class="line"' + cls + '>' + l.replace(/</g,'&lt;') + '</div>';
+                    }).join('');
+                    logEl.scrollTop = logEl.scrollHeight;
+                } else if (logEl) {
                     logEl.innerHTML = '<div class="line" style="color:#555">No log data</div>';
                 }
+
+                // Day Trader log
+                const dayLogEl = document.getElementById('day-trader-log');
+                if (dayLogEl && d.day_log_lines && d.day_log_lines.length > 0) {
+                    dayLogEl.innerHTML = d.day_log_lines.slice(-30).map(l => {
+                        let cls = '';
+                        if (l.includes('BUY') && !l.includes('HOLD')) cls = ' style="color:#00e676"';
+                        else if (l.includes('SELL')) cls = ' style="color:#e94560"';
+                        else if (l.includes('HOLD') && l.includes('합의')) cls = ' style="color:#ffc107"';
+                        return '<div class="line"' + cls + '>' + l.replace(/</g,'&lt;') + '</div>';
+                    }).join('');
+                    dayLogEl.scrollTop = dayLogEl.scrollHeight;
+                } else if (dayLogEl) {
+                    dayLogEl.innerHTML = '<div class="line" style="color:#555">No day trader log</div>';
+                }
+
             } catch(e) { console.error('Trader fetch failed', e); }
         }
 
-        async function traderAction(action) {
-            if (action === 'stop' && !confirm('Stop Smart Trader?')) return;
+        async function updateDayCapital(value) {
+            const capital = parseInt(value);
+            if (isNaN(capital) || capital < 10000) return;
             try {
-                const r = await fetch(TRADER_API_BASE + '/api/trader/' + action, { method: 'POST',
+                await fetch(TRADER_API_BASE + '/api/trader/config', {
+                    method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({auto: true})
+                    body: JSON.stringify({day_capital: capital})
+                });
+                document.getElementById('day-capital').style.borderColor = '#00e676';
+                setTimeout(() => { document.getElementById('day-capital').style.borderColor = '#1a3a5c'; }, 1500);
+            } catch(e) { console.error('Capital update failed', e); }
+        }
+
+        async function traderAction(action, dayMode) {
+            if (action === 'stop') {
+                const label = dayMode === 'day' ? 'Day Trader' : dayMode === 'smart' ? 'Smart Trader' : 'Trader';
+                if (!confirm('Stop ' + label + '?')) return;
+                try {
+                    await fetch(TRADER_API_BASE + '/api/trader/stop', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({type: dayMode || 'all'})
+                    });
+                    setTimeout(refreshTrader, 2000);
+                } catch(e) { alert('Error: ' + e.message); }
+                return;
+            }
+            try {
+                const r = await fetch(TRADER_API_BASE + '/api/trader/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({auto: true, day: dayMode === true})
                 });
                 const d = await r.json();
+                if (d.error) alert(d.error);
                 setTimeout(refreshTrader, 2000);
             } catch(e) { alert('Error: ' + e.message); }
         }
@@ -1935,7 +2243,16 @@
         setInterval(refreshResources, 5000);
         setInterval(refreshMachines, 15000);
         setInterval(refreshLogs, 10000);
-        if (LOCAL_MACHINE === 'CashCow' || LOCAL_MACHINE === 'Christy') setInterval(refreshTrader, 15000);
+        if (LOCAL_MACHINE === 'CashCow' || LOCAL_MACHINE === 'Christy') {
+            setInterval(refreshTrader, 15000);
+            refreshIBPortfolio();
+            setInterval(refreshIBPortfolio, 30000);
+            // Load day trader config (saved capital)
+            fetch(TRADER_API_BASE + '/api/trader/config')
+                .then(r => r.json())
+                .then(d => { if (d.day_capital) document.getElementById('day-capital').value = d.day_capital; })
+                .catch(() => {});
+        }
         if (LOCAL_MACHINE === 'Christy') setInterval(refreshXbee, 5000);
         if (LOCAL_MACHINE === 'Dreamer' || LOCAL_MACHINE === 'Gram') setInterval(refreshDreamerXbee, 10000);
         if (LOCAL_MACHINE === 'R1') {

@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Today's Trades - AJ Robotics</title>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
+
+        .topbar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 24px; background: #16213e; border-bottom: 1px solid #0f3460;
+        }
+        .topbar h1 { color: #00e5ff; font-size: 20px; }
+        .topbar a { color: #00e5ff; text-decoration: none; font-size: 14px; }
+        .topbar a:hover { text-decoration: underline; }
+        .topbar .date-label { color: #8892b0; font-size: 14px; }
+
+        .content { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+        .section-header {
+            display: flex; align-items: center; gap: 12px;
+            margin: 24px 0 12px 0; padding-bottom: 8px;
+            border-bottom: 2px solid #0f3460;
+        }
+        .section-header h2 { color: #e0e0e0; font-size: 18px; }
+        .section-header .badge {
+            font-size: 11px; padding: 3px 10px; border-radius: 10px; font-weight: bold;
+        }
+        .badge-day { background: #ff6d0033; color: #ffab40; border: 1px solid #ff6d00; }
+        .badge-smart { background: #7c4dff33; color: #b388ff; border: 1px solid #7c4dff; }
+
+        .no-trades {
+            color: #8892b0; font-style: italic; padding: 30px;
+            text-align: center; background: #16213e; border-radius: 8px;
+            border: 1px dashed #0f3460; margin: 8px 0;
+        }
+
+        .chart-card {
+            background: #16213e; border: 1px solid #0f3460; border-radius: 8px;
+            margin-bottom: 16px; overflow: hidden;
+        }
+        .chart-card-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 16px; background: #1a2744; border-bottom: 1px solid #0f3460;
+        }
+        .chart-card-header .symbol { color: #00e5ff; font-size: 16px; font-weight: bold; }
+        .chart-card-header .trade-count { color: #8892b0; font-size: 13px; }
+        .chart-container { width: 100%; height: 500px; position: relative; }
+
+        /* Trade popup */
+        .trade-popup {
+            display: none; position: fixed; z-index: 1000;
+            background: #1a2744; border: 1px solid #00e5ff; border-radius: 8px;
+            padding: 16px; min-width: 320px; max-width: 420px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+        .trade-popup.visible { display: block; }
+        .trade-popup .popup-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #0f3460;
+        }
+        .trade-popup .popup-title { font-weight: bold; font-size: 15px; }
+        .trade-popup .popup-close {
+            cursor: pointer; color: #8892b0; font-size: 18px; line-height: 1;
+            background: none; border: none; padding: 2px 6px;
+        }
+        .trade-popup .popup-close:hover { color: #e0e0e0; }
+        .popup-buy { color: #00e676; }
+        .popup-sell { color: #e94560; }
+
+        .trade-popup .detail-row {
+            display: flex; justify-content: space-between; padding: 3px 0;
+            font-size: 13px;
+        }
+        .detail-row .label { color: #8892b0; }
+        .detail-row .value { color: #e0e0e0; }
+
+        .signal-table {
+            width: 100%; margin-top: 10px; border-collapse: collapse; font-size: 12px;
+        }
+        .signal-table th {
+            text-align: left; color: #8892b0; padding: 4px 6px;
+            border-bottom: 1px solid #0f3460; font-weight: normal;
+        }
+        .signal-table td { padding: 4px 6px; }
+        .signal-table .sig-buy { color: #00e676; }
+        .signal-table .sig-sell { color: #e94560; }
+        .signal-table .sig-hold { color: #ffc107; }
+
+        .loading {
+            text-align: center; padding: 60px; color: #8892b0; font-size: 16px;
+        }
+        .loading .spinner {
+            display: inline-block; width: 24px; height: 24px;
+            border: 3px solid #0f3460; border-top-color: #00e5ff;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+            margin-right: 10px; vertical-align: middle;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .trade-summary {
+            display: flex; gap: 24px; flex-wrap: wrap; margin: 8px 0 4px 0;
+        }
+        .trade-summary .stat {
+            font-size: 13px; color: #8892b0;
+        }
+        .trade-summary .stat span { color: #e0e0e0; font-weight: bold; }
+
+        /* Trade table */
+        #dayTradeTable, #smartTradeTable {
+            background: #16213e; border: 1px solid #0f3460; border-radius: 8px;
+            padding: 8px 12px; margin-top: 12px; overflow-x: auto;
+        }
+        #dayTradeTable table, #smartTradeTable table { margin: 0; }
+        #dayTradeTable tr:hover, #smartTradeTable tr:hover { background: #1a2744; }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+    <div style="display:flex; align-items:center; gap:16px;">
+        <a href="/">Home</a>
+        <a href="/trader">Trader</a>
+        <a href="/politician">Politician</a>
+        <h1 style="display:inline">Trades</h1>
+    </div>
+    <div style="display:flex; align-items:center; gap:12px;">
+        <select id="dateSelect" onchange="loadTradesForDate(this.value)"
+            style="background:#0d2137;color:#00e5ff;border:1px solid #0f3460;border-radius:6px;padding:5px 10px;font-size:13px;cursor:pointer;">
+            <option value="">Today</option>
+        </select>
+        <div class="date-label" id="dateLabel"></div>
+    </div>
+</div>
+
+<div class="content">
+    <div id="loadingMsg" class="loading">
+        <span class="spinner"></span> Loading today's trades...
+    </div>
+
+    <!-- Day Trader Section -->
+    <div id="daySection" style="display:none">
+        <div class="section-header">
+            <h2>Day Trader</h2>
+            <span class="badge badge-day">INTRADAY</span>
+        </div>
+        <div class="trade-summary" id="daySummary"></div>
+        <div id="dayCharts"></div>
+        <div id="dayTradeTable"></div>
+    </div>
+
+    <!-- Smart Trader Section -->
+    <div id="smartSection" style="display:none">
+        <div class="section-header">
+            <h2>Smart Trader</h2>
+            <span class="badge badge-smart">SWING</span>
+        </div>
+        <div class="trade-summary" id="smartSummary"></div>
+        <div id="smartCharts"></div>
+        <div id="smartTradeTable"></div>
+    </div>
+</div>
+
+<!-- Trade detail popup -->
+<div class="trade-popup" id="tradePopup">
+    <div class="popup-header">
+        <span class="popup-title" id="popupTitle"></span>
+        <button class="popup-close" onclick="closePopup()">&times;</button>
+    </div>
+    <div id="popupContent"></div>
+</div>
+
+<script>
+// ── State ──
+let allTradeData = {};
+const chartInstances = {};
+
+// ── Init ──
+document.addEventListener('DOMContentLoaded', () => {
+    const now = new Date();
+    document.getElementById('dateLabel').textContent =
+        now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    loadTrades();
+    loadHistory();
+});
+
+async function loadHistory() {
+    try {
+        const r = await fetch('/api/trader/history');
+        const d = await r.json();
+        const sel = document.getElementById('dateSelect');
+        (d.dates || []).forEach(dt => {
+            const opt = document.createElement('option');
+            opt.value = dt; opt.textContent = dt;
+            sel.appendChild(opt);
+        });
+    } catch(e) {}
+}
+
+function loadTradesForDate(dateStr) {
+    const url = dateStr ? `/api/trader/today?date=${dateStr}` : '/api/trader/today';
+    document.getElementById('dateLabel').textContent = dateStr || new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    document.getElementById('loadingMsg').style.display = '';
+    document.getElementById('daySection').style.display = 'none';
+    document.getElementById('smartSection').style.display = 'none';
+    document.getElementById('dayCharts').innerHTML = '';
+    document.getElementById('smartCharts').innerHTML = '';
+    loadTrades(url);
+}
+
+// Close popup on outside click
+document.addEventListener('click', (e) => {
+    const popup = document.getElementById('tradePopup');
+    if (popup.classList.contains('visible') && !popup.contains(e.target)) {
+        closePopup();
+    }
+});
+
+// ── Load Trades ──
+async function loadTrades(url) {
+    url = url || '/api/trader/today';
+    try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+        allTradeData = data;
+
+        document.getElementById('loadingMsg').style.display = 'none';
+
+        renderSection('day', data.day_trades, 'daySection', 'dayCharts', 'daySummary');
+        renderSection('smart', data.smart_trades, 'smartSection', 'smartCharts', 'smartSummary');
+
+        // Show sections even if empty
+        document.getElementById('daySection').style.display = 'block';
+        document.getElementById('smartSection').style.display = 'block';
+
+    } catch (err) {
+        document.getElementById('loadingMsg').innerHTML =
+            '<span style="color:#e94560">Failed to load trades: ' + err.message + '</span>';
+    }
+}
+
+// ── Render Section — single unified chart with all symbols ──
+function renderSection(traderType, trades, sectionId, chartsId, summaryId) {
+    const chartsDiv = document.getElementById(chartsId);
+    const summaryDiv = document.getElementById(summaryId);
+
+    if (!trades || trades.length === 0) {
+        chartsDiv.innerHTML = '<div class="no-trades">No trades executed today</div>';
+        summaryDiv.innerHTML = '';
+        return;
+    }
+
+    // Summary stats
+    const buys = trades.filter(t => t.side === 'BUY').length;
+    const sells = trades.filter(t => t.side === 'SELL').length;
+    const symbols = [...new Set(trades.map(t => t.symbol))];
+    summaryDiv.innerHTML =
+        `<div class="stat">Symbols: <span>${symbols.join(', ')}</span></div>` +
+        `<div class="stat">Buys: <span style="color:#00e676">${buys}</span></div>` +
+        `<div class="stat">Sells: <span style="color:#e94560">${sells}</span></div>` +
+        `<div class="stat">Total: <span>${trades.length}</span></div>`;
+
+    // Compute simple P&L for sells (match with most recent buy of same symbol)
+    const buyPrices = {};  // symbol -> last buy price (from IB intraday data approximation)
+    const sorted = [...trades].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+
+    // Render trade table below chart
+    const tableId = traderType === 'day' ? 'dayTradeTable' : 'smartTradeTable';
+    const tableDiv = document.getElementById(tableId);
+    if (tableDiv) {
+        let thtml = `<table id="tradeTable_${traderType}" style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px;">
+            <thead><tr style="border-bottom:1px solid #0f3460;color:#8892b0;">
+                <th style="text-align:left;padding:6px;">Time (PT)</th>
+                <th style="text-align:left;padding:6px;">Symbol</th>
+                <th style="text-align:center;padding:6px;">Side</th>
+                <th style="text-align:right;padding:6px;">Qty</th>
+                <th style="text-align:right;padding:6px;">Score</th>
+                <th style="text-align:right;padding:6px;">P&L</th>
+            </tr></thead><tbody>`;
+        sorted.forEach((t, idx) => {
+            const isBuy = t.side === 'BUY';
+            const sideColor = isBuy ? '#00e676' : '#e94560';
+            const arrow = isBuy ? '&#9650;' : '&#9660;';
+            const score = t.consensus_score != null ? (t.consensus_score >= 0 ? '+' : '') + t.consensus_score.toFixed(3) : '--';
+            const timeStr = t.time && t.time !== 'unknown' ? t.time : '--';
+
+            // Track buy prices, compute P&L for sells
+            let pnlStr = '';
+            if (isBuy && t.price) {
+                buyPrices[t.symbol] = parseFloat(t.price);
+            } else if (!isBuy && buyPrices[t.symbol] && t.price) {
+                const sellPrice = parseFloat(t.price);
+                const buyPrice = buyPrices[t.symbol];
+                const pnl = (sellPrice - buyPrice) * t.quantity;
+                const pnlPct = ((sellPrice - buyPrice) / buyPrice * 100).toFixed(1);
+                const pnlColor = pnl >= 0 ? '#00e676' : '#e94560';
+                pnlStr = `<span style="color:${pnlColor};font-weight:bold;">$${pnl >= 0 ? '+' : ''}${pnl.toFixed(0)} (${pnlPct}%)</span>`;
+            }
+
+            thtml += `<tr data-trade-idx="${idx}" data-trader="${traderType}" data-symbol="${t.symbol}" data-time="${t.time || ''}"
+                style="border-bottom:1px solid #0a192f;cursor:pointer;transition:background 0.2s;"
+                onmouseenter="this.style.background='#1a2744'" onmouseleave="this.style.background=''"
+                onclick="highlightTrade('${traderType}', '${t.symbol}', '${t.time || ''}', ${idx})">
+                <td style="padding:5px 6px;color:#00e5ff;">${timeStr}</td>
+                <td style="padding:5px 6px;color:${symbolColor(t.symbol)};font-weight:bold;">${t.symbol}</td>
+                <td style="padding:5px 6px;text-align:center;color:${sideColor};font-weight:bold;">${arrow} ${t.side}</td>
+                <td style="padding:5px 6px;text-align:right;">${t.quantity}</td>
+                <td style="padding:5px 6px;text-align:right;color:${sideColor};">${score}</td>
+                <td style="padding:5px 6px;text-align:right;">${pnlStr}</td>
+            </tr>`;
+        });
+        thtml += '</tbody></table>';
+        tableDiv.innerHTML = thtml;
+    }
+
+    // Create one unified chart card
+    chartsDiv.innerHTML = '';
+    const card = document.createElement('div');
+    card.className = 'chart-card';
+    const symbolLabels = symbols.map(s => `<span style="color:${symbolColor(s)}">${s}</span>`).join(' &bull; ');
+    card.innerHTML =
+        `<div class="chart-card-header">
+            <span class="symbol">${symbolLabels}</span>
+            <span class="trade-count">
+                <span style="color:#00e676">${buys} BUY</span> /
+                <span style="color:#e94560">${sells} SELL</span>
+            </span>
+        </div>
+        <div class="chart-container" id="chart_${traderType}_unified"></div>`;
+    chartsDiv.appendChild(card);
+
+    // Fetch all symbols and render unified chart
+    fetchUnifiedChart(traderType, symbols, trades);
+}
+
+// Consistent colors per symbol
+const SYMBOL_COLORS = ['#00e5ff','#00e676','#ffab40','#e94560','#b388ff','#ff6d00','#64ffda','#f48fb1','#80cbc4','#ffd54f'];
+function symbolColor(sym) {
+    let hash = 0;
+    for (let i = 0; i < sym.length; i++) hash = sym.charCodeAt(i) + ((hash << 5) - hash);
+    return SYMBOL_COLORS[Math.abs(hash) % SYMBOL_COLORS.length];
+}
+
+async function fetchUnifiedChart(traderType, symbols, trades) {
+    const chartId = `chart_${traderType}_unified`;
+    const chartEl = document.getElementById(chartId);
+    // IB returns naive ET times. Convert to PT for display.
+    // Lightweight Charts treats timestamps as UTC, so we need to shift.
+    // ET naive string → treat as ET → display as PT = subtract 3 hours
+    // But Date() parses naive strings as LOCAL time (PT on this browser).
+    // So "04:00:00" is parsed as 4AM PT already. No offset needed for bars.
+    // Trade times from logs are also PT. So NO offset.
+    const PT_OFFSET = 0;
+    // ET to PT shift for IB bars (IB sends ET, browser parses as PT, so shift -3h)
+    const ET_TO_PT = -3 * 3600;
+
+    const chart = LightweightCharts.createChart(chartEl, {
+        width: chartEl.clientWidth,
+        height: 500,
+        layout: { background: { color: '#16213e' }, textColor: '#8892b0' },
+        grid: { vertLines: { color: '#1a2744' }, horzLines: { color: '#1a2744' } },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#0f3460' },
+        rightPriceScale: { borderColor: '#0f3460' },
+    });
+    new ResizeObserver(() => chart.applyOptions({ width: chartEl.clientWidth })).observe(chartEl);
+
+    const allMarkers = [];
+
+    // Fetch and add each symbol as a separate line series
+    for (const symbol of symbols) {
+        try {
+            const resp = await fetch(`/api/trader/intraday/${symbol}`);
+            const rawData = await resp.json();
+            const bars = Array.isArray(rawData) ? rawData : (rawData.bars || []);
+            if (!bars || bars.length === 0) continue;
+
+            const color = symbolColor(symbol);
+            const lineSeries = chart.addSeries(LightweightCharts.LineSeries, {
+                color: color,
+                lineWidth: 2,
+                title: symbol,
+                priceScaleId: symbol,  // separate price scale per symbol
+            });
+
+            // Hide extra price scales (only show the first)
+            if (symbols.indexOf(symbol) > 0) {
+                chart.priceScale(symbol).applyOptions({ visible: false });
+            }
+
+            // IB bars are naive ET; browser parses as PT. Shift -3h to correct.
+            const lineData = bars.map(bar => ({
+                time: Math.floor(new Date(bar.time).getTime() / 1000) + ET_TO_PT,
+                value: bar.close,
+            }));
+            lineSeries.setData(lineData);
+
+            // Collect and plot trade markers as colored dots on the line
+            const symTrades = trades.filter(t => t.symbol === symbol);
+            const buyDots = [];
+            const sellDots = [];
+
+            symTrades.forEach((trade, idx) => {
+                let tradeTs = null;
+                if (trade.time && trade.time !== 'unknown') {
+                    let d = new Date(trade.time);
+                    if (isNaN(d.getTime())) {
+                        const today = new Date();
+                        d = new Date(today.toISOString().split('T')[0] + 'T' + trade.time);
+                    }
+                    // Trade times from log are already PT — no offset needed
+                    if (!isNaN(d.getTime())) tradeTs = Math.floor(d.getTime() / 1000);
+                }
+                if (!tradeTs) return;
+
+                // Snap to nearest bar and get price
+                let bestTime = lineData[0]?.time;
+                let bestPrice = lineData[0]?.value;
+                let bestDist = Infinity;
+                for (const pt of lineData) {
+                    const dist = Math.abs(pt.time - tradeTs);
+                    if (dist < bestDist) { bestDist = dist; bestTime = pt.time; bestPrice = pt.value; }
+                }
+
+                const isBuy = trade.side === 'BUY';
+                const dotEntry = { time: bestTime, value: bestPrice };
+                if (isBuy) buyDots.push(dotEntry);
+                else sellDots.push(dotEntry);
+
+                allMarkers.push({
+                    time: bestTime,
+                    price: bestPrice,
+                    symbol: symbol,
+                    _trade: trade,
+                });
+            });
+
+            // BUY dots — green circles on line
+            if (buyDots.length > 0) {
+                const buySeries = chart.addSeries(LightweightCharts.LineSeries, {
+                    color: 'rgba(0,0,0,0)',
+                    lineWidth: 0,
+                    pointMarkersVisible: true,
+                    pointMarkersRadius: 6,
+                    priceScaleId: symbol,
+                    lastValueVisible: false,
+                    priceLineVisible: false,
+                    crosshairMarkerVisible: false,
+                    title: '',
+                });
+                // Add invisible line with visible point markers
+                buySeries.setData(buyDots);
+                // Override marker appearance via CSS trick: use series markers
+                const buyMarkers = buyDots.map((d, i) => ({
+                    time: d.time,
+                    position: 'belowBar',
+                    color: '#00e676',
+                    shape: 'arrowUp',
+                    text: 'B',
+                    size: 2,
+                }));
+                try {
+                    if (typeof LightweightCharts.createSeriesMarkers === 'function') {
+                        LightweightCharts.createSeriesMarkers(buySeries, buyMarkers);
+                    } else if (buySeries.setMarkers) {
+                        buySeries.setMarkers(buyMarkers);
+                    }
+                } catch(e) { console.warn('Marker API:', e); }
+            }
+
+            // SELL dots — red circles on line
+            if (sellDots.length > 0) {
+                const sellSeries = chart.addSeries(LightweightCharts.LineSeries, {
+                    color: 'rgba(0,0,0,0)',
+                    lineWidth: 0,
+                    pointMarkersVisible: true,
+                    pointMarkersRadius: 6,
+                    priceScaleId: symbol,
+                    lastValueVisible: false,
+                    priceLineVisible: false,
+                    crosshairMarkerVisible: false,
+                    title: '',
+                });
+                sellSeries.setData(sellDots);
+                const sellMarkers = sellDots.map((d, i) => ({
+                    time: d.time,
+                    position: 'aboveBar',
+                    color: '#e94560',
+                    shape: 'arrowDown',
+                    text: 'S',
+                    size: 2,
+                }));
+                try {
+                    if (typeof LightweightCharts.createSeriesMarkers === 'function') {
+                        LightweightCharts.createSeriesMarkers(sellSeries, sellMarkers);
+                    } else if (sellSeries.setMarkers) {
+                        sellSeries.setMarkers(sellMarkers);
+                    }
+                } catch(e) { console.warn('Marker API:', e); }
+            }
+        } catch (err) {
+            console.error(`Failed to load ${symbol}:`, err);
+        }
+    }
+
+    // Click handler
+    chart.subscribeClick((param) => {
+        if (!param.time) return;
+        const clicked = allMarkers.filter(m => m.time === param.time);
+        if (clicked.length > 0 && clicked[0]._trade) {
+            showPopup(clicked[0]._trade, param.point);
+        }
+    });
+
+    chart.timeScale().fitContent();
+}
+
+// ── (Legacy) Fetch & Render individual chart — kept for reference ──
+async function fetchAndRenderChart(traderType, symbol, trades) {
+    const chartId = `chart_${traderType}_${symbol}`;
+    const chartEl = document.getElementById(chartId);
+
+    try {
+        const resp = await fetch(`/api/trader/intraday/${symbol}`);
+        const rawData = await resp.json();
+
+        // Handle error responses or empty arrays
+        const bars = Array.isArray(rawData) ? rawData : (rawData.bars || []);
+        if (!bars || bars.length === 0) {
+            const errMsg = rawData.error ? `IB error: ${rawData.error}` : 'No intraday data available from IB';
+            chartEl.innerHTML = `<div class="no-trades">${errMsg}</div>`;
+            return;
+        }
+
+        // Create lightweight chart
+        const chart = LightweightCharts.createChart(chartEl, {
+            width: chartEl.clientWidth,
+            height: 350,
+            layout: {
+                background: { color: '#16213e' },
+                textColor: '#8892b0',
+            },
+            grid: {
+                vertLines: { color: '#1a2744' },
+                horzLines: { color: '#1a2744' },
+            },
+            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: false,
+                borderColor: '#0f3460',
+            },
+            rightPriceScale: { borderColor: '#0f3460' },
+        });
+
+        // Responsive resize
+        const resizeObserver = new ResizeObserver(() => {
+            chart.applyOptions({ width: chartEl.clientWidth });
+        });
+        resizeObserver.observe(chartEl);
+
+        // Candlestick series (v5 API)
+        const candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+            upColor: '#00e676',
+            downColor: '#e94560',
+            borderUpColor: '#00e676',
+            borderDownColor: '#e94560',
+            wickUpColor: '#00e676',
+            wickDownColor: '#e94560',
+        });
+
+        // Convert bar times to Pacific Time for display
+        // Lightweight Charts treats timestamps as UTC, so we shift to PT
+        // IB returns naive ET times. Convert to PT for display.
+    // Lightweight Charts treats timestamps as UTC, so we need to shift.
+    // ET naive string → treat as ET → display as PT = subtract 3 hours
+    // But Date() parses naive strings as LOCAL time (PT on this browser).
+    // So "04:00:00" is parsed as 4AM PT already. No offset needed for bars.
+    // Trade times from logs are also PT. So NO offset.
+    const PT_OFFSET = 0;
+    // ET to PT shift for IB bars (IB sends ET, browser parses as PT, so shift -3h)
+    const ET_TO_PT = -3 * 3600; // PDT (UTC-7)
+        const chartData = bars.map(bar => {
+            const d = new Date(bar.time);
+            const utcSec = Math.floor(d.getTime() / 1000);
+            return {
+                time: utcSec + ET_TO_PT,
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close,
+            };
+        });
+
+        candleSeries.setData(chartData);
+
+        // Volume series (v5 API)
+        const volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
+            priceFormat: { type: 'volume' },
+            priceScaleId: 'vol',
+        });
+        chart.priceScale('vol').applyOptions({
+            scaleMargins: { top: 0.85, bottom: 0 },
+        });
+        const volumeData = bars.map(bar => {
+            const d = new Date(bar.time);
+            return {
+                time: Math.floor(d.getTime() / 1000) + ET_TO_PT,
+                value: bar.volume,
+                color: bar.close >= bar.open ? '#00e67644' : '#e9456044',
+            };
+        });
+        volumeSeries.setData(volumeData);
+
+        // Add trade markers
+        const markers = [];
+        trades.forEach((trade, idx) => {
+            // Parse trade time
+            let tradeTs = null;
+            if (trade.time && trade.time !== 'unknown') {
+                // Try full datetime
+                let d = new Date(trade.time);
+                if (isNaN(d.getTime())) {
+                    // Try just time (HH:MM:SS) with today's date
+                    const today = new Date();
+                    d = new Date(today.toISOString().split('T')[0] + 'T' + trade.time);
+                }
+                if (!isNaN(d.getTime())) {
+                    tradeTs = Math.floor(d.getTime() / 1000);
+                }
+            }
+
+            if (!tradeTs) {
+                // If we can't parse time, skip marker
+                return;
+            }
+
+            // Snap to nearest bar time
+            let bestBarTime = chartData[0]?.time;
+            let bestDist = Infinity;
+            for (const bar of chartData) {
+                const dist = Math.abs(bar.time - tradeTs);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestBarTime = bar.time;
+                }
+            }
+
+            const isBuy = trade.side === 'BUY';
+            markers.push({
+                time: bestBarTime,
+                position: isBuy ? 'belowBar' : 'aboveBar',
+                color: isBuy ? '#00e676' : '#e94560',
+                shape: isBuy ? 'arrowUp' : 'arrowDown',
+                text: `${trade.side} x${trade.quantity}`,
+                id: `${traderType}_${symbol}_${idx}`,
+            });
+        });
+
+        // Sort markers by time
+        markers.sort((a, b) => a.time - b.time);
+        // v5 API: createSeriesMarkers instead of setMarkers
+        if (typeof LightweightCharts.createSeriesMarkers === 'function') {
+            LightweightCharts.createSeriesMarkers(candleSeries, markers);
+        } else {
+            candleSeries.setMarkers(markers);
+        }
+
+        // Store reference for click handling
+        chartInstances[chartId] = { chart, candleSeries, trades, markers };
+
+        // Click handler for markers
+        chart.subscribeClick((param) => {
+            if (!param.time) return;
+
+            // Find marker at this time
+            const clickedMarkers = markers.filter(m => m.time === param.time);
+            if (clickedMarkers.length === 0) return;
+
+            // Get the trade data
+            const marker = clickedMarkers[0];
+            const tradeIdx = parseInt(marker.id.split('_').pop());
+            const trade = trades[tradeIdx];
+
+            if (trade) {
+                showPopup(trade, param.point);
+            }
+        });
+
+        chart.timeScale().fitContent();
+
+    } catch (err) {
+        chartEl.innerHTML =
+            `<div class="no-trades">Error loading chart: ${err.message}</div>`;
+    }
+}
+
+// ── Popup ──
+function showPopup(trade, point) {
+    const popup = document.getElementById('tradePopup');
+    const title = document.getElementById('popupTitle');
+    const content = document.getElementById('popupContent');
+
+    const isBuy = trade.side === 'BUY';
+    title.innerHTML = `<span class="${isBuy ? 'popup-buy' : 'popup-sell'}">
+        ${isBuy ? '&#9650;' : '&#9660;'} ${trade.side}</span> ${trade.symbol}`;
+
+    let html = '';
+
+    // Trade details
+    html += `<div class="detail-row"><span class="label">Time</span><span class="value">${trade.time || 'N/A'}</span></div>`;
+    html += `<div class="detail-row"><span class="label">Quantity</span><span class="value">${trade.quantity} shares</span></div>`;
+    html += `<div class="detail-row"><span class="label">Mode</span><span class="value">${trade.mode || 'AUTO'}</span></div>`;
+    if (trade.order_id) {
+        html += `<div class="detail-row"><span class="label">Order ID</span><span class="value">${trade.order_id}</span></div>`;
+    }
+    if (trade.consensus_score !== null && trade.consensus_score !== undefined) {
+        const score = trade.consensus_score;
+        const scoreColor = score > 0 ? '#00e676' : score < 0 ? '#e94560' : '#ffc107';
+        html += `<div class="detail-row"><span class="label">Consensus</span>` +
+                `<span class="value" style="color:${scoreColor};font-weight:bold">${score >= 0 ? '+' : ''}${score.toFixed(3)}</span></div>`;
+    }
+
+    // Strategy signals table
+    if (trade.signals && trade.signals.length > 0) {
+        html += `<table class="signal-table">
+            <thead><tr><th>Strategy</th><th>Signal</th><th>Conf</th><th>Reason</th></tr></thead>
+            <tbody>`;
+        trade.signals.forEach(sig => {
+            const sigClass = sig.signal === 'BUY' ? 'sig-buy' : sig.signal === 'SELL' ? 'sig-sell' : 'sig-hold';
+            html += `<tr>
+                <td>${sig.strategy}</td>
+                <td class="${sigClass}">${sig.signal}</td>
+                <td>${sig.confidence}%</td>
+                <td style="color:#8892b0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                    title="${sig.reason}">${sig.reason}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+    } else {
+        html += '<div style="color:#8892b0;font-size:12px;margin-top:8px">No strategy signals captured</div>';
+    }
+
+    content.innerHTML = html;
+
+    // Position popup near click (but keep on screen)
+    const popupRect = { width: 380, height: 300 };
+    let left = (point?.x || 400) + 20;
+    let top = (point?.y || 200) + 80;
+
+    if (left + popupRect.width > window.innerWidth - 20) {
+        left = window.innerWidth - popupRect.width - 20;
+    }
+    if (top + popupRect.height > window.innerHeight - 20) {
+        top = window.innerHeight - popupRect.height - 20;
+    }
+
+    popup.style.left = Math.max(10, left) + 'px';
+    popup.style.top = Math.max(10, top) + 'px';
+    popup.classList.add('visible');
+}
+
+function closePopup() {
+    document.getElementById('tradePopup').classList.remove('visible');
+}
+
+// ── Highlight trade on chart when table row clicked ──
+let highlightOverlay = null;
+function highlightTrade(traderType, symbol, tradeTime, idx) {
+    const chartId = `chart_${traderType}_unified`;
+    const chartEl = document.getElementById(chartId);
+    if (!chartEl) return;
+
+    // Remove previous highlight
+    if (highlightOverlay) {
+        highlightOverlay.remove();
+        highlightOverlay = null;
+    }
+
+    // Find the marker data for this trade
+    const marker = allMarkers.find(m => m.symbol === symbol && m._trade && m._trade.time === tradeTime);
+    if (!marker) return;
+
+    // Create pulsing circle overlay
+    const circle = document.createElement('div');
+    circle.className = 'highlight-circle';
+    circle.innerHTML = `<div class="hc-label">${marker._trade.side} ${symbol}</div>`;
+    chartEl.style.position = 'relative';
+    chartEl.appendChild(circle);
+    highlightOverlay = circle;
+
+    // Scroll chart to that time
+    const inst = chartInstances[chartId];
+    if (inst && inst.chart) {
+        inst.chart.timeScale().scrollToPosition(-2, true);
+    }
+
+    // Pulse animation then remove after 3 seconds
+    setTimeout(() => {
+        if (highlightOverlay === circle) {
+            circle.remove();
+            highlightOverlay = null;
+        }
+    }, 4000);
+
+    // Highlight table row
+    document.querySelectorAll(`#tradeTable_${traderType} tr`).forEach(r => r.style.background = '');
+    const row = document.querySelector(`#tradeTable_${traderType} tr[data-trade-idx="${idx}"]`);
+    if (row) row.style.background = '#1a3a5c';
+
+    // Scroll chart into view
+    chartEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+</script>
+<style>
+.highlight-circle {
+    position: absolute; top: 50%; left: 50%;
+    width: 40px; height: 40px; border-radius: 50%;
+    border: 3px solid #00e5ff; background: rgba(0, 229, 255, 0.15);
+    transform: translate(-50%, -50%);
+    animation: pulse-ring 1s ease-out infinite;
+    pointer-events: none; z-index: 10;
+}
+.highlight-circle .hc-label {
+    position: absolute; top: -24px; left: 50%; transform: translateX(-50%);
+    white-space: nowrap; font-size: 11px; color: #00e5ff; font-weight: bold;
+    background: #0d2137; padding: 2px 8px; border-radius: 4px;
+}
+@keyframes pulse-ring {
+    0% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.4); }
+    70% { box-shadow: 0 0 0 20px rgba(0, 229, 255, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0); }
+}
+</style>
+</body>
+</html>

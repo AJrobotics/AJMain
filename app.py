@@ -5,6 +5,7 @@ Web-based GUI for robotics control, smart trading, and remote deployment.
 
 import json
 import os
+import sys
 
 # Fix HOME for SSH key discovery on Windows (must be set before any SSH calls)
 if os.name == "nt" and ("HOME" not in os.environ or "My Drive" in os.environ.get("HOME", "")):
@@ -74,6 +75,15 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 @app.route("/")
 def index():
+    # CashCow: show machine detail as home page (trading-focused)
+    if LOCAL_MACHINE == "CashCow":
+        info = find_machine("CashCow")
+        return render_template(
+            "machine_detail.html",
+            machine_name="CashCow",
+            machine_info=info or {},
+            local_machine=LOCAL_MACHINE,
+        )
     return render_template("index.html", local_machine=LOCAL_MACHINE)
 
 
@@ -118,6 +128,204 @@ def gamepad_via_machine(machine):
 @app.route("/trader")
 def trader_panel():
     return render_template("trader.html")
+
+
+@app.route("/today")
+def today_panel():
+    return render_template("today.html")
+
+
+@app.route("/politician")
+def politician_panel():
+    return render_template("politician.html")
+
+
+# --- Today's Trades API (local log parsing + IB intraday) ---
+
+_TRADER_LOG_DIR = os.path.expanduser("~/ib_smart_trader/logs")
+
+
+def _parse_today_trades(trader_type: str, date_str: str) -> list:
+    """Parse a trader log file and extract today's executed trades with strategy context."""
+    if trader_type == "day":
+        log_name = "day_trader_stdout.log"
+    else:
+        log_name = "trader_stdout.log"
+
+    log_path = os.path.join(_TRADER_LOG_DIR, log_name)
+    if not os.path.isfile(log_path) or os.path.getsize(log_path) == 0:
+        return []
+
+    try:
+        with open(log_path, "r", errors="replace") as f:
+            all_lines = f.readlines()
+    except Exception:
+        return []
+
+    trades = []
+
+    # Patterns for executed orders
+    if trader_type == "day":
+        order_re = re.compile(
+            r"✅\s+(BUY|SELL)\s+주문\s+전송!\s+(\w+)\s+x(\d+)\s*\|\s*주문ID:\s*(\d+)"
+        )
+        alert_re = re.compile(
+            r"🔔\s+\[ALERT\]\s+(BUY|SELL)\s+(\w+)\s+x(\d+)\s+@\s+\$([0-9.]+)"
+        )
+    else:
+        order_re = re.compile(
+            r"✅\s+주문\s+전송!\s+(BUY|SELL)\s+(\w+)\s+x(\d+)\s*\|\s*주문\s*ID:\s*(\d+)"
+        )
+        alert_re = None
+
+    ensemble_re = re.compile(
+        r"🎯\s+(\w+).*합의:\s+([+-]?[0-9.]+)\s*\|\s*BUY:(\d+)\s+SELL:(\d+)"
+    )
+    signal_re = re.compile(
+        r"([\w_]+)\s+→\s+(BUY|SELL|HOLD)\s+\((\d+)%\)\s+(.*)"
+    )
+    # Timestamp: either "YYYY-MM-DD HH:MM:SS" or just "HH:MM:SS" at line start
+    ts_full_re = re.compile(r"(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})")
+    ts_time_re = re.compile(r"^(\d{2}:\d{2}:\d{2})")
+
+    for i, line in enumerate(all_lines):
+        m_order = order_re.search(line)
+        m_alert = alert_re.search(line) if alert_re else None
+
+        if not m_order and not m_alert:
+            continue
+
+        if m_order:
+            side, symbol, quantity, order_id = (
+                m_order.group(1), m_order.group(2),
+                int(m_order.group(3)), m_order.group(4),
+            )
+            mode = "AUTO"
+        else:
+            side, symbol, quantity = (
+                m_alert.group(1), m_alert.group(2), int(m_alert.group(3)),
+            )
+            order_id, mode = None, "ALERT"
+
+        # Extract timestamp
+        trade_time = None
+        for check_line in [line] + all_lines[max(0, i - 5):i]:
+            # Try full datetime first
+            tm = ts_full_re.search(check_line)
+            if tm:
+                if tm.group(1) == date_str:
+                    trade_time = tm.group(2)
+                break
+            # Try time-only (HH:MM:SS at line start)
+            tm2 = ts_time_re.search(check_line)
+            if tm2:
+                trade_time = tm2.group(1)
+                break
+
+        if trade_time is None:
+            trade_time = "unknown"
+
+        # Look backwards for strategy signals.
+        # Find the ensemble line for this symbol, then collect signals below it.
+        signals = []
+        consensus_score = None
+        ensemble_line_idx = None
+        for j in range(i - 1, max(0, i - 20) - 1, -1):
+            back_line = all_lines[j]
+            em = ensemble_re.search(back_line)
+            if em and em.group(1) == symbol:
+                consensus_score = float(em.group(2))
+                ensemble_line_idx = j
+                break
+            # Stop if we hit another ensemble line (different symbol)
+            if em and em.group(1) != symbol:
+                break
+
+        if ensemble_line_idx is not None:
+            # Collect strategy signals between ensemble line and order line
+            for j in range(ensemble_line_idx + 1, i):
+                sm = signal_re.search(all_lines[j])
+                if sm:
+                    signals.append({
+                        "strategy": sm.group(1),
+                        "signal": sm.group(2),
+                        "confidence": int(sm.group(3)),
+                        "reason": sm.group(4).strip(),
+                    })
+
+        trades.append({
+            "time": trade_time,
+            "symbol": symbol,
+            "side": side,
+            "quantity": quantity,
+            "order_id": order_id,
+            "mode": mode,
+            "consensus_score": consensus_score,
+            "signals": signals,
+        })
+
+    return trades
+
+
+@app.route("/api/trader/today")
+def api_trader_today():
+    """Parse today's trades from both Day Trader and Smart Trader logs."""
+    from datetime import datetime as _dtx
+    today_str = _dtx.now().strftime("%Y-%m-%d")
+    day_trades = _parse_today_trades("day", today_str)
+    smart_trades = _parse_today_trades("smart", today_str)
+    return jsonify({
+        "day_trades": day_trades,
+        "smart_trades": smart_trades,
+        "date": today_str,
+    })
+
+
+@app.route("/api/trader/intraday/<symbol>")
+def api_trader_intraday(symbol):
+    """Fetch today's 5-min bars for a symbol from IB Gateway."""
+    port = request.args.get("port", 7497, type=int)
+    try:
+        import asyncio
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+
+        from ib_insync import IB, Stock
+        ib = IB()
+        ib.connect("127.0.0.1", port, clientId=98, timeout=5)
+
+        contract = Stock(symbol, "SMART", "USD")
+        ib.qualifyContracts(contract)
+
+        bars = ib.reqHistoricalData(
+            contract,
+            endDateTime="",
+            durationStr="1 D",
+            barSizeSetting="5 mins",
+            whatToShow="TRADES",
+            useRTH=False,
+            formatDate=1,
+        )
+        ib.disconnect()
+
+        result = []
+        for bar in bars:
+            result.append({
+                "time": bar.date.strftime("%Y-%m-%d %H:%M:%S")
+                        if hasattr(bar.date, "strftime")
+                        else str(bar.date),
+                "open": float(bar.open),
+                "high": float(bar.high),
+                "low": float(bar.low),
+                "close": float(bar.close),
+                "volume": int(bar.volume),
+            })
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e), "bars": []}), 200
 
 
 @app.route("/deploy")
@@ -615,7 +823,7 @@ def api_deploy_christy():
             # Deploy files via deploy_christy.py
             deploy_script = os.path.join(os.path.dirname(__file__), "deploy", "deploy_christy.py")
             proc = subprocess.run(
-                ["python", deploy_script], capture_output=True, text=True, timeout=60
+                [sys.executable, deploy_script], capture_output=True, text=True, timeout=60
             )
             log_event(f"Deploy to Christy: rc={proc.returncode}")
             return jsonify({
@@ -848,9 +1056,12 @@ def api_trader_status(name):
         # Process status
         is_running = bool(proc_info) and "NOT_RUNNING" not in proc_info
         mode = "UNKNOWN"
+        trader_type = "smart"  # "smart" or "day"
         pid = "--"
         if is_running:
             mode = "AUTO" if "--auto" in proc_info else "ALERT"
+            if "--day" in proc_info:
+                trader_type = "day"
             for line in proc_info.splitlines():
                 parts = line.split()
                 if len(parts) > 1 and parts[1].isdigit():
@@ -913,6 +1124,7 @@ def api_trader_status(name):
         result.update({
             "running": is_running,
             "mode": mode,
+            "trader_type": trader_type,
             "pid": pid,
             "log_lines": log_lines,
             "daily_picks": picks,
@@ -938,12 +1150,14 @@ def api_deploy_cashcow():
     action = data.get("action", "sync")
 
     deploy_script = os.path.join(os.path.dirname(__file__), "deploy", "deploy_cashcow.py")
-    cmd = ["python", deploy_script]
+    cmd = [sys.executable, deploy_script]
 
     if action == "run":
         cmd.append("--run")
         if data.get("auto"):
             cmd.append("--auto")
+        if data.get("day"):
+            cmd.append("--day")
         port = data.get("port", 7497)
         cmd.extend(["--port", str(port)])
     elif action == "stop":
@@ -956,7 +1170,7 @@ def api_deploy_cashcow():
         pass
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         log_event(f"Deploy to CashCow: action={action}, rc={proc.returncode}")
         return jsonify({
             "ok": proc.returncode == 0,
@@ -982,15 +1196,30 @@ def api_cashcow_logs():
     user = info.get("username")
     try:
         limit = request.args.get("limit", 30, type=int)
+        trader_type = request.args.get("type", "smart")
+        if trader_type == "day":
+            log_file = "day_trader_stdout.log"
+        else:
+            log_file = "trader_stdout.log"
         log_cmd = (
-            f"if [ -s /home/dongchul/ib_smart_trader/logs/trader_stdout.log ]; then "
-            f"tail -{limit} /home/dongchul/ib_smart_trader/logs/trader_stdout.log; "
+            f"if [ -s /home/dongchul/ib_smart_trader/logs/{log_file} ]; then "
+            f"tail -{limit} /home/dongchul/ib_smart_trader/logs/{log_file}; "
             f"else tail -{limit} /home/dongchul/ib_smart_trader/ib_smart_trader/smart_trader.log 2>/dev/null || echo 'No logs'; fi"
         )
         output, stderr, rc = _ssh_run(user, host, log_cmd, timeout=10)
         return jsonify({"logs": output.strip().splitlines()})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/cashcow/portfolio")
+def api_cashcow_portfolio():
+    """Proxy to CashCow agent's portfolio API (avoids CORS)."""
+    try:
+        r = http_requests.get("http://192.168.1.91:5000/api/trader/portfolio", timeout=10)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"connected": False, "error": str(e)}), 200
 
 
 # --- IB Gateway Monitor ---
@@ -1917,7 +2146,7 @@ def api_deploy_vision():
     action = data.get("action", "sync")
 
     deploy_script = os.path.join(os.path.dirname(__file__), "deploy", "deploy_vision.py")
-    cmd = ["python", deploy_script]
+    cmd = [sys.executable, deploy_script]
 
     if action == "run":
         cmd.append("--run")

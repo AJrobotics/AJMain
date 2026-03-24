@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trader - AJ Robotics</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0a1929; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
+
+        .topbar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 24px; background: #0d2137; border-bottom: 1px solid #1a3a5c;
+        }
+        .topbar h1 { color: #00e5ff; font-size: 20px; display: inline; margin-left: 16px; }
+        .topbar a { color: #00e5ff; text-decoration: none; font-size: 14px; }
+        .topbar a:hover { text-decoration: underline; }
+        .topbar .market-badge {
+            padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;
+        }
+        .market-open { background: #00e67633; color: #00e676; border: 1px solid #00e676; }
+        .market-closed { background: #e9456022; color: #e94560; border: 1px solid #e94560; }
+        .market-pre { background: #ffc10733; color: #ffc107; border: 1px solid #ffc107; }
+
+        .content { max-width: 1300px; margin: 0 auto; padding: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+        .card {
+            background: #112240; border: 1px solid #1a3a5c;
+            border-radius: 10px; padding: 16px 20px;
+        }
+        .card h3 {
+            color: #00e5ff; font-size: 15px; margin-bottom: 12px;
+            border-bottom: 1px solid #1a3a5c; padding-bottom: 8px;
+        }
+        .card h3 .badge {
+            font-size: 11px; padding: 2px 8px; border-radius: 8px;
+            margin-left: 8px; vertical-align: middle;
+        }
+        .badge-smart { background: #7c4dff33; color: #b388ff; border: 1px solid #7c4dff; }
+        .badge-day { background: #ff6d0033; color: #ffab40; border: 1px solid #ff6d00; }
+
+        .btn {
+            padding: 10px 20px; border: 1px solid #00e5ff; background: transparent;
+            color: #00e5ff; border-radius: 6px; cursor: pointer; font-size: 13px;
+            margin: 4px; transition: all 0.2s;
+        }
+        .btn:hover { background: #00e5ff22; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn.deploy { background: #00e67633; border-color: #00e676; color: #00e676; font-size: 14px; padding: 12px 24px; }
+        .btn.deploy:hover { background: #00e67655; }
+        .btn.stop { border-color: #e94560; color: #e94560; }
+        .btn.stop:hover { background: #e9456022; }
+        .btn.day { border-color: #ffab40; color: #ffab40; }
+        .btn.day:hover { background: #ffab4022; }
+
+        .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+
+        .toggle-group {
+            display: inline-flex; border: 1px solid #1a3a5c; border-radius: 6px; overflow: hidden; margin: 8px 0;
+        }
+        .toggle-group label {
+            padding: 8px 16px; cursor: pointer; font-size: 13px; color: #888; transition: all 0.2s;
+        }
+        .toggle-group input[type="radio"] { display: none; }
+        .toggle-group input[type="radio"]:checked + label {
+            background: #00e5ff22; color: #00e5ff; border-color: #00e5ff;
+        }
+
+        select, input[type="checkbox"] { accent-color: #00e5ff; }
+        select {
+            background: #0a192f; color: #e0e0e0; border: 1px solid #1a3a5c;
+            padding: 8px 12px; border-radius: 6px; font-size: 13px;
+        }
+
+        .status-box {
+            background: #0a192f; border-radius: 8px; padding: 14px 18px;
+            margin: 10px 0; font-size: 13px;
+        }
+        .status-box .label { color: #888; font-size: 11px; text-transform: uppercase; margin-bottom: 4px; }
+        .status-box .value { color: #e0e0e0; font-family: 'Consolas', monospace; }
+
+        .info-row {
+            display: flex; justify-content: space-between;
+            padding: 6px 0; border-bottom: 1px solid #0a192f; font-size: 13px;
+        }
+        .info-row .label { color: #888; }
+        .info-row .value { color: #e0e0e0; font-family: 'Consolas', monospace; }
+
+        .log-box {
+            background: #0a192f; border-radius: 8px; padding: 14px;
+            font-family: 'Consolas', monospace; font-size: 11px;
+            color: #aaa; max-height: 350px; overflow-y: auto;
+            white-space: pre-wrap; word-break: break-all; line-height: 1.5;
+        }
+        .log-line { padding: 1px 0; }
+        .log-line.buy { color: #00e676; }
+        .log-line.sell { color: #e94560; }
+        .log-line.hold { color: #888; }
+        .log-line.error { color: #e94560; font-weight: bold; }
+        .log-line.info { color: #00e5ff; }
+        .log-line.warn { color: #ffc107; }
+
+        .output-box {
+            background: #0a192f; border-radius: 8px; padding: 14px;
+            font-family: 'Consolas', monospace; font-size: 11px;
+            color: #888; max-height: 250px; overflow-y: auto;
+            white-space: pre-wrap; margin-top: 10px;
+        }
+
+        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .dot.online { background: #00e676; }
+        .dot.offline { background: #e94560; }
+        .dot.unknown { background: #555; }
+
+        .pnl-positive { color: #00e676; }
+        .pnl-negative { color: #e94560; }
+
+        @media (max-width: 900px) {
+            .grid { grid-template-columns: 1fr; }
+            .grid-3 { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div>
+            <a href="/">&larr; Dashboard</a>
+            <a href="/today">Today</a>
+            <a href="/politician">Politician</a>
+            <h1>CashCow Trader</h1>
+        </div>
+        <div>
+            <span id="market-badge" class="market-badge market-closed">--</span>
+            <span style="margin-left:12px; font-size:12px; color:#888;" id="market-time"></span>
+        </div>
+    </div>
+
+    <div class="content">
+        <!-- Status Overview -->
+        <div class="grid-3">
+            <div class="card">
+                <h3>Trader Status</h3>
+                <div class="info-row">
+                    <span class="label">CashCow</span>
+                    <span class="value"><span class="dot unknown" id="cashcow-dot"></span><span id="cashcow-status">Checking...</span></span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Trader</span>
+                    <span class="value"><span id="trader-running">--</span></span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Type</span>
+                    <span class="value" id="trader-type">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Mode</span>
+                    <span class="value" id="trader-mode">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">PID</span>
+                    <span class="value" id="trader-pid">--</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Deploy to CashCow</h3>
+                <div style="margin-bottom:10px;">
+                    <span class="label" style="color:#888;font-size:12px;">Trader Type</span><br>
+                    <div class="toggle-group">
+                        <input type="radio" name="trader-type-sel" id="type-smart" value="smart" checked>
+                        <label for="type-smart">Smart Trader</label>
+                        <input type="radio" name="trader-type-sel" id="type-day" value="day">
+                        <label for="type-day">Day Trader</label>
+                    </div>
+                </div>
+                <div style="margin-bottom:10px;">
+                    <span class="label" style="color:#888;font-size:12px;">Options</span><br>
+                    <label style="font-size:13px;"><input type="checkbox" id="opt-auto"> AUTO mode (execute trades)</label><br>
+                    <label style="font-size:13px;">Port: </label>
+                    <select id="opt-port">
+                        <option value="7497" selected>7497 (Paper)</option>
+                        <option value="7496">7496 (LIVE)</option>
+                    </select>
+                </div>
+                <div class="btn-row">
+                    <button class="btn deploy" onclick="deployCashCow('run')" id="btn-deploy">&#9654; Sync & Run</button>
+                    <button class="btn" onclick="deployCashCow('sync')">Sync Only</button>
+                    <button class="btn stop" onclick="deployCashCow('stop')">&#9632; Stop</button>
+                </div>
+                <div class="status-box">
+                    <div class="label">Last Action</div>
+                    <div class="value" id="deploy-status">--</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Quick Access</h3>
+                <div class="btn-row" style="flex-direction:column;">
+                    <button class="btn" onclick="sshTo('CashCow')">SSH CashCow</button>
+                    <button class="btn" onclick="vncTo('CashCow')">VNC CashCow</button>
+                    <button class="btn" onclick="refreshStatus()">Refresh Status</button>
+                    <button class="btn" onclick="fetchLogs()">Refresh Logs</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Deploy Output + Logs -->
+        <div class="grid">
+            <div class="card">
+                <h3>Deploy Output</h3>
+                <div class="output-box" id="deploy-output">Deploy output will appear here...</div>
+            </div>
+
+            <div class="card">
+                <h3>Trader Logs (CashCow)
+                    <span style="margin-left:8px;">
+                        <button class="btn" style="padding:4px 10px;font-size:11px;" onclick="fetchLogs('smart')">Smart</button>
+                        <button class="btn day" style="padding:4px 10px;font-size:11px;" onclick="fetchLogs('day')">Day</button>
+                    </span>
+                </h3>
+                <div class="log-box" id="trader-logs">Loading logs...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ── Deploy to CashCow ──
+        function deployCashCow(action) {
+            const btn = document.getElementById('btn-deploy');
+            const status = document.getElementById('deploy-status');
+            const output = document.getElementById('deploy-output');
+            const isDay = document.getElementById('type-day').checked;
+            const isAuto = document.getElementById('opt-auto').checked;
+            const port = document.getElementById('opt-port').value;
+
+            const labels = {run:'Deploying...', stop:'Stopping...', sync:'Syncing...'};
+            status.textContent = labels[action] || 'Working...';
+            output.textContent = 'Working...\n';
+            if (action === 'run') { btn.disabled = true; btn.textContent = 'Deploying...'; }
+
+            // Live warning
+            if (action === 'run' && port === '7496') {
+                if (!confirm('LIVE trading port (7496) selected! Are you sure?')) {
+                    btn.disabled = false; btn.innerHTML = '&#9654; Sync & Run';
+                    status.textContent = 'Cancelled';
+                    return;
+                }
+            }
+
+            fetch('/api/deploy/cashcow', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    action: action,
+                    auto: isAuto,
+                    day: isDay,
+                    port: parseInt(port),
+                })
+            })
+            .then(r => r.json())
+            .then(d => {
+                const ts = new Date().toLocaleTimeString();
+                output.textContent = d.output || 'No output';
+                output.scrollTop = output.scrollHeight;
+
+                const traderLabel = isDay ? 'Day Trader' : 'Smart Trader';
+                if (d.ok) {
+                    if (action === 'run') status.textContent = traderLabel + ' deployed & running (' + ts + ')';
+                    else if (action === 'stop') status.textContent = 'Stopped (' + ts + ')';
+                    else status.textContent = 'Synced (' + ts + ')';
+                } else {
+                    status.textContent = 'Error (' + ts + ')';
+                }
+
+                btn.disabled = false;
+                btn.innerHTML = '&#9654; Sync & Run';
+                setTimeout(refreshStatus, 2000);
+                if (action === 'run') setTimeout(() => fetchLogs(isDay ? 'day' : 'smart'), 3000);
+            })
+            .catch(err => {
+                status.textContent = 'Failed: ' + err;
+                output.textContent = 'Error: ' + err;
+                btn.disabled = false;
+                btn.innerHTML = '&#9654; Sync & Run';
+            });
+        }
+
+        // ── Trader Status ──
+        function refreshStatus() {
+            fetch('/api/machine/CashCow/trader-status')
+                .then(r => r.json())
+                .then(d => {
+                    // CashCow connectivity
+                    const dot = document.getElementById('cashcow-dot');
+                    const csText = document.getElementById('cashcow-status');
+
+                    if (d.error) {
+                        dot.className = 'dot offline';
+                        csText.textContent = 'Unreachable';
+                        return;
+                    }
+
+                    dot.className = 'dot online';
+                    csText.textContent = 'Online';
+
+                    // Trader status
+                    document.getElementById('trader-running').innerHTML =
+                        d.running
+                            ? '<span style="color:#00e676;">Running</span>'
+                            : '<span style="color:#e94560;">Stopped</span>';
+
+                    const tt = d.trader_type || 'smart';
+                    document.getElementById('trader-type').innerHTML =
+                        tt === 'day'
+                            ? '<span class="badge badge-day">Day Trader</span>'
+                            : '<span class="badge badge-smart">Smart Trader</span>';
+
+                    document.getElementById('trader-mode').textContent = d.mode || '--';
+                    document.getElementById('trader-pid').textContent = d.pid || '--';
+
+                    // Market badge
+                    const badge = document.getElementById('market-badge');
+                    const mTime = document.getElementById('market-time');
+                    mTime.textContent = d.market_time || '';
+
+                    if (d.market_status === 'open') {
+                        badge.className = 'market-badge market-open';
+                        badge.textContent = 'Market Open';
+                    } else if (d.market_status === 'pre-market') {
+                        badge.className = 'market-badge market-pre';
+                        badge.textContent = 'Pre-Market';
+                    } else {
+                        badge.className = 'market-badge market-closed';
+                        badge.textContent = d.market_status ? d.market_status.replace('-',' ').toUpperCase() : 'CLOSED';
+                    }
+                })
+                .catch(() => {
+                    document.getElementById('cashcow-dot').className = 'dot offline';
+                    document.getElementById('cashcow-status').textContent = 'Error';
+                });
+        }
+
+        // ── Logs ──
+        let currentLogType = 'smart';
+        function fetchLogs(type) {
+            if (type) currentLogType = type;
+            const logBox = document.getElementById('trader-logs');
+
+            fetch('/api/deploy/cashcow/logs?limit=50&type=' + currentLogType)
+                .then(r => r.json())
+                .then(d => {
+                    if (d.logs && d.logs.length > 0) {
+                        logBox.innerHTML = d.logs.map(line => {
+                            let cls = '';
+                            if (line.includes('BUY') && !line.includes('HOLD')) cls = 'buy';
+                            else if (line.includes('SELL')) cls = 'sell';
+                            else if (line.includes('HOLD')) cls = 'hold';
+                            else if (line.includes('ERROR') || line.includes('FAIL')) cls = 'error';
+                            else if (line.includes('OK') || line.includes('Started') || line.includes('Connected')) cls = 'info';
+                            else if (line.includes('WARNING') || line.includes('WARN') || line.includes('BLOCK')) cls = 'warn';
+                            return '<div class="log-line ' + cls + '">' + escapeHtml(line) + '</div>';
+                        }).join('');
+                        logBox.scrollTop = logBox.scrollHeight;
+                    } else {
+                        logBox.textContent = 'No logs yet.';
+                    }
+                })
+                .catch(err => { logBox.textContent = 'Error: ' + err; });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function sshTo(machine) {
+            fetch('/api/actions/ssh/' + machine, { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { if (d.error) alert(d.error); });
+        }
+        function vncTo(machine) {
+            fetch('/api/actions/vnc/' + machine, { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { if (d.error) alert(d.error); });
+        }
+
+        // Initial load
+        refreshStatus();
+        fetchLogs('smart');
+        setInterval(refreshStatus, 30000);
+        setInterval(() => fetchLogs(), 15000);
+    </script>
+</body>
+</html>

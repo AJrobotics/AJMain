@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Politician Trader - AJ Robotics</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0a1929; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
+
+        .topbar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 24px; background: #0d2137; border-bottom: 1px solid #1a3a5c;
+        }
+        .topbar h1 { color: #b388ff; font-size: 20px; display: inline; margin-left: 16px; }
+        .topbar a { color: #b388ff; text-decoration: none; font-size: 14px; }
+        .topbar a:hover { text-decoration: underline; }
+        .topbar .market-badge {
+            padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;
+        }
+        .market-open { background: #00e67633; color: #00e676; border: 1px solid #00e676; }
+        .market-closed { background: #e9456022; color: #e94560; border: 1px solid #e94560; }
+        .market-pre { background: #ffc10733; color: #ffc107; border: 1px solid #ffc107; }
+
+        .content { max-width: 1300px; margin: 0 auto; padding: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+        .card {
+            background: #112240; border: 1px solid #1a3a5c;
+            border-radius: 10px; padding: 16px 20px;
+        }
+        .card h3 {
+            color: #b388ff; font-size: 15px; margin-bottom: 12px;
+            border-bottom: 1px solid #1a3a5c; padding-bottom: 8px;
+        }
+        .badge-politician { background: #7c4dff33; color: #b388ff; border: 1px solid #7c4dff;
+            font-size: 11px; padding: 2px 8px; border-radius: 8px; margin-left: 8px; }
+
+        .btn {
+            padding: 10px 20px; border: 1px solid #b388ff; background: transparent;
+            color: #b388ff; border-radius: 6px; cursor: pointer; font-size: 13px;
+            margin: 4px; transition: all 0.2s;
+        }
+        .btn:hover { background: #b388ff22; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn.start { background: #7c4dff33; border-color: #b388ff; color: #b388ff; font-size: 14px; padding: 12px 24px; }
+        .btn.start:hover { background: #7c4dff55; }
+        .btn.stop { border-color: #e94560; color: #e94560; }
+        .btn.stop:hover { background: #e9456022; }
+
+        .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+
+        .toggle-group {
+            display: inline-flex; border: 1px solid #1a3a5c; border-radius: 6px; overflow: hidden; margin: 8px 0;
+        }
+        .toggle-group label {
+            padding: 8px 16px; cursor: pointer; font-size: 13px; color: #888; transition: all 0.2s;
+        }
+        .toggle-group input[type="radio"] { display: none; }
+        .toggle-group input[type="radio"]:checked + label {
+            background: #7c4dff22; color: #b388ff;
+        }
+
+        select { background: #0a192f; color: #e0e0e0; border: 1px solid #1a3a5c;
+            padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+
+        .info-row {
+            display: flex; justify-content: space-between;
+            padding: 6px 0; border-bottom: 1px solid #0a192f; font-size: 13px;
+        }
+        .info-row .label { color: #888; }
+        .info-row .value { color: #e0e0e0; font-family: 'Consolas', monospace; }
+
+        .log-box {
+            background: #0a192f; border-radius: 8px; padding: 14px;
+            font-family: 'Consolas', monospace; font-size: 11px;
+            color: #aaa; max-height: 350px; overflow-y: auto;
+            white-space: pre-wrap; word-break: break-all; line-height: 1.5;
+        }
+        .log-line { padding: 1px 0; }
+        .log-line.buy { color: #00e676; }
+        .log-line.sell { color: #e94560; }
+        .log-line.info { color: #b388ff; }
+        .log-line.warn { color: #ffc107; }
+        .log-line.error { color: #e94560; font-weight: bold; }
+
+        .disclosure-item {
+            background: #0a192f; border-radius: 8px; padding: 10px 14px;
+            margin: 6px 0; font-size: 12px; border-left: 3px solid #7c4dff;
+        }
+        .disclosure-item .name { color: #b388ff; font-weight: bold; }
+        .disclosure-item .symbol { color: #00e5ff; font-weight: bold; }
+        .disclosure-item .amount { color: #ffc107; }
+        .disclosure-item .party-r { color: #e94560; }
+        .disclosure-item .party-d { color: #42a5f5; }
+
+        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .dot.online { background: #00e676; }
+        .dot.offline { background: #e94560; }
+
+        .pnl-positive { color: #00e676; }
+        .pnl-negative { color: #e94560; }
+
+        .news-item {
+            background: #0a192f; border-radius: 8px; padding: 10px 14px;
+            margin: 6px 0; font-size: 12px; border-left: 3px solid #42a5f5;
+        }
+        .news-item:hover { border-left-color: #b388ff; }
+        .news-item .news-title { color: #e0e0e0; font-weight: bold; font-size: 13px; }
+        .news-item .news-title a { color: #42a5f5; text-decoration: none; }
+        .news-item .news-title a:hover { text-decoration: underline; color: #b388ff; }
+        .news-item .news-summary { color: #999; margin-top: 4px; line-height: 1.5; }
+        .news-item .news-meta { color: #666; font-size: 10px; margin-top: 4px; }
+        .news-item .news-source { color: #b388ff; font-weight: bold; }
+
+        @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div>
+            <a href="/">&larr; Dashboard</a>
+            <a href="/trader">Trader</a>
+            <a href="/today">Today</a>
+            <h1>Politician Trader</h1>
+            <span class="badge-politician">Congressional Trades</span>
+        </div>
+        <div>
+            <span id="market-badge" class="market-badge market-closed">--</span>
+            <span style="margin-left:12px; font-size:12px; color:#888;" id="market-time"></span>
+        </div>
+    </div>
+
+    <div class="content">
+        <!-- Controls & Status -->
+        <div class="grid">
+            <div class="card">
+                <h3>Trader Control</h3>
+                <div class="info-row">
+                    <span class="label">Status</span>
+                    <span class="value"><span class="dot offline" id="status-dot"></span><span id="status-text">Checking...</span></span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Mode</span>
+                    <span class="value" id="mode-text">--</span>
+                </div>
+                <div style="margin: 12px 0;">
+                    <span style="color:#888;font-size:12px;">Options</span><br>
+                    <div class="toggle-group">
+                        <input type="radio" name="mode" id="mode-alert" value="alert" checked>
+                        <label for="mode-alert">ALERT</label>
+                        <input type="radio" name="mode" id="mode-auto" value="auto">
+                        <label for="mode-auto">AUTO</label>
+                    </div>
+                    <label style="font-size:13px; margin-left:12px;">Port: </label>
+                    <select id="opt-port">
+                        <option value="7497" selected>7497 (Paper)</option>
+                        <option value="7496">7496 (LIVE)</option>
+                    </select>
+                </div>
+                <div class="btn-row">
+                    <button class="btn start" onclick="startTrader()" id="btn-start">&#9654; Start Politician Trader</button>
+                    <button class="btn stop" onclick="stopTrader()">&#9632; Stop</button>
+                </div>
+                <div style="margin-top:8px; font-size:11px; color:#666;" id="action-msg">--</div>
+            </div>
+
+            <div class="card">
+                <h3>Portfolio</h3>
+                <div class="info-row">
+                    <span class="label">Daily PnL</span>
+                    <span class="value" id="pnl-daily">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Positions</span>
+                    <span class="value" id="position-count">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Swing / Day</span>
+                    <span class="value" id="mode-split">-- / --</span>
+                </div>
+                <div id="positions-list" style="margin-top:10px;"></div>
+            </div>
+        </div>
+
+        <!-- Political News -->
+        <div class="card" style="margin-bottom:16px;">
+            <h3 style="display:flex; justify-content:space-between; align-items:center;">
+                Political News Feed
+                <span style="font-size:12px; font-weight:normal; color:#888; display:flex; align-items:center; gap:8px;">
+                    Refresh every
+                    <input type="number" id="news-interval" value="10" min="1" max="120" step="1"
+                        style="width:50px; background:#0a192f; color:#b388ff; border:1px solid #1a3a5c;
+                        border-radius:4px; padding:4px 6px; font-size:12px; text-align:center;">
+                    min
+                    <button class="btn" style="padding:4px 10px; font-size:11px; margin:0;" onclick="fetchNews()">Refresh Now</button>
+                    <span id="news-status" style="font-size:11px; color:#666;"></span>
+                </span>
+            </h3>
+            <div id="news-feed" style="max-height:350px; overflow-y:auto;">
+                <div style="color:#666; font-size:12px;">Loading news...</div>
+            </div>
+        </div>
+
+        <!-- Recent Disclosures & Logs -->
+        <div class="grid">
+            <div class="card">
+                <h3 style="display:flex; justify-content:space-between; align-items:center;">
+                    Recent Congressional Disclosures
+                    <span style="font-size:12px; font-weight:normal; color:#888; display:flex; align-items:center; gap:8px;">
+                        Refresh every
+                        <input type="number" id="disclosures-interval" value="30" min="1" max="1440" step="1"
+                            style="width:50px; background:#0a192f; color:#b388ff; border:1px solid #1a3a5c;
+                            border-radius:4px; padding:4px 6px; font-size:12px; text-align:center;">
+                        min
+                        <button class="btn" style="padding:4px 10px; font-size:11px; margin:0;" onclick="fetchDisclosures()">Refresh Now</button>
+                        <span id="disclosures-status" style="font-size:11px; color:#666;"></span>
+                    </span>
+                </h3>
+                <div id="disclosures-feed" style="max-height:300px; overflow-y:auto;">
+                    <div style="color:#666; font-size:12px;">Loading...</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Politician Trader Log</h3>
+                <div class="log-box" id="log-box">Loading logs...</div>
+            </div>
+        </div>
+    </div>
+
+<script>
+const API = '/api/trader';
+let refreshTimer;
+
+async function fetchStatus() {
+    try {
+        const resp = await fetch(`${API}/status`);
+        const data = await resp.json();
+
+        // Market badge
+        const badge = document.getElementById('market-badge');
+        const mt = document.getElementById('market-time');
+        if (data.market_status === 'trading') {
+            badge.className = 'market-badge market-open'; badge.textContent = 'MARKET OPEN';
+        } else if (data.market_status === 'pre-market') {
+            badge.className = 'market-badge market-pre'; badge.textContent = 'PRE-MARKET';
+        } else {
+            badge.className = 'market-badge market-closed'; badge.textContent = 'CLOSED';
+        }
+        mt.textContent = data.market_time || '';
+
+        // Politician trader status
+        const dot = document.getElementById('status-dot');
+        const stxt = document.getElementById('status-text');
+        const isRunning = data.politician_running === true;
+        dot.className = isRunning ? 'dot online' : 'dot offline';
+        stxt.textContent = isRunning ? 'Running' : 'Stopped';
+
+        // Mode
+        if (isRunning && data.processes) {
+            const pp = data.processes.find(p => p.trader_type === 'politician');
+            document.getElementById('mode-text').textContent = pp ? pp.mode : '--';
+        } else {
+            document.getElementById('mode-text').textContent = '--';
+        }
+
+        // Logs
+        if (data.politician_log_lines && data.politician_log_lines.length) {
+            renderLogs(data.politician_log_lines);
+        } else {
+            document.getElementById('log-box').innerHTML = '<span style="color:#666">Politician Trader not running. No logs yet.</span>';
+        }
+    } catch (e) {
+        console.error('Status fetch error:', e);
+    }
+}
+
+function renderLogs(lines) {
+    const box = document.getElementById('log-box');
+    box.innerHTML = lines.map(l => {
+        let cls = '';
+        if (l.includes('BUY')) cls = 'buy';
+        else if (l.includes('SELL')) cls = 'sell';
+        else if (l.includes('ERROR') || l.includes('❌')) cls = 'error';
+        else if (l.includes('⚠️') || l.includes('WARN')) cls = 'warn';
+        else if (l.includes('✅') || l.includes('🏛️')) cls = 'info';
+        return `<div class="log-line ${cls}">${escapeHtml(l)}</div>`;
+    }).join('');
+    box.scrollTop = box.scrollHeight;
+}
+
+async function startTrader() {
+    const auto = document.getElementById('mode-auto').checked;
+    const port = parseInt(document.getElementById('opt-port').value);
+
+    if (port === 7496 && !confirm('LIVE port selected. Continue?')) return;
+
+    try {
+        const resp = await fetch(`${API}/start`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({politician: true, auto, port}),
+        });
+        const data = await resp.json();
+        document.getElementById('action-msg').textContent = data.message || data.error || 'Done';
+        setTimeout(fetchStatus, 2000);
+    } catch (e) {
+        document.getElementById('action-msg').textContent = 'Error: ' + e.message;
+    }
+}
+
+async function stopTrader() {
+    try {
+        const resp = await fetch(`${API}/stop`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({type: 'politician'}),
+        });
+        const data = await resp.json();
+        document.getElementById('action-msg').textContent = data.message || 'Stopped';
+        setTimeout(fetchStatus, 2000);
+    } catch (e) {
+        document.getElementById('action-msg').textContent = 'Error: ' + e.message;
+    }
+}
+
+function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+let disclosuresTimer = null;
+
+async function fetchDisclosures() {
+    const statusEl = document.getElementById('disclosures-status');
+    statusEl.textContent = 'fetching...';
+    try {
+        const resp = await fetch(`${API}/politician/disclosures`);
+        const data = await resp.json();
+        const feed = document.getElementById('disclosures-feed');
+
+        if (!data.disclosures || data.disclosures.length === 0) {
+            feed.innerHTML = '<div style="color:#666; font-size:12px;">No disclosures available. Start Politician Trader or configure API keys.</div>';
+            statusEl.textContent = 'no data';
+            return;
+        }
+
+        feed.innerHTML = data.disclosures.map(d => {
+            const partyClass = d.party === 'R' ? 'party-r' : 'party-d';
+            const partyLabel = d.party === 'R' ? '(R)' : '(D)';
+            const typeIcon = d.type === 'purchase' ? '🟢 BUY' : '🔴 SELL';
+            const amount = d.amount >= 1000000 ? `$${(d.amount/1000000).toFixed(1)}M` :
+                           d.amount >= 1000 ? `$${(d.amount/1000).toFixed(0)}K` : `$${d.amount}`;
+            return `<div class="disclosure-item">
+                <span class="name">${escapeHtml(d.politician)}</span>
+                <span class="${partyClass}">${partyLabel}</span>
+                &rarr; ${typeIcon}
+                <span class="symbol">${escapeHtml(d.symbol)}</span>
+                <span class="amount">${amount}</span>
+                <br>
+                <span style="color:#888; font-size:11px;">
+                    ${d.sector || ''} | Delay: ${d.delay_days}d |
+                    Reliability: ${(d.reliability * 100).toFixed(0)}% |
+                    ${d.committees ? d.committees.join(', ') : ''}
+                </span>
+            </div>`;
+        }).join('');
+
+        const now = new Date();
+        statusEl.textContent = `updated ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}`;
+    } catch (e) {
+        document.getElementById('disclosures-feed').innerHTML =
+            `<div style="color:#e94560; font-size:12px;">Error loading disclosures: ${e.message}</div>`;
+        document.getElementById('disclosures-status').textContent = 'error';
+    }
+}
+
+function startDisclosuresTimer() {
+    if (disclosuresTimer) clearInterval(disclosuresTimer);
+    const minutes = parseInt(document.getElementById('disclosures-interval').value) || 30;
+    disclosuresTimer = setInterval(fetchDisclosures, minutes * 60 * 1000);
+}
+
+document.getElementById('disclosures-interval').addEventListener('change', () => {
+    startDisclosuresTimer();
+    const min = document.getElementById('disclosures-interval').value;
+    document.getElementById('disclosures-status').textContent = `interval: ${min}min`;
+});
+
+// ── News Feed ──
+let newsTimer = null;
+
+async function fetchNews() {
+    const statusEl = document.getElementById('news-status');
+    statusEl.textContent = 'fetching...';
+    try {
+        const resp = await fetch(`${API}/politician/news?max=10`);
+        const data = await resp.json();
+        const feed = document.getElementById('news-feed');
+
+        if (!data.articles || data.articles.length === 0) {
+            feed.innerHTML = '<div style="color:#666; font-size:12px;">No news available. RSS feeds may be unreachable.</div>';
+            statusEl.textContent = 'no articles';
+            return;
+        }
+
+        feed.innerHTML = data.articles.map(a => {
+            const summary = a.summary || 'No summary available.';
+            const pub = a.published ? a.published.replace(/ \+0000$/, ' UTC') : '';
+            return `<div class="news-item">
+                <div class="news-title"><a href="${escapeHtml(a.link)}" target="_blank">${escapeHtml(a.title)}</a></div>
+                <div class="news-summary">${escapeHtml(summary)}</div>
+                <div class="news-meta">
+                    <span class="news-source">${escapeHtml(a.source)}</span>
+                    ${pub ? ' | ' + escapeHtml(pub) : ''}
+                </div>
+            </div>`;
+        }).join('');
+
+        const now = new Date();
+        statusEl.textContent = `updated ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}`;
+    } catch (e) {
+        document.getElementById('news-feed').innerHTML =
+            `<div style="color:#e94560; font-size:12px;">Error fetching news: ${e.message}</div>`;
+        statusEl.textContent = 'error';
+    }
+}
+
+function startNewsTimer() {
+    if (newsTimer) clearInterval(newsTimer);
+    const minutes = parseInt(document.getElementById('news-interval').value) || 10;
+    newsTimer = setInterval(fetchNews, minutes * 60 * 1000);
+}
+
+// Update timer when interval changes
+document.getElementById('news-interval').addEventListener('change', () => {
+    startNewsTimer();
+    const min = document.getElementById('news-interval').value;
+    document.getElementById('news-status').textContent = `interval: ${min}min`;
+});
+
+// Initial load & refresh
+fetchStatus();
+fetchDisclosures();
+fetchNews();
+refreshTimer = setInterval(fetchStatus, 10000);
+startDisclosuresTimer();
+startNewsTimer();
+</script>
+</body>
+</html>

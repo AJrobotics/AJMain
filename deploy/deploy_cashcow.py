@@ -1,9 +1,13 @@
-"""Deploy Smart Trader code from Dreamer to CashCow via SSH/SCP.
+"""Deploy Smart Trader / Day Trader code from Dreamer to CashCow via SSH/SCP.
 
 Usage:
     python -m deploy.deploy_cashcow              # sync files + install deps
     python -m deploy.deploy_cashcow --run         # sync + start trader (ALERT mode)
     python -m deploy.deploy_cashcow --run --auto  # sync + start trader (AUTO mode)
+    python -m deploy.deploy_cashcow --run --day   # sync + start day trader (ALERT)
+    python -m deploy.deploy_cashcow --run --day --auto  # sync + start day trader (AUTO)
+    python -m deploy.deploy_cashcow --run --politician       # sync + start politician trader (ALERT)
+    python -m deploy.deploy_cashcow --run --politician --auto  # sync + start politician trader (AUTO)
     python -m deploy.deploy_cashcow --sync-only   # sync files only
     python -m deploy.deploy_cashcow --stop        # stop running trader
     python -m deploy.deploy_cashcow --status      # check if trader is running
@@ -38,6 +42,13 @@ TRADER_FILES = [
     "portfolio_manager.py",
     "risk_shield.py",
     "tax_optimizer.py",
+    "day_trader.py",
+    "day_strategies.py",
+    "day_risk.py",
+    "politician_trader.py",
+    "politician_strategies.py",
+    "politician_data.py",
+    "politician_risk.py",
     "requirements.txt",
 ]
 
@@ -121,21 +132,43 @@ def install_deps():
     print("  [OK] Dependencies installed")
 
 
-def start_trader(auto: bool = False, port: int = 7497):
-    """Start Smart Trader on CashCow (background with nohup)."""
-    mode = "--auto" if auto else ""
-    mode_name = "AUTO" if auto else "ALERT"
-    print(f"  Starting Smart Trader on CashCow ({mode_name} mode, port {port})...")
+def start_trader(auto: bool = False, port: int = 7497, day: bool = False,
+                  politician: bool = False):
+    """Start Smart Trader, Day Trader, or Politician Trader on CashCow."""
+    flags = []
+    if day:
+        flags.append("--day")
+    if politician:
+        flags.append("--politician")
+    if auto:
+        flags.append("--auto")
+    flags.append(f"--port {port}")
+    flags_str = " ".join(flags)
 
+    if politician:
+        trader_type = "Politician Trader"
+    elif day:
+        trader_type = "Day Trader"
+    else:
+        trader_type = "Smart Trader"
+    mode_name = "AUTO" if auto else "ALERT"
+    print(f"  Starting {trader_type} on CashCow ({mode_name} mode, port {port})...")
+
+    if politician:
+        log_file = "politician_trader_stdout.log"
+    elif day:
+        log_file = "day_trader_stdout.log"
+    else:
+        log_file = "trader_stdout.log"
     cmd = (
         f"source {REMOTE_VENV}/bin/activate && "
         f"cd {REMOTE_DIR} && "
-        f"nohup python run.py {mode} --port {port} "
-        f"> {REMOTE_DIR}/logs/trader_stdout.log 2>&1 &"
+        f"nohup python run.py {flags_str} "
+        f"> {REMOTE_DIR}/logs/{log_file} 2>&1 &"
     )
     ssh_cmd(cmd, quiet=True)
-    print(f"  [OK] Smart Trader started in background ({mode_name} mode)")
-    print(f"  Logs: CashCow:{REMOTE_DIR}/logs/")
+    print(f"  [OK] {trader_type} started in background ({mode_name} mode)")
+    print(f"  Logs: CashCow:{REMOTE_DIR}/logs/{log_file}")
 
 
 def stop_trader():
@@ -175,6 +208,8 @@ def main():
     parser = argparse.ArgumentParser(description="Deploy Smart Trader to CashCow")
     parser.add_argument("--run", action="store_true", help="Start trader after sync")
     parser.add_argument("--auto", action="store_true", help="Start in AUTO mode (executes trades)")
+    parser.add_argument("--day", action="store_true", help="Day trading mode (scalping + intraday)")
+    parser.add_argument("--politician", action="store_true", help="Politician trading mode (congressional trade follower)")
     parser.add_argument("--sync-only", action="store_true", help="Sync files only")
     parser.add_argument("--stop", action="store_true", help="Stop running trader")
     parser.add_argument("--status", action="store_true", help="Check trader status")
@@ -215,14 +250,21 @@ def main():
 
     if args.run:
         stop_trader()  # stop old instance first
-        start_trader(auto=args.auto, port=args.port)
+        start_trader(auto=args.auto, port=args.port, day=args.day,
+                     politician=args.politician)
 
     print()
     print("=" * 50)
     print("  Deploy complete!")
     if args.run:
         mode = "AUTO" if args.auto else "ALERT"
-        print(f"  Trader running on CashCow ({mode} mode, port {args.port})")
+        if args.politician:
+            trader_type = "Politician Trader"
+        elif args.day:
+            trader_type = "Day Trader"
+        else:
+            trader_type = "Smart Trader"
+        print(f"  {trader_type} running on CashCow ({mode} mode, port {args.port})")
     else:
         print("  Use --run to start the trader")
         print(f"  Or SSH: ssh {REMOTE_USER}@{REMOTE_HOST}")
