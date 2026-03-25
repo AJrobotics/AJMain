@@ -59,19 +59,13 @@ def init_bot():
             print("STM32 not found (/dev/rosmaster missing). Skipping bot init.")
             return
         from Rosmaster_Lib import Rosmaster
-        # Test if this is really the STM32 before full init
-        test = Rosmaster(car_type=2, com="/dev/rosmaster")
-        test.create_receive_threading()
-        time.sleep(2)
-        v = test.get_battery_voltage()
-        del test
-        if v < 1:
-            print(f"STM32 on /dev/rosmaster not responding (battery={v}V). Skipping.")
-            return
+        print("Initializing Rosmaster_Lib on /dev/rosmaster...")
         bot = Rosmaster(car_type=2, com="/dev/rosmaster")
         bot.create_receive_threading()
-        time.sleep(1)
-        print(f"Rosmaster_Lib initialized on /dev/myserial. Battery: {bot.get_battery_voltage()}V")
+        time.sleep(3)
+        v = bot.get_battery_voltage()
+        print(f"Rosmaster_Lib initialized. Battery: {v}V")
+        bot.set_beep(0)
     except Exception as e:
         print(f"Rosmaster_Lib init failed: {e}")
         bot = None
@@ -92,6 +86,17 @@ class CollisionConfigHandler(tornado.web.RequestHandler):
             if "enabled" in data:
                 collision.enabled = bool(data["enabled"])
             self.write(json.dumps({"ok": True, "ignore_angle": collision.ignore_angle, "enabled": collision.enabled}))
+        except Exception as e:
+            self.write(json.dumps({"ok": False, "error": str(e)}))
+
+
+class DepthOffsetHandler(tornado.web.RequestHandler):
+    def post(self):
+        try:
+            data = json.loads(self.request.body)
+            offset = float(data.get("offset", 0.0))
+            depth.set_angle_offset(offset)
+            self.write(json.dumps({"ok": True, "offset": offset}))
         except Exception as e:
             self.write(json.dumps({"ok": False, "error": str(e)}))
 
@@ -223,9 +228,12 @@ def broadcast_lidar():
     scan = lidar.get_scan()
     if not scan:
         return
+    # Get depth camera horizontal line for overlay
+    depth_line = depth.get_depth_line() if depth.connected else []
     msg = json.dumps({
         "type": "scan",
         "points": scan,
+        "depth_line": depth_line,
         "simulated": lidar.simulated,
         "connected": lidar.connected,
         "ts": time.time(),
@@ -245,14 +253,11 @@ def broadcast_depth():
     jpeg_b64, stats = depth.get_frame()
     if not jpeg_b64:
         return
-    floor_b64, floor_stats = depth.get_floor()
     msg = json.dumps({
         "type": "depth",
         "image": jpeg_b64,
         "stats": stats,
         "connected": depth.connected,
-        "floor_image": floor_b64,
-        "floor_stats": floor_stats,
     })
     dead = set()
     for client in depth_clients:
@@ -446,6 +451,7 @@ def make_app():
         (r"/ws/cam/primary", CamPrimaryWSHandler),
         (r"/ws/collision", CollisionWSHandler),
         (r"/api/collision", CollisionConfigHandler),
+        (r"/api/depth_offset", DepthOffsetHandler),
         (r"/api/calibration", CalibrationHandler),
         (r"/api/explorer", ExplorerHandler),
         (r"/ws/slam", SlamWSHandler),
@@ -513,7 +519,7 @@ def main():
     # Status at ~1 Hz
     tornado.ioloop.PeriodicCallback(broadcast_status, 1000).start()
 
-    def shutdown(sig, frame):
+    def shutdown():
         global bot
         print("\nShutting down...")
         lidar.stop()
@@ -525,13 +531,16 @@ def main():
             except Exception:
                 pass
         loop.stop()
-        sys.exit(0)
 
-    signal.signal(signal.SIGINT, shutdown)
-    signal.signal(signal.SIGTERM, shutdown)
+    def on_signal(sig, frame):
+        loop.add_callback_from_signal(shutdown)
+
+    signal.signal(signal.SIGINT, on_signal)
+    signal.signal(signal.SIGTERM, on_signal)
 
     print("Server ready!")
     loop.start()
+    sys.exit(0)
 
 
 if __name__ == "__main__":

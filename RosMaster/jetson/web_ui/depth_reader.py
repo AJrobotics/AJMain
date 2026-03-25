@@ -14,6 +14,9 @@ OPENNI2_PATH = "/home/jetson/yahboomcar_ros2_ws/software/library_ws/install/astr
 
 
 class DepthReader:
+    # Orbbec Astra horizontal FOV in degrees
+    HFOV = 60.0
+
     def __init__(self):
         self.running = False
         self.connected = False
@@ -21,7 +24,9 @@ class DepthReader:
         self.depth_stats = {}
         self.floor_jpeg = None  # base64 JPEG of floor detection view
         self.floor_stats = {}   # floor detection stats
+        self.depth_line = []    # horizontal line: list of (angle_deg, distance_mm)
         self._raw_depth = None  # raw uint16 depth frame for collision avoidance
+        self.angle_offset = 0.0  # degrees to add to each depth angle for LiDAR alignment
         self.lock = threading.Lock()
         self._thread = None
         self.floor_baseline = None  # learned floor distance per column
@@ -80,10 +85,14 @@ class DepthReader:
                 # Floor detection: bottom third of frame
                 floor_b64, floor_st = self._process_floor(data)
 
+                # Extract horizontal line from middle row for LiDAR overlay
+                depth_line = self._extract_depth_line(data)
+
                 with self.lock:
                     self.depth_jpeg = b64
                     self._raw_depth = data.copy()
                     self.depth_stats = stats
+                    self.depth_line = depth_line
                     if floor_b64:
                         self.floor_jpeg = floor_b64
                         self.floor_stats = floor_st
@@ -168,10 +177,43 @@ class DepthReader:
 
         return b64, stats
 
+    def _extract_depth_line(self, data):
+        """Extract horizontal distance line from middle row of depth frame.
+
+        Returns list of (angle_deg, distance_mm) pairs.
+        Angle 0 = straight ahead, negative = left, positive = right.
+        The depth camera faces forward, so angle range is ±HFOV/2.
+        """
+        h, w = data.shape
+        mid_row = data[h // 2, :]
+
+        half_fov = self.HFOV / 2.0
+        line = []
+        # Sample every 4th pixel for efficiency (160 points across 640px)
+        for col in range(0, w, 4):
+            d = int(mid_row[col])
+            if d < 100 or d > 8000:
+                continue
+            # Map pixel column to angle: col 0 = +30° (right), col 639 = -30° (left)
+            # Depth image is mirrored relative to LiDAR, so negate
+            angle = -(col - w / 2.0) / (w / 2.0) * half_fov + self.angle_offset
+            line.append((round(angle, 1), d))
+
+        return line
+
     def get_frame(self):
         """Returns (base64_jpeg, stats_dict) or (None, {})."""
         with self.lock:
             return self.depth_jpeg, self.depth_stats.copy()
+
+    def get_depth_line(self):
+        """Returns list of (angle_deg, distance_mm) for LiDAR overlay."""
+        with self.lock:
+            return list(self.depth_line)
+
+    def set_angle_offset(self, offset_deg):
+        """Set angle offset in degrees for aligning depth line with LiDAR data."""
+        self.angle_offset = float(offset_deg)
 
     def get_floor(self):
         """Returns (floor_jpeg_b64, floor_stats) for floor detection view."""

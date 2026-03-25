@@ -4,11 +4,11 @@
 - **Board:** Jetson Orin NX (JetPack R36.4.3, aarch64, Ubuntu)
 - **Wheels:** Mecanum (4WD omnidirectional, car_type=2)
 - **LiDAR:** RPLidar S2 (Slamtec, 1Mbaud, CP210x, `/dev/rplidar`)
-- **Depth Camera:** Orbbec Astra (OpenNI2, depth 640x480 + RGB)
-- **Driver Board:** STM32 with CH340 USB-serial (`/dev/rosmaster`)
+- **Depth Camera:** Orbbec Astra (OpenNI2, depth 640x480 + RGB, HFOV ~60°)
+- **Driver Board:** STM32 v3.5 with CH340 USB-serial (`/dev/rosmaster`)
 - **XBee:** FT231X USB-serial (`/dev/xbee`, 115200 baud)
 - **GPS:** U-Blox 7 (`/dev/gps`, CDC-ACM)
-- **OLED:** SSD1306 128x32 via I2C
+- **OLED:** SSD1306 128x32 via I2C (bus 0, addr 0x50/0x57)
 - **WiFi:** RTL8822CE, connected to NETGEAR15, static IP 192.168.1.99
 - **SSH:** `jetson@192.168.1.99`, key auth, password `yahboom`
 - **VNC:** port 5900, password `yahboom`, x11vnc with virtual display 1280x720
@@ -53,7 +53,7 @@ Accessible from any device on the network.
 **WebSocket endpoints:**
 | Endpoint | Rate | Content |
 |----------|------|---------|
-| `/ws/lidar` | ~5 Hz | LiDAR scan points |
+| `/ws/lidar` | ~5 Hz | LiDAR scan points + depth camera line overlay |
 | `/ws/depth` | ~5 Hz | Depth heatmap + floor detection |
 | `/ws/cam/primary` | ~5 Hz | Astra RGB camera |
 | `/ws/collision` | ~5 Hz | 8-sector collision distances |
@@ -66,6 +66,7 @@ Accessible from any device on the network.
 | `/api/collision` | POST | Set ignore_angle, enable/disable |
 | `/api/calibration` | POST/GET | Motor calibration tests |
 | `/api/explorer` | POST/GET | Exploration control |
+| `/api/depth_offset` | POST | Set depth camera angle offset |
 
 ## Project Structure
 ```
@@ -86,7 +87,7 @@ jetson/
   web_ui/
     server.py                # Tornado web server
     lidar_reader.py          # RPLidar S2 reader (pyrplidar)
-    depth_reader.py          # Orbbec Astra depth + floor detection
+    depth_reader.py          # Orbbec Astra depth + floor detection + depth line
     camera_reader.py         # RGB camera reader
     static/
       index.html             # Dashboard UI
@@ -113,17 +114,41 @@ jetson/
 - Rotation always allowed
 - Rear ignore zone excludes LiDAR points behind robot
 
+## LiDAR Configuration
+- **RPLidar S2** (Model 113, FW 1.2, HW 18)
+- Best motor PWM: **600** (spread=273, most stable)
+- Scan rate: ~4.5 Hz at PWM 600
+- Points per revolution: 1155-1428 (avg ~1256)
+- Revolution detection: angle wraps backward by >300°
+- Depth camera overlay: horizontal line from middle row of depth frame (±30° FOV)
+- Depth image is mirrored relative to LiDAR (angle negated in extraction)
+
+## Depth Camera
+- **Orbbec Astra** (original model with RGB + IR + depth)
+- OpenNI2 path: `/home/jetson/yahboomcar_ros2_ws/software/library_ws/install/astra_camera/include/openni2/openni2_redist/arm64`
+- Depth resolution: 640x480, range 400-5000mm
+- Horizontal FOV: ~60° (±30° from center)
+- RGB via OpenCV VideoCapture (video0), not OpenNI2
+- Depth line overlay: middle row sampled every 4th pixel → ~130 points
+- Angle offset calibration available via `/api/depth_offset`
+
 ## SLAM
 - Custom Python: occupancy grid (600x600, 50mm/cell) + ICP scan matching
 - Pose tracking with IMU yaw fusion
 - Frontier-based autonomous exploration
 - Return-to-home via breadcrumb trail
+- SLAM runs in background thread, not Tornado event loop
 
 ## Known Issues
-- STM32 USB connection is intermittent (sometimes only 1 CH340 appears)
-- Low battery causes LiDAR instability
-- Expansion board beeps on power-up until Key1 pressed
-- Yahboom autostart app removed from GNOME autostart
+- **STM32 USB intermittent**: sometimes only 1 CH340 appears instead of 2. The STM32 driver board's CH340 USB path can change between boots depending on expansion board power-up timing. Server `init_bot()` tests battery voltage > 1V to verify connection.
+- **Serial port conflict**: Only ONE process can open `/dev/rosmaster` at a time. The OLED `status_display.py` must NOT open it — only `server.py` should.
+- **Low battery causes LiDAR instability**: voltage drops → RPLidar motor speed fluctuates → inconsistent scan data. Charge battery when voltage drops below 9V.
+- **Expansion board beeps on power-up**: Press Key1 on the board to stop. The beep is STM32 firmware, not software-controlled unless USB serial works.
+- **Yahboom autostart app**: removed from GNOME autostart (`~/.config/autostart/start_app.sh.desktop` deleted)
+- **USB path-based udev rules**: work when devices are on stable hub ports, but expansion board's internal hub can reassign ports between boots. If battery reads 0V, the STM32 may be on a different ttyUSB — restart the web UI service after verifying which port has the STM32.
+- **Server SIGTERM handling**: Uses `loop.add_callback_from_signal()` to avoid premature shutdown during systemctl restart. Service uses `Restart=always`.
+- **Astra RGB not via OpenNI2**: Color stream fails via OpenNI2; use OpenCV `VideoCapture(0)` for the Astra RGB camera instead.
+- **GStreamer warnings**: Astra RGB camera shows GStreamer pipeline errors on first open but works with V4L2 backend fallback.
 
 ## SMS Boot Notification
 - Sends to 6616180571 (Verizon) via `dreamittogether@gmail.com`

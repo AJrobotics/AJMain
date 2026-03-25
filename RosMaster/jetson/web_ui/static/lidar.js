@@ -20,6 +20,8 @@ let isConnected = false;
 let collisionSectors = [9999, 9999, 9999, 9999, 9999, 9999, 9999, 9999];
 let collisionThresholds = { stop: 200, slow: 500, caution: 800 };
 let ignoreAngle = 120;
+let depthLine = [];  // depth camera horizontal line: [{angle, dist}, ...]
+let depthOffset = 0;  // depth camera angle offset in degrees
 
 // Range rings in meters
 const RANGE_RINGS = [0.5, 1.0, 2.0, 4.0];
@@ -133,6 +135,34 @@ function drawPoints(cx, cy, scale) {
     ctx.fill();
 }
 
+function drawDepthLine(cx, cy, scale) {
+    if (depthLine.length === 0) return;
+
+    const dpr = window.devicePixelRatio;
+    const dotSize = 4 * dpr;
+
+    // Draw depth points as orange dots
+    ctx.fillStyle = '#ff6600';
+
+    for (const p of depthLine) {
+        const distM = p.dist / 1000.0;
+        if (distM < 0.05 || distM > MAX_RANGE_M) continue;
+
+        // Depth camera: 0° = forward (up on canvas), +angle = right, -angle = left
+        // Canvas: -90° = up. So depth angle 0 → canvas -90°
+        const angleRad = (p.angle - 90) * Math.PI / 180.0;
+        const px = cx + Math.cos(angleRad) * distM * scale;
+        const py = cy + Math.sin(angleRad) * distM * scale;
+
+        ctx.fillRect(px - dotSize / 2, py - dotSize / 2, dotSize, dotSize);
+    }
+
+    // Show depth point count near top-left
+    ctx.fillStyle = '#ff6600';
+    ctx.font = (12 * dpr) + 'px monospace';
+    ctx.fillText('Depth: ' + depthLine.length + ' pts', 10 * dpr, 80 * dpr);
+}
+
 function drawCollisionZones(cx, cy, scale) {
     const dpr = window.devicePixelRatio;
     const sectorAngle = Math.PI * 2 / 8;
@@ -186,6 +216,7 @@ function render() {
     drawBackground(w, h, cx, cy, scale);
     drawCollisionZones(cx, cy, scale);
     drawPoints(cx, cy, scale);
+    drawDepthLine(cx, cy, scale);
 
     // Update info text
     document.getElementById('lidar-fps').textContent = scanFps + ' scans/s';
@@ -213,6 +244,7 @@ function connectLidarWS() {
                 return;
             }
             scanPoints = data.points;
+            depthLine = (data.depth_line || []).map(p => ({angle: p[0], dist: p[1]}));
             isSimulated = data.simulated;
             isConnected = data.connected;
             needsRedraw = true;
@@ -508,3 +540,25 @@ document.getElementById('ignore-angle-input').addEventListener('change', (e) => 
         body: JSON.stringify({ignore_angle: val}),
     });
 });
+
+// --- Depth offset control ---
+// Create a small input overlay on the LiDAR panel for depth angle offset
+(function() {
+    const container = document.createElement('div');
+    container.style.cssText = 'position:absolute;top:8px;right:8px;font-size:12px;color:#ff6600;display:flex;align-items:center;gap:4px;';
+    container.innerHTML = '<span>Depth Offset</span>' +
+        '<input type="number" id="depth-offset-input" value="0" step="1" ' +
+        'style="width:50px;background:#0a0a1a;color:#ff6600;border:1px solid #333;padding:2px 4px;font-size:12px;text-align:right;" />' +
+        '<span style="font-size:11px;color:#888;">&deg;</span>';
+    document.getElementById('lidar-panel').appendChild(container);
+
+    document.getElementById('depth-offset-input').addEventListener('change', (e) => {
+        const val = parseFloat(e.target.value) || 0;
+        depthOffset = val;
+        fetch('/api/depth_offset', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({offset: val}),
+        });
+    });
+})();

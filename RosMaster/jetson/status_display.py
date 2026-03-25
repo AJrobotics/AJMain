@@ -35,18 +35,8 @@ class StatusDisplay:
         self.image = Image.new("1", (WIDTH, HEIGHT))
         self.draw = ImageDraw.Draw(self.image)
         self.font = ImageFont.truetype(FONT_PATH, FONT_SIZE)
+        # Don't open /dev/rosmaster here — web UI server owns that port
         self.bot = None
-        try:
-            import os
-            if os.path.exists("/dev/rosmaster"):
-                self.bot = Rosmaster(car_type=ROBOT_TYPE, com="/dev/rosmaster")
-                self.bot.create_receive_threading()
-                time.sleep(1)
-                if self.bot.get_battery_voltage() < 1:
-                    del self.bot
-                    self.bot = None
-        except Exception:
-            self.bot = None
         self.running = True
         self.page = 0
 
