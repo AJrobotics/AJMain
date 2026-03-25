@@ -13,12 +13,13 @@ import numpy as np
 from slam_engine import GRID_SIZE, CELL_SIZE_MM
 
 # Explorer parameters
-EXPLORE_SPEED = 0.12       # m/s
-ROTATION_SPEED = 0.8       # rad/s
+EXPLORE_SPEED = 0.08       # m/s forward speed (slow for safety)
+ROTATION_SPEED = 0.3       # rad/s — slow turn for sensor fusion accuracy
 WAYPOINT_TOLERANCE = 150   # mm — how close to a waypoint before moving to next
 FRONTIER_MIN_SIZE = 5      # minimum frontier cluster size to target
 HEADING_TOLERANCE = 0.3    # radians — how aligned before moving forward
 EXPLORE_UPDATE_HZ = 5      # how often the explorer loop runs
+INITIAL_SCAN_SPEED = 0.2   # rad/s — very slow initial 360° scan
 
 
 class Explorer:
@@ -40,7 +41,10 @@ class Explorer:
         """Move with collision avoidance."""
         if self.collision and self.collision.enabled:
             self.collision.update_sectors()
+            orig_vx, orig_vy = vx, vy
             vx, vy, vz = self.collision.filter_motion(vx, vy, vz)
+            if orig_vx != 0 and vx == 0:
+                print(f"Collision BLOCKED forward motion (min_dist={self.collision.min_dist}mm)")
         if self.bot:
             self.bot.set_car_motion(vx, vy, vz)
         return vx, vy, vz
@@ -61,71 +65,102 @@ class Explorer:
         return angle_from_rear >= (self.ignore_angle / 2.0)
 
     def _find_frontiers(self):
-        """Find frontier cells (free cells adjacent to unknown cells)."""
+        """Find frontier cells (free cells adjacent to unknown cells).
+
+        Uses numpy vectorized operations for speed instead of per-pixel loops.
+        """
         if not self.slam:
             return []
 
         grid = self.slam.get_map_image()
-        frontiers = []
 
         # Free cells: pixel value > 200 (high probability of free)
         # Unknown cells: pixel value ~128
-        # Occupied: pixel value < 50
         free = grid > 200
         unknown = (grid > 100) & (grid < 160)
 
-        for y in range(1, GRID_SIZE - 1):
-            for x in range(1, GRID_SIZE - 1):
-                if not free[y, x]:
-                    continue
-                # Check if any neighbor is unknown
-                if (unknown[y-1, x] or unknown[y+1, x] or
-                    unknown[y, x-1] or unknown[y, x+1]):
-                    # Convert to world mm
-                    wx = x * CELL_SIZE_MM
-                    wy = y * CELL_SIZE_MM
+        # Vectorized neighbor check: free cell with any unknown neighbor
+        unknown_neighbor = (
+            unknown[:-2, 1:-1] |   # up
+            unknown[2:, 1:-1] |    # down
+            unknown[1:-1, :-2] |   # left
+            unknown[1:-1, 2:]      # right
+        )
+        frontier_mask = free[1:-1, 1:-1] & unknown_neighbor
 
-                    # Check if this frontier is in a valid direction (not rear)
-                    pose = self._get_pose()
-                    dx = wx - pose[0]
-                    dy = wy - pose[1]
-                    angle_to_frontier = math.atan2(dy, dx)
-                    relative_angle = angle_to_frontier - pose[2]
+        # Get frontier coordinates
+        fy, fx = np.where(frontier_mask)
+        fx = fx + 1  # offset from 1:-1 slicing
+        fy = fy + 1
 
-                    if self._angle_in_valid_zone(relative_angle):
-                        frontiers.append((wx, wy))
+        if len(fx) == 0:
+            return []
 
+        # Convert to world mm
+        wx = fx * CELL_SIZE_MM
+        wy = fy * CELL_SIZE_MM
+
+        # Filter: only frontiers in valid direction (not rear ignore zone)
+        pose = self._get_pose()
+        dx = wx - pose[0]
+        dy = wy - pose[1]
+        angles = np.arctan2(dy, dx)
+        relative = angles - pose[2]
+        # Normalize to -pi..pi
+        relative = (relative + np.pi) % (2 * np.pi) - np.pi
+        # Convert to degrees and check ignore zone
+        rel_deg = np.degrees(relative) % 360
+        angle_from_rear = np.abs(((rel_deg - 180) + 180) % 360 - 180)
+        valid = angle_from_rear >= (self.ignore_angle / 2.0)
+
+        frontiers = list(zip(wx[valid].tolist(), wy[valid].tolist()))
         return frontiers
 
     def _cluster_frontiers(self, frontiers):
-        """Group nearby frontier cells into clusters, return largest cluster centers."""
+        """Group nearby frontier cells into clusters using grid-based binning.
+
+        Fast O(n) approach: bin frontiers into coarse grid cells, then
+        merge adjacent bins into clusters.
+        """
         if not frontiers:
             return []
 
-        points = np.array(frontiers)
-        visited = [False] * len(points)
+        bin_size = CELL_SIZE_MM * 4  # coarse bin = 200mm
+        bins = {}
+
+        for fx, fy in frontiers:
+            key = (int(fx / bin_size), int(fy / bin_size))
+            if key not in bins:
+                bins[key] = []
+            bins[key].append((fx, fy))
+
+        # Merge adjacent bins into clusters
+        visited = set()
         clusters = []
 
-        for i in range(len(points)):
-            if visited[i]:
+        for key in bins:
+            if key in visited:
                 continue
-            cluster = [i]
-            visited[i] = True
-            queue = [i]
+            # BFS through adjacent bins
+            cluster_points = []
+            queue = [key]
+            visited.add(key)
 
             while queue:
-                idx = queue.pop(0)
-                for j in range(len(points)):
-                    if not visited[j]:
-                        dist = np.linalg.norm(points[idx] - points[j])
-                        if dist < CELL_SIZE_MM * 3:
-                            visited[j] = True
-                            cluster.append(j)
-                            queue.append(j)
+                bk = queue.pop(0)
+                if bk in bins:
+                    cluster_points.extend(bins[bk])
+                for dx in [-1, 0, 1]:
+                    for dy in [-1, 0, 1]:
+                        nk = (bk[0] + dx, bk[1] + dy)
+                        if nk not in visited and nk in bins:
+                            visited.add(nk)
+                            queue.append(nk)
 
-            if len(cluster) >= FRONTIER_MIN_SIZE:
-                center = points[cluster].mean(axis=0)
-                clusters.append((center[0], center[1], len(cluster)))
+            if len(cluster_points) >= FRONTIER_MIN_SIZE:
+                pts = np.array(cluster_points)
+                cx, cy = pts.mean(axis=0)
+                clusters.append((cx, cy, len(cluster_points)))
 
         # Sort by distance from robot (nearest first)
         pose = self._get_pose()
@@ -154,24 +189,45 @@ class Explorer:
                 vz = ROTATION_SPEED if heading_error > 0 else -ROTATION_SPEED
                 self._move_filtered(0, 0, vz)
             else:
-                # Move forward
+                # Move forward — check collision first
                 vx = min(EXPLORE_SPEED, dist / 1000.0)
-                self._move_filtered(vx, 0, heading_error * 0.5)  # slight correction
+                actual_vx, _, _ = self._move_filtered(vx, 0, heading_error * 0.3)
+                if actual_vx == 0 and vx > 0:
+                    # Blocked by collision — skip this target
+                    print(f"Collision blocked path to ({target_x:.0f}, {target_y:.0f}), skipping")
+                    return False
 
             time.sleep(1.0 / EXPLORE_UPDATE_HZ)
 
         return False
 
+    def _initial_scan(self):
+        """Slow 360° scan at start to build initial map with both sensors."""
+        print("Initial scan: slow 360° rotation...")
+        scan_time = 2 * math.pi / INITIAL_SCAN_SPEED  # time for full rotation
+        start = time.time()
+        while time.time() - start < scan_time and not self._abort:
+            self._move_filtered(0, 0, INITIAL_SCAN_SPEED)
+            time.sleep(1.0 / EXPLORE_UPDATE_HZ)
+        self._stop_motors()
+        time.sleep(0.5)
+        print("Initial scan complete")
+
     def _explore_loop(self):
         """Main exploration loop."""
         try:
+            # Do initial slow scan to build map from both sensors
+            self._initial_scan()
+
             while not self._abort and self.state == "exploring":
                 # Find frontiers
+                t0 = time.time()
                 raw_frontiers = self._find_frontiers()
                 with self.lock:
                     self.frontiers = raw_frontiers[:100]  # limit for UI
 
                 clusters = self._cluster_frontiers(raw_frontiers)
+                print(f"Frontiers: {len(raw_frontiers)} raw, {len(clusters)} clusters ({time.time()-t0:.2f}s)")
 
                 if not clusters:
                     # No more frontiers — exploration complete

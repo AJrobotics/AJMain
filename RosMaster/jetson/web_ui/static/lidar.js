@@ -431,6 +431,12 @@ function connectSlamWS() {
                 const img = document.getElementById('slam-map');
                 img.src = 'data:image/jpeg;base64,' + data.image;
             }
+            if (data.walls_image) {
+                const wimg = document.getElementById('walls-map');
+                wimg.src = 'data:image/jpeg;base64,' + data.walls_image;
+                document.getElementById('walls-info').textContent =
+                    `${data.wall_count || 0} wall cells`;
+            }
             document.getElementById('slam-info').textContent =
                 `Scans: ${data.scans} | Pose: (${data.pose.x}, ${data.pose.y}) ${data.pose.theta}\u00B0`;
 

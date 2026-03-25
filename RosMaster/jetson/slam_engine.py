@@ -23,7 +23,7 @@ L_OCC = 0.9
 L_OCC_FUSED = 1.5        # higher confidence when both sensors agree
 L_OCC_SINGLE = 0.3       # lower confidence when only LiDAR in overlap zone
 L_MIN = -5.0
-L_MAX = 5.0
+L_MAX = 4.0
 
 # ICP parameters
 ICP_MAX_ITER = 20
@@ -321,15 +321,38 @@ class SLAMEngine:
                 self.pose_history.append(self.pose.copy())
 
     def get_map_image(self):
-        """Return occupancy grid as uint8 grayscale image."""
+        """Return occupancy grid as clean uint8 image.
+
+        Uses thresholds to show only high-confidence features:
+        - Solid black walls: cells with log-odds > 2.0 (confirmed by multiple scans)
+        - White free space: cells with log-odds < -1.5 (cleared by rays)
+        - Gray unknown: everything else (not enough evidence)
+        This eliminates noisy single-scan artifacts.
+        """
         with self.lock:
-            # Convert log-odds to probability, then to 0-255
-            prob = 1.0 / (1.0 + np.exp(-self.grid))
-            # Unknown (0.5) = gray(128), free (0) = white(255), occupied (1) = black(0)
-            img = ((1.0 - prob) * 255).astype(np.uint8)
-            # Mark unknown cells as gray
-            unknown = np.abs(self.grid) < 0.1
-            img[unknown] = 128
+            img = np.full((GRID_SIZE, GRID_SIZE), 128, dtype=np.uint8)  # gray = unknown
+
+            # Free space: log-odds clearly negative
+            free_mask = self.grid < -1.5
+            img[free_mask] = 240  # near-white
+
+            # Occupied: log-odds clearly positive (multiple confirmations)
+            wall_mask = self.grid > 2.0
+            img[wall_mask] = 0  # black = solid wall
+
+            # Weak evidence of occupancy (1-2 scans): show as dark gray hint
+            hint_mask = (self.grid > 0.8) & (self.grid <= 2.0)
+            img[hint_mask] = 80  # dark gray hint
+
+            return img
+
+    def get_walls_image(self):
+        """Return image showing only confirmed walls (white on black)."""
+        with self.lock:
+            img = np.zeros((GRID_SIZE, GRID_SIZE), dtype=np.uint8)
+            # Cells with decent confidence (log-odds > 0.9 = at least 1 full scan)
+            wall_mask = self.grid > 0.9
+            img[wall_mask] = 255
             return img
 
     def get_pose(self):

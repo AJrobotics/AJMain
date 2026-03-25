@@ -376,10 +376,35 @@ def broadcast_slam():
     _, jpeg = cv2.imencode('.jpg', display, [cv2.IMWRITE_JPEG_QUALITY, 75])
     b64 = base64.b64encode(jpeg.tobytes()).decode('ascii')
 
+    # Walls-only image (white walls on black background)
+    walls_img = slam.get_walls_image()
+    # Crop same region as main map
+    if len(non_gray[0]) > 10:
+        walls_cropped = walls_img[y_min:y_max, x_min:x_max]
+    else:
+        walls_cropped = walls_img[250:350, 250:350]
+    walls_display = cv2.resize(walls_cropped, (300, 300), interpolation=cv2.INTER_NEAREST)
+
+    # Draw robot position on walls map too
+    walls_color = cv2.cvtColor(walls_display, cv2.COLOR_GRAY2BGR)
+    # Scale robot position to cropped coordinates
+    if len(non_gray[0]) > 10:
+        wrx = int((pose[0] / CELL_SIZE_MM - x_min) * 300 / max(x_max - x_min, 1))
+        wry = int((pose[1] / CELL_SIZE_MM - y_min) * 300 / max(y_max - y_min, 1))
+        cv2.circle(walls_color, (wrx, wry), 4, (0, 100, 255), -1)
+
+    _, walls_jpeg = cv2.imencode('.jpg', walls_color, [cv2.IMWRITE_JPEG_QUALITY, 75])
+    walls_b64 = base64.b64encode(walls_jpeg.tobytes()).decode('ascii')
+
+    # Count wall cells
+    wall_count = int(np.sum(walls_img > 0))
+
     status = explorer.get_status()
     msg = json.dumps({
         "type": "slam",
         "image": b64,
+        "walls_image": walls_b64,
+        "wall_count": wall_count,
         "pose": {"x": round(pose[0]), "y": round(pose[1]), "theta": round(math.degrees(pose[2]), 1)},
         "explorer": status,
         "scans": slam.scan_count,
@@ -525,6 +550,8 @@ def main():
     # Status at ~1 Hz
     tornado.ioloop.PeriodicCallback(broadcast_status, 1000).start()
 
+    _start_time = time.time()
+
     def shutdown():
         global bot
         print("\nShutting down...")
@@ -539,6 +566,10 @@ def main():
         loop.stop()
 
     def on_signal(sig, frame):
+        # Ignore SIGTERM during first 10 seconds (stale signal from systemctl restart)
+        if time.time() - _start_time < 10:
+            print(f"Ignoring early SIGTERM ({time.time() - _start_time:.1f}s after start)")
+            return
         loop.add_callback_from_signal(shutdown)
 
     signal.signal(signal.SIGINT, on_signal)

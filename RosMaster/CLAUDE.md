@@ -129,15 +129,28 @@ jetson/
 - Depth resolution: 640x480, range 400-5000mm
 - Horizontal FOV: ~60° (±30° from center)
 - RGB via OpenCV VideoCapture (video0), not OpenNI2
-- Depth line overlay: middle row sampled every 4th pixel → ~130 points
+- Depth line overlay: rows 20%-30% from top (wall-level, avoids floor), sampled every 4th pixel, median averaged → ~130 points
+- Depth image is mirrored relative to LiDAR (angle negated in extraction)
 - Angle offset calibration available via `/api/depth_offset`
 
 ## SLAM
 - Custom Python: occupancy grid (600x600, 50mm/cell) + ICP scan matching
 - Pose tracking with IMU yaw fusion
+- **Sensor fusion**: in ±30° forward overlap zone, LiDAR points confirmed by depth camera get higher confidence (L_OCC_FUSED=1.5), contradicted points get lower confidence (L_OCC_SINGLE=0.3)
 - Frontier-based autonomous exploration
 - Return-to-home via breadcrumb trail
 - SLAM runs in background thread, not Tornado event loop
+- **Map display thresholds**: solid walls (log-odds > 0.9), free space (< -1.5), hint walls (0.8-2.0)
+- **Walls-only canvas**: shows only confirmed wall cells (log-odds > 0.9) as white on black
+
+## Explorer
+- Initial slow 360° scan at 0.2 rad/s before exploration (~31 sec)
+- Navigation turn speed: 0.3 rad/s (slow for sensor fusion accuracy)
+- Forward speed: 0.08 m/s (slow for safety)
+- Frontier search: numpy vectorized (handles 10,000+ frontiers in <0.3s)
+- Frontier clustering: grid-based binning O(n) instead of O(n²)
+- Collision-aware: skips blocked targets, picks next frontier
+- Logs frontier count, cluster count, navigation targets, and collision blocks
 
 ## Known Issues
 - **STM32 USB intermittent**: sometimes only 1 CH340 appears instead of 2. The STM32 driver board's CH340 USB path can change between boots depending on expansion board power-up timing. Server `init_bot()` tests battery voltage > 1V to verify connection.
@@ -146,7 +159,7 @@ jetson/
 - **Expansion board beeps on power-up**: Press Key1 on the board to stop. The beep is STM32 firmware, not software-controlled unless USB serial works.
 - **Yahboom autostart app**: removed from GNOME autostart (`~/.config/autostart/start_app.sh.desktop` deleted)
 - **USB path-based udev rules**: work when devices are on stable hub ports, but expansion board's internal hub can reassign ports between boots. If battery reads 0V, the STM32 may be on a different ttyUSB — restart the web UI service after verifying which port has the STM32.
-- **Server SIGTERM handling**: Uses `loop.add_callback_from_signal()` to avoid premature shutdown during systemctl restart. Service uses `Restart=always`.
+- **Server SIGTERM handling**: Ignores SIGTERM during first 10 seconds after startup (stale signal from systemctl restart). Uses `loop.add_callback_from_signal()` after grace period. Service uses `Restart=always` with `-u` (unbuffered) Python.
 - **Astra RGB not via OpenNI2**: Color stream fails via OpenNI2; use OpenCV `VideoCapture(0)` for the Astra RGB camera instead.
 - **GStreamer warnings**: Astra RGB camera shows GStreamer pipeline errors on first open but works with V4L2 backend fallback.
 

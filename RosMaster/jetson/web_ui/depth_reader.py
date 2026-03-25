@@ -178,23 +178,31 @@ class DepthReader:
         return b64, stats
 
     def _extract_depth_line(self, data):
-        """Extract horizontal distance line from middle row of depth frame.
+        """Extract horizontal distance line from rows 20%-30% from top of depth frame.
+
+        Averages multiple rows to get stable wall-level readings, avoiding
+        floor data that appears in lower rows when camera is tilted down.
 
         Returns list of (angle_deg, distance_mm) pairs.
         Angle 0 = straight ahead, negative = left, positive = right.
-        The depth camera faces forward, so angle range is ±HFOV/2.
         """
         h, w = data.shape
-        mid_row = data[h // 2, :]
+        row_start = int(h * 0.20)  # 20% from top
+        row_end = int(h * 0.30)    # 30% from top
+        band = data[row_start:row_end, :]  # shape: (rows, 640)
 
         half_fov = self.HFOV / 2.0
         line = []
-        # Sample every 4th pixel for efficiency (160 points across 640px)
+        # Sample every 4th pixel for efficiency
         for col in range(0, w, 4):
-            d = int(mid_row[col])
-            if d < 100 or d > 8000:
+            col_data = band[:, col]
+            valid = col_data[col_data > 100]
+            if len(valid) < 2:
                 continue
-            # Map pixel column to angle: col 0 = +30° (right), col 639 = -30° (left)
+            d = int(np.median(valid))
+            if d > 8000:
+                continue
+            # Map pixel column to angle
             # Depth image is mirrored relative to LiDAR, so negate
             angle = -(col - w / 2.0) / (w / 2.0) * half_fov + self.angle_offset
             line.append((round(angle, 1), d))
