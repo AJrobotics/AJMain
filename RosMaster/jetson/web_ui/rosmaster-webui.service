@@ -1,0 +1,16 @@
+[Unit]
+Description=RosMaster Web UI Dashboard
+After=network-online.target
+Wants=network-online.target
+Before=rosmaster-status.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/jetson/RosMaster/web_ui
+ExecStart=/usr/bin/python3 /home/jetson/RosMaster/web_ui/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

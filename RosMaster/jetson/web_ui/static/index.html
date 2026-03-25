@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RosMaster X3 Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Consolas, monospace;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        #header {
+            background: #16213e;
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #0f3460;
+        }
+        #header h1 { font-size: 18px; color: #00d4ff; font-weight: 600; }
+        #status-bar { display: flex; gap: 20px; font-size: 13px; }
+        .status-item { display: flex; align-items: center; gap: 5px; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .dot-ok { background: #00ff88; }
+        .dot-err { background: #ff4444; }
+        .dot-sim { background: #ffaa00; }
+
+        /* Main 2-column layout */
+        #main {
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            height: calc(100vh - 42px);
+        }
+
+        /* Left: LiDAR + SLAM stacked */
+        #left-column {
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #0f3460;
+        }
+        #lidar-panel {
+            position: relative;
+            background: #0a0a1a;
+            flex: 1;
+        }
+        #lidar-canvas { width: 100%; height: 100%; }
+        #lidar-info {
+            position: absolute;
+            top: 8px; left: 8px;
+            font-size: 12px; color: #888;
+        }
+
+        /* Right: stacked panels */
+        #side {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            background: #0f3460;
+            overflow-y: auto;
+        }
+        .panel {
+            background: #16213e;
+            padding: 8px 10px;
+        }
+        .panel h3 {
+            font-size: 12px;
+            color: #00d4ff;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .panel-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+            font-size: 12px;
+        }
+        .panel-label { color: #888; }
+        .panel-value { color: #e0e0e0; font-weight: 600; }
+        .panel-placeholder {
+            color: #444;
+            font-style: italic;
+            font-size: 11px;
+            text-align: center;
+            padding: 10px 0;
+        }
+        .cal-btn {
+            background: #0f3460;
+            color: #e0e0e0;
+            border: 1px solid #1a4a7a;
+            padding: 4px 2px;
+            font-size: 11px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        .cal-btn:hover { background: #1a4a7a; }
+        .cal-btn:active { background: #00d4ff; color: #000; }
+        .cal-run { background: #1a4a2a; border-color: #2a6a3a; }
+        .cal-run:hover { background: #2a6a3a; }
+        .cal-abort { background: #4a1a1a; border-color: #6a2a2a; }
+        .cal-abort:hover { background: #6a2a2a; }
+
+        .cam-img {
+            width: 100%;
+            background: #000;
+            display: none;
+        }
+        .cam-label {
+            font-size: 11px;
+            color: #888;
+            margin-top: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>RosMaster X3</h1>
+        <div id="status-bar">
+            <div class="status-item"><span class="dot" id="dot-lidar"></span><span>LiDAR</span></div>
+            <div class="status-item"><span class="dot dot-err" id="dot-depth"></span><span>Depth</span></div>
+            <div class="status-item"><span class="dot dot-err" id="dot-cam1"></span><span>Cam</span></div>
+            <div class="status-item"><span class="dot dot-err" id="dot-xbee"></span><span>XBee</span></div>
+            <div class="status-item"><span id="battery-val">--V</span></div>
+            <div class="status-item"><span id="ip-val">--</span></div>
+        </div>
+    </div>
+
+    <div id="main">
+        <div id="left-column">
+            <div id="lidar-panel">
+                <canvas id="lidar-canvas"></canvas>
+                <div id="lidar-info">
+                    <div id="lidar-fps">-- scans/s</div>
+                    <div id="lidar-points">-- points</div>
+                    <div id="lidar-mode">--</div>
+                </div>
+            </div>
+
+            <!-- SLAM Map -->
+            <div style="background:#16213e;border-top:1px solid #0f3460;padding:6px;display:flex;align-items:flex-start;gap:8px;">
+                <div style="flex-shrink:0;">
+                    <div style="font-size:12px;color:#00d4ff;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">SLAM Map</div>
+                    <img id="slam-map" style="width:200px;height:200px;background:#808080;image-rendering:pixelated;" />
+                    <div id="slam-info" style="font-size:10px;color:#888;margin-top:2px;">Scans: 0</div>
+                </div>
+                <div style="flex:1;">
+                    <div style="font-size:12px;color:#00d4ff;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Explorer</div>
+                    <div class="panel-row"><span class="panel-label">State</span><span class="panel-value" id="explorer-state">IDLE</span></div>
+                    <div class="panel-row"><span class="panel-label">Frontiers</span><span class="panel-value" id="explorer-frontiers">0</span></div>
+                    <div style="display:flex;gap:3px;margin-top:6px;flex-wrap:wrap;">
+                        <button class="cal-btn cal-run" onclick="explorerCmd('start')">Explore</button>
+                        <button class="cal-btn" onclick="explorerCmd('return_home')">Return</button>
+                        <button class="cal-btn cal-abort" onclick="explorerCmd('stop')">Stop</button>
+                        <button class="cal-btn" onclick="explorerCmd('reset_map')">Reset Map</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="side">
+            <!-- Primary Camera: Astra RGB -->
+            <div class="panel">
+                <h3>Astra RGB (Primary)</h3>
+                <img id="cam-primary-image" class="cam-img" />
+                <div id="cam-primary-placeholder" class="panel-placeholder">Not connected</div>
+            </div>
+
+            <!-- Depth Camera Heatmap -->
+            <div class="panel">
+                <h3>Depth Map</h3>
+                <img id="depth-image" class="cam-img" style="image-rendering:pixelated;" />
+                <div id="depth-stats" class="cam-label"></div>
+                <div id="depth-placeholder" class="panel-placeholder">Not connected</div>
+            </div>
+
+            <!-- Floor Detection -->
+            <div class="panel">
+                <h3>Floor Detection</h3>
+                <img id="floor-image" class="cam-img" style="image-rendering:pixelated;" />
+                <div id="floor-stats" class="cam-label"></div>
+                <div id="floor-placeholder" class="panel-placeholder">Waiting for data</div>
+            </div>
+
+            <!-- IMU -->
+            <div class="panel">
+                <h3>IMU</h3>
+                <div class="panel-row"><span class="panel-label">Roll</span><span class="panel-value" id="imu-roll">--</span></div>
+                <div class="panel-row"><span class="panel-label">Pitch</span><span class="panel-value" id="imu-pitch">--</span></div>
+                <div class="panel-row"><span class="panel-label">Yaw</span><span class="panel-value" id="imu-yaw">--</span></div>
+                <div class="panel-row"><span class="panel-label">Accel Z</span><span class="panel-value" id="imu-az">--</span></div>
+            </div>
+
+            <!-- Collision Avoidance -->
+            <div class="panel">
+                <h3>Collision Avoidance</h3>
+                <div class="panel-row">
+                    <span class="panel-label">Status</span>
+                    <span class="panel-value" id="collision-level">--</span>
+                </div>
+                <div class="panel-row">
+                    <span class="panel-label">Min Dist</span>
+                    <span class="panel-value" id="collision-min">--</span>
+                </div>
+                <div class="panel-row">
+                    <span class="panel-label">Enabled</span>
+                    <span class="panel-value" id="collision-enabled">--</span>
+                </div>
+                <div class="panel-row" style="margin-top:6px;">
+                    <span class="panel-label">Rear Ignore</span>
+                    <span>
+                        <input type="number" id="ignore-angle-input" value="120" min="0" max="180" step="5"
+                            style="width:50px;background:#0a0a1a;color:#e0e0e0;border:1px solid #0f3460;padding:2px 4px;font-size:12px;text-align:right;" />
+                        <span style="font-size:11px;color:#888;">&deg;</span>
+                    </span>
+                </div>
+            </div>
+
+            <!-- Calibration -->
+            <div class="panel">
+                <h3>Calibration</h3>
+                <div class="panel-row">
+                    <span class="panel-label">Distance/Angle</span>
+                    <span>
+                        <input type="number" id="cal-distance" value="500" min="50" max="5000" step="50"
+                            style="width:60px;background:#0a0a1a;color:#e0e0e0;border:1px solid #0f3460;padding:2px 4px;font-size:12px;text-align:right;" />
+                        <span style="font-size:11px;color:#888;">mm/deg</span>
+                    </span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-top:6px;">
+                    <button class="cal-btn" onclick="runCal('left')">Left</button>
+                    <button class="cal-btn" onclick="runCal('forward')">Fwd</button>
+                    <button class="cal-btn" onclick="runCal('right')">Right</button>
+                    <button class="cal-btn" onclick="runCal('rotate_left')">Rot L</button>
+                    <button class="cal-btn" onclick="runCal('backward')">Back</button>
+                    <button class="cal-btn" onclick="runCal('rotate_right')">Rot R</button>
+                </div>
+                <div style="display:flex;gap:3px;margin-top:4px;">
+                    <button class="cal-btn cal-run" onclick="runCalAll()">Run All</button>
+                    <button class="cal-btn cal-abort" onclick="abortCal()">Abort</button>
+                </div>
+                <div id="cal-status" style="font-size:11px;color:#888;margin-top:4px;">IDLE</div>
+                <div id="cal-results" style="font-size:10px;color:#aaa;margin-top:2px;max-height:80px;overflow-y:auto;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/lidar.js"></script>
+</body>
+</html>

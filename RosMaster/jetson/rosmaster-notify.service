@@ -1,0 +1,14 @@
+[Unit]
+Description=RosMaster boot SMS notification
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=jetson
+ExecStart=/usr/bin/python3 /home/jetson/RosMaster/boot_notify.py
+TimeoutStartSec=120
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

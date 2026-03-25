@@ -1,0 +1,15 @@
+[Unit]
+Description=RosMaster OLED Status Display
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/jetson/RosMaster
+ExecStart=/usr/bin/python3 /home/jetson/RosMaster/status_display.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
