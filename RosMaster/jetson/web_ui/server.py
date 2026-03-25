@@ -43,7 +43,7 @@ cam_primary_clients = set()
 collision_clients = set()
 collision = CollisionAvoidance()
 calibration = CalibrationRunner()
-slam = SLAMEngine(ignore_angle=120)
+slam = SLAMEngine(ignore_angle=140)
 explorer = Explorer(slam=slam, ignore_angle=120)
 slam_clients = set()
 
@@ -90,6 +90,20 @@ class CollisionConfigHandler(tornado.web.RequestHandler):
             self.write(json.dumps({"ok": False, "error": str(e)}))
 
 
+class LidarModeHandler(tornado.web.RequestHandler):
+    def post(self):
+        try:
+            data = json.loads(self.request.body)
+            mode = data.get("mode", "standard")
+            lidar.set_scan_mode(mode)
+            self.write(json.dumps({"ok": True, "mode": mode}))
+        except Exception as e:
+            self.write(json.dumps({"ok": False, "error": str(e)}))
+
+    def get(self):
+        self.write(json.dumps({"mode": lidar.scan_mode}))
+
+
 class DepthOffsetHandler(tornado.web.RequestHandler):
     def post(self):
         try:
@@ -99,6 +113,110 @@ class DepthOffsetHandler(tornado.web.RequestHandler):
             self.write(json.dumps({"ok": True, "offset": offset}))
         except Exception as e:
             self.write(json.dumps({"ok": False, "error": str(e)}))
+
+
+# Current SLAM method: 'custom', 'slam_toolbox', 'cartographer'
+current_slam_method = 'custom'
+ros2_slam_process = None
+
+
+class SlamMethodHandler(tornado.web.RequestHandler):
+    def post(self):
+        global current_slam_method, ros2_slam_process
+        import subprocess
+        try:
+            data = json.loads(self.request.body)
+            method = data.get("method", "custom")
+
+            if method not in ("custom", "slam_toolbox", "cartographer"):
+                self.write(json.dumps({"ok": False, "error": f"Unknown method: {method}"}))
+                return
+
+            if method == current_slam_method:
+                self.write(json.dumps({"ok": True, "method": method, "msg": "already active"}))
+                return
+
+            # --- Stop previous method ---
+            # Kill any ROS2 SLAM processes
+            if ros2_slam_process:
+                import os, signal as _sig
+                try:
+                    os.killpg(os.getpgid(ros2_slam_process.pid), _sig.SIGTERM)
+                except Exception:
+                    ros2_slam_process.terminate()
+                try:
+                    ros2_slam_process.wait(timeout=5)
+                except Exception:
+                    ros2_slam_process.kill()
+                ros2_slam_process = None
+                print("Stopped ROS2 SLAM processes")
+                # Kill any leftover ROS2 nodes
+                subprocess.run(["pkill", "-f", "sllidar_node"], capture_output=True)
+                subprocess.run(["pkill", "-f", "slam_toolbox"], capture_output=True)
+                subprocess.run(["pkill", "-f", "cartographer"], capture_output=True)
+                subprocess.run(["pkill", "-f", "ros2_scan_filter"], capture_output=True)
+                time.sleep(2)
+
+            # If switching FROM ros2 TO custom, restart our LiDAR reader
+            if current_slam_method != 'custom' and method == 'custom':
+                print("Restarting pyrplidar reader...")
+                lidar.start()
+                time.sleep(2)
+
+            # If switching FROM custom TO ros2, stop our LiDAR reader to free serial port
+            if current_slam_method == 'custom' and method != 'custom':
+                print("Stopping pyrplidar reader to free /dev/rplidar...")
+                lidar.stop()
+                time.sleep(2)
+
+            current_slam_method = method
+
+            # --- Start new method ---
+            if method == "custom":
+                print("SLAM method: Custom Python")
+                slam.reset()
+
+            elif method == "slam_toolbox":
+                print("SLAM method: SLAM Toolbox (ROS2) — starting...")
+                ignore = collision.ignore_angle if collision else 140
+                ros2_slam_process = subprocess.Popen(
+                    ["bash", "-c",
+                     "source /opt/ros/humble/setup.bash && "
+                     "source /home/jetson/yahboomcar_ros2_ws/software/library_ws/install/setup.bash && "
+                     "ros2 launch sllidar_ros2 sllidar_s2_launch.py & "
+                     f"python3 /home/jetson/RosMaster/web_ui/ros2_scan_filter.py --ignore-angle {ignore} & "
+                     "sleep 5 && "
+                     "ros2 launch slam_toolbox online_async_launch.py "
+                     "params_file:=/home/jetson/RosMaster/web_ui/slam_toolbox_params.yaml"],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    preexec_fn=os.setsid
+                )
+                print(f"SLAM Toolbox + scan filter started (PID {ros2_slam_process.pid})")
+
+            elif method == "cartographer":
+                print("SLAM method: Cartographer (ROS2) — starting...")
+                ignore = collision.ignore_angle if collision else 140
+                ros2_slam_process = subprocess.Popen(
+                    ["bash", "-c",
+                     "source /opt/ros/humble/setup.bash && "
+                     "source /home/jetson/yahboomcar_ros2_ws/software/library_ws/install/setup.bash && "
+                     "ros2 launch sllidar_ros2 sllidar_s2_launch.py & "
+                     f"python3 /home/jetson/RosMaster/web_ui/ros2_scan_filter.py --ignore-angle {ignore} & "
+                     "sleep 5 && "
+                     "ros2 launch cartographer_ros demo_revo_lds.launch.py"],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    preexec_fn=os.setsid
+                )
+                print(f"Cartographer + scan filter started (PID {ros2_slam_process.pid})")
+
+            self.write(json.dumps({"ok": True, "method": method}))
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.write(json.dumps({"ok": False, "error": str(e)}))
+
+    def get(self):
+        self.write(json.dumps({"method": current_slam_method}))
 
 
 class SlamWSHandler(tornado.websocket.WebSocketHandler):
@@ -293,10 +411,16 @@ def slam_update_thread():
 
     Uses sensor fusion: in the ±30° forward overlap zone, only marks
     cells as occupied when both LiDAR and depth camera agree.
+    Only runs when using 'custom' SLAM method.
     """
     import threading
     while True:
         try:
+            # Skip custom SLAM when using ROS2 methods
+            if current_slam_method != 'custom':
+                time.sleep(1)
+                continue
+
             scan = lidar.get_scan()
             if scan and len(scan) > 50:
                 imu_yaw = None
@@ -482,7 +606,9 @@ def make_app():
         (r"/ws/cam/primary", CamPrimaryWSHandler),
         (r"/ws/collision", CollisionWSHandler),
         (r"/api/collision", CollisionConfigHandler),
+        (r"/api/lidar_mode", LidarModeHandler),
         (r"/api/depth_offset", DepthOffsetHandler),
+        (r"/api/slam_method", SlamMethodHandler),
         (r"/api/calibration", CalibrationHandler),
         (r"/api/explorer", ExplorerHandler),
         (r"/ws/slam", SlamWSHandler),

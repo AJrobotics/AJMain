@@ -469,6 +469,30 @@ function explorerCmd(action) {
 
 window.explorerCmd = explorerCmd;
 
+function setSlamMethod(method) {
+    const status = document.getElementById('controls-status');
+    status.textContent = 'Switching mapping method...';
+    status.style.color = '#ffaa00';
+    fetch('/api/slam_method', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({method: method}),
+    }).then(r => r.json()).then(d => {
+        if (d.ok) {
+            const names = {custom: 'Custom Python', slam_toolbox: 'SLAM Toolbox (ROS2)', cartographer: 'Cartographer (ROS2)'};
+            status.textContent = 'Mapping: ' + (names[method] || method);
+            status.style.color = '#00ff88';
+        } else {
+            status.textContent = 'Error: ' + (d.error || 'unknown');
+            status.style.color = '#ff4444';
+        }
+    }).catch(e => {
+        status.textContent = 'Error: ' + e;
+        status.style.color = '#ff4444';
+    });
+}
+window.setSlamMethod = setSlamMethod;
+
 // --- Calibration functions ---
 
 function runCal(test) {
@@ -547,24 +571,27 @@ document.getElementById('ignore-angle-input').addEventListener('change', (e) => 
     });
 });
 
-// --- Depth offset control ---
-// Create a small input overlay on the LiDAR panel for depth angle offset
-(function() {
-    const container = document.createElement('div');
-    container.style.cssText = 'position:absolute;top:8px;right:8px;font-size:12px;color:#ff6600;display:flex;align-items:center;gap:4px;';
-    container.innerHTML = '<span>Depth Offset</span>' +
-        '<input type="number" id="depth-offset-input" value="0" step="1" ' +
-        'style="width:50px;background:#0a0a1a;color:#ff6600;border:1px solid #333;padding:2px 4px;font-size:12px;text-align:right;" />' +
-        '<span style="font-size:11px;color:#888;">&deg;</span>';
-    document.getElementById('lidar-panel').appendChild(container);
-
-    document.getElementById('depth-offset-input').addEventListener('change', (e) => {
-        const val = parseFloat(e.target.value) || 0;
-        depthOffset = val;
-        fetch('/api/depth_offset', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({offset: val}),
-        });
+// --- Controls bar event handlers ---
+document.getElementById('lidar-mode-select').addEventListener('change', (e) => {
+    const status = document.getElementById('controls-status');
+    status.textContent = 'Switching scan mode...';
+    status.style.color = '#ffaa00';
+    fetch('/api/lidar_mode', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: e.target.value}),
+    }).then(r => r.json()).then(d => {
+        status.textContent = d.ok ? 'Scan mode: ' + e.target.value : 'Error: ' + d.error;
+        status.style.color = d.ok ? '#00ff88' : '#ff4444';
     });
-})();
+});
+
+document.getElementById('depth-offset-input').addEventListener('change', (e) => {
+    const val = parseFloat(e.target.value) || 0;
+    depthOffset = val;
+    fetch('/api/depth_offset', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({offset: val}),
+    });
+});

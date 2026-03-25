@@ -22,8 +22,9 @@ DEPTH_FOV_DEG = 60
 DEPTH_WIDTH = 640
 DEPTH_HEIGHT = 480
 
-# Default rear ignore zone: 120° centered at 180° (backward)
-DEFAULT_IGNORE_ANGLE = 120
+# Default rear ignore zone: 140° centered at 180° (backward)
+# Covers 110°-250° to exclude cables/devices mounted at rear
+DEFAULT_IGNORE_ANGLE = 140
 
 
 class CollisionAvoidance:
@@ -50,7 +51,7 @@ class CollisionAvoidance:
             for point in scan:
                 angle = point["angle"]
                 dist = point["dist"]
-                if dist <= 0:
+                if dist < 50:  # ignore very close readings (robot body/noise)
                     continue
                 # Skip points in the rear ignore zone (centered at 180°)
                 angle_from_rear = abs(((angle - 180) + 180) % 360 - 180)
@@ -69,8 +70,11 @@ class CollisionAvoidance:
         self._sector_distances = sectors
 
     def _fuse_depth(self, sectors):
-        """Fuse depth camera data into front sectors."""
-        # Access raw depth frame from the reader's internal state
+        """Fuse depth camera data into front sectors.
+
+        Only uses rows 15%-35% from top (wall-level band) to avoid
+        floor readings and robot body parts in lower rows.
+        """
         if not hasattr(self.depth, '_get_raw_depth'):
             return
 
@@ -80,21 +84,26 @@ class CollisionAvoidance:
 
         h, w = depth_frame.shape
 
+        # Only use wall-level rows (15%-35% from top)
+        row_start = int(h * 0.15)
+        row_end = int(h * 0.35)
+        wall_band = depth_frame[row_start:row_end, :]
+
         # Split into 3 zones: left-front, center-front, right-front
         third = w // 3
         zones = [
-            depth_frame[:, :third],         # left side of image = right-front (mirrored)
-            depth_frame[:, third:2*third],   # center
-            depth_frame[:, 2*third:],        # right side of image = left-front (mirrored)
+            wall_band[:, :third],         # left side of image = right-front (mirrored)
+            wall_band[:, third:2*third],   # center
+            wall_band[:, 2*third:],        # right side of image = left-front (mirrored)
         ]
 
         # Map to sectors: right-front=7, front=0, left-front=1
         zone_sectors = [7, 0, 1]
 
         for zone_data, sector_idx in zip(zones, zone_sectors):
-            valid = zone_data[zone_data > 50]  # ignore <50mm noise
-            if len(valid) > 0:
-                min_depth = float(np.percentile(valid, 5))  # 5th percentile for robustness
+            valid = zone_data[(zone_data > 300) & (zone_data < 8000)]  # ignore noise and robot body
+            if len(valid) > 100:  # need substantial data
+                min_depth = float(np.percentile(valid, 10))  # 10th percentile
                 sectors[sector_idx] = min(sectors[sector_idx], min_depth)
 
     @property
@@ -121,17 +130,6 @@ class CollisionAvoidance:
 
         self.update_sectors()
 
-        # HARD SAFETY: if ANY non-ignored sector is below STOP_DIST,
-        # block ALL translational motion regardless of direction
-        for i in range(NUM_SECTORS):
-            # Skip rear ignore zone sectors
-            sector_center = i * SECTOR_SIZE
-            angle_from_rear = abs(((sector_center - 180) + 180) % 360 - 180)
-            if angle_from_rear < self.ignore_angle / 2.0:
-                continue
-            if self._sector_distances[i] < STOP_DIST:
-                return 0, 0, vz  # emergency stop, rotation only
-
         # No translational movement — nothing to filter
         speed = math.sqrt(vx * vx + vy * vy)
         if speed < 0.001:
@@ -141,15 +139,17 @@ class CollisionAvoidance:
         # vx=forward, vy=left → angle: atan2(-vy, vx) for clockwise convention
         move_angle_deg = math.degrees(math.atan2(-vy, vx)) % 360
 
-        # Get the target sector and its neighbors
+        # Check wide arc: target sector + 2 neighbors on each side (5 sectors = 225°)
         target = self._angle_to_sector(move_angle_deg)
         neighbors = [
+            (target - 2) % NUM_SECTORS,
             (target - 1) % NUM_SECTORS,
             target,
             (target + 1) % NUM_SECTORS,
+            (target + 2) % NUM_SECTORS,
         ]
 
-        # Find minimum distance in the direction of movement
+        # Find minimum distance in the wide movement arc
         min_dist = min(self._sector_distances[s] for s in neighbors)
 
         # Scale speed based on distance

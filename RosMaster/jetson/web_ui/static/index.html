@@ -130,6 +130,31 @@
         </div>
     </div>
 
+    <div id="controls-bar" style="background:#0f1a30;padding:4px 16px;display:flex;gap:16px;align-items:center;border-bottom:1px solid #0f3460;font-size:12px;">
+        <div style="display:flex;align-items:center;gap:4px;">
+            <span style="color:#00ff88;">Scan Mode</span>
+            <select id="lidar-mode-select" style="background:#0a0a1a;color:#00ff88;border:1px solid #333;padding:2px 6px;font-size:12px;">
+                <option value="standard">Standard (6Hz ~1300pts)</option>
+                <option value="express">Express (5Hz ~2700pts)</option>
+            </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;">
+            <span style="color:#00d4ff;">Mapping</span>
+            <select id="slam-method-top" style="background:#0a0a1a;color:#00d4ff;border:1px solid #333;padding:2px 6px;font-size:12px;" onchange="setSlamMethod(this.value)">
+                <option value="custom">Custom Python</option>
+                <option value="slam_toolbox">SLAM Toolbox (ROS2)</option>
+                <option value="cartographer">Cartographer (ROS2)</option>
+            </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;">
+            <span style="color:#ff6600;">Depth Offset</span>
+            <input type="number" id="depth-offset-input" value="0" step="1"
+                style="width:50px;background:#0a0a1a;color:#ff6600;border:1px solid #333;padding:2px 4px;font-size:12px;text-align:right;" />
+            <span style="font-size:11px;color:#888;">&deg;</span>
+        </div>
+        <div id="controls-status" style="font-size:11px;color:#888;margin-left:auto;"></div>
+    </div>
+
     <div id="main">
         <div id="left-column">
             <div id="lidar-panel">
@@ -149,7 +174,7 @@
                     <div id="slam-info" style="font-size:10px;color:#888;margin-top:2px;">Scans: 0</div>
                 </div>
                 <div style="flex-shrink:0;">
-                    <div style="font-size:12px;color:#ff6600;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Walls Only</div>
+                    <div style="font-size:12px;color:#ff6600;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Room Boundary</div>
                     <img id="walls-map" style="width:200px;height:200px;background:#000;image-rendering:pixelated;" />
                     <div id="walls-info" style="font-size:10px;color:#888;margin-top:2px;">—</div>
                 </div>
@@ -254,6 +279,6 @@
         </div>
     </div>
 
-    <script src="/static/lidar.js?v=2"></script>
+    <script src="/static/lidar.js?v=3"></script>
 </body>
 </html>

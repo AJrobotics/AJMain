@@ -347,13 +347,125 @@ class SLAMEngine:
             return img
 
     def get_walls_image(self):
-        """Return image showing only confirmed walls (white on black)."""
+        """Return image with room boundary using concave hull (alpha shape).
+
+        Extracts occupied cells, computes concave hull to find room outline,
+        draws it as a closed polygon — showing the room boundary.
+        """
+        import cv2
+        from scipy.spatial import Delaunay
+
         with self.lock:
-            img = np.zeros((GRID_SIZE, GRID_SIZE), dtype=np.uint8)
-            # Cells with decent confidence (log-odds > 0.9 = at least 1 full scan)
             wall_mask = self.grid > 0.9
-            img[wall_mask] = 255
+            wy, wx = np.where(wall_mask)
+
+            img = np.zeros((GRID_SIZE, GRID_SIZE), dtype=np.uint8)
+
+            if len(wx) < 10:
+                return img
+
+            points = np.column_stack((wx, wy)).astype(np.float64)
+
+            # Compute concave hull via alpha shape
+            boundary = self._alpha_shape(points, alpha=0.3)
+
+            if boundary is not None and len(boundary) >= 3:
+                # Draw filled boundary outline
+                hull_pts = boundary.astype(np.int32).reshape((-1, 1, 2))
+                cv2.polylines(img, [hull_pts], isClosed=True, color=255, thickness=2)
+
+            # Also draw wall points as dim dots for reference
+            for i in range(len(wx)):
+                if 0 <= wx[i] < GRID_SIZE and 0 <= wy[i] < GRID_SIZE:
+                    img[wy[i], wx[i]] = max(img[wy[i], wx[i]], 100)
+
             return img
+
+    def _alpha_shape(self, points, alpha=0.3):
+        """Compute concave hull (alpha shape) of 2D points.
+
+        Args:
+            points: Nx2 array of (x, y) coordinates
+            alpha: controls concavity (smaller = more concave, 0 = convex hull)
+
+        Returns:
+            Ordered boundary points as Nx2 array, or None if failed.
+        """
+        if len(points) < 4:
+            return None
+
+        try:
+            tri = Delaunay(points)
+        except Exception:
+            return None
+
+        # Find boundary edges: edges that belong to triangles with
+        # circumradius < 1/alpha
+        edges = set()
+        for simplex in tri.simplices:
+            p0 = points[simplex[0]]
+            p1 = points[simplex[1]]
+            p2 = points[simplex[2]]
+
+            # Circumradius of triangle
+            a = np.linalg.norm(p0 - p1)
+            b = np.linalg.norm(p1 - p2)
+            c = np.linalg.norm(p2 - p0)
+            s = (a + b + c) / 2.0
+
+            area = max(s * (s - a) * (s - b) * (s - c), 1e-10)
+            area = math.sqrt(area)
+            if area < 1e-10:
+                continue
+
+            circumradius = (a * b * c) / (4.0 * area)
+
+            if alpha > 0 and circumradius < 1.0 / alpha:
+                # Add edges of this triangle
+                for i, j in [(0, 1), (1, 2), (2, 0)]:
+                    edge = tuple(sorted([simplex[i], simplex[j]]))
+                    if edge in edges:
+                        edges.remove(edge)  # internal edge (shared by 2 triangles)
+                    else:
+                        edges.add(edge)
+
+        if not edges:
+            # Fallback to convex hull
+            from scipy.spatial import ConvexHull
+            try:
+                hull = ConvexHull(points)
+                return points[hull.vertices]
+            except Exception:
+                return None
+
+        # Order boundary edges into a polygon
+        edge_list = list(edges)
+        ordered = [edge_list[0][0], edge_list[0][1]]
+        used = {0}
+
+        for _ in range(len(edge_list)):
+            last = ordered[-1]
+            found = False
+            for idx, (a, b) in enumerate(edge_list):
+                if idx in used:
+                    continue
+                if a == last:
+                    ordered.append(b)
+                    used.add(idx)
+                    found = True
+                    break
+                elif b == last:
+                    ordered.append(a)
+                    used.add(idx)
+                    found = True
+                    break
+            if not found:
+                break
+
+        if len(ordered) < 3:
+            return None
+
+        return points[ordered]
 
     def get_pose(self):
         with self.lock:

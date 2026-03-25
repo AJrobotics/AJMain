@@ -10,7 +10,7 @@ import threading
 
 LIDAR_PORT = "/dev/rplidar"
 LIDAR_BAUD = 1000000
-MOTOR_PWM = 600
+MOTOR_PWM = 800
 
 
 class LidarReader:
@@ -23,7 +23,18 @@ class LidarReader:
         self.lock = threading.Lock()
         self.connected = False
         self.simulated = False
+        self.scan_mode = "standard"  # "standard" or "express"
+        self._mode_change = False     # flag to trigger mode switch
         self._thread = None
+
+    def set_scan_mode(self, mode):
+        """Switch scan mode. Requires restart of reader thread."""
+        if mode not in ("standard", "express"):
+            return
+        if mode != self.scan_mode:
+            self.scan_mode = mode
+            self._mode_change = True
+            print(f"LiDAR scan mode changed to: {mode}")
 
     def start(self):
         self.running = True
@@ -34,50 +45,67 @@ class LidarReader:
         try:
             from pyrplidar import PyRPlidar
 
-            lidar = PyRPlidar()
-            lidar.connect(port=self.port, baudrate=self.baud, timeout=3)
+            while self.running:
+                lidar = PyRPlidar()
+                lidar.connect(port=self.port, baudrate=self.baud, timeout=3)
 
-            info = lidar.get_info()
-            print(f"RPLidar connected: {info}")
-            self.connected = True
-            self.simulated = False
+                info = lidar.get_info()
+                print(f"RPLidar connected: {info}")
+                self.connected = True
+                self.simulated = False
+                self._mode_change = False
 
-            lidar.set_motor_pwm(MOTOR_PWM)
-            time.sleep(1)
+                lidar.set_motor_pwm(MOTOR_PWM)
+                time.sleep(1)
 
-            scan_generator = lidar.start_scan()
-            angle_map = {}
-            prev_angle = -1
+                # Start scan based on current mode
+                if self.scan_mode == "express":
+                    print("LiDAR: Express scan mode (2x points)")
+                    scan_generator = lidar.start_scan_express(0)
+                else:
+                    print("LiDAR: Standard scan mode")
+                    scan_generator = lidar.start_scan()
 
-            for measurement in scan_generator():
-                if not self.running:
-                    break
+                angle_map = {}
+                prev_angle = -1
 
-                angle = measurement.angle
-                distance = measurement.distance
-                quality = measurement.quality
+                for measurement in scan_generator():
+                    if not self.running or self._mode_change:
+                        break
 
-                # Detect revolution: angle wraps backward by > 300°
-                if prev_angle > 0 and angle < prev_angle - 300:
-                    if len(angle_map) > 200:
-                        scan = sorted(angle_map.values(), key=lambda p: p["angle"])
-                        with self.lock:
-                            self.scan_data = scan
-                            self.has_new_scan = True
-                    angle_map = {}
+                    angle = measurement.angle
+                    distance = measurement.distance
+                    quality = measurement.quality
 
-                prev_angle = angle
+                    # Detect revolution: angle wraps backward by > 300°
+                    if prev_angle > 0 and angle < prev_angle - 300:
+                        if len(angle_map) > 200:
+                            scan = sorted(angle_map.values(), key=lambda p: p["angle"])
+                            with self.lock:
+                                self.scan_data = scan
+                                self.has_new_scan = True
+                        angle_map = {}
 
-                if distance > 0 and quality > 0:
-                    key = int(angle) % 360
-                    angle_map[key] = {
-                        "angle": round(angle, 1),
-                        "dist": round(distance),
-                    }
+                    prev_angle = angle
 
-            lidar.stop()
-            lidar.set_motor_pwm(0)
-            lidar.disconnect()
+                    if distance > 0 and (quality > 0 or self.scan_mode == "express"):
+                        key = int(angle) % 360
+                        angle_map[key] = {
+                            "angle": round(angle, 1),
+                            "dist": round(distance),
+                        }
+
+                lidar.stop()
+                lidar.set_motor_pwm(0)
+                lidar.disconnect()
+
+                if self._mode_change:
+                    print(f"LiDAR: switching to {self.scan_mode} mode...")
+                    self._mode_change = False
+                    time.sleep(1)
+                    continue  # reconnect with new mode
+                else:
+                    break  # normal exit
 
         except Exception as e:
             print(f"RPLidar error: {e}. Using simulated data.")
