@@ -289,7 +289,11 @@ def broadcast_cam_primary():
 
 
 def slam_update_thread():
-    """Background thread: feed LiDAR scans into SLAM engine."""
+    """Background thread: feed LiDAR + depth scans into SLAM engine.
+
+    Uses sensor fusion: in the ±30° forward overlap zone, only marks
+    cells as occupied when both LiDAR and depth camera agree.
+    """
     import threading
     while True:
         try:
@@ -302,7 +306,9 @@ def slam_update_thread():
                         imu_yaw = math.radians(yaw)
                     except Exception:
                         pass
-                slam.update(scan, imu_yaw)
+                # Get depth line for sensor fusion
+                depth_line = depth.get_depth_line() if depth.connected else None
+                slam.update(scan, imu_yaw, depth_line)
         except Exception:
             pass
         time.sleep(0.2)  # ~5 Hz

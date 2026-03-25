@@ -2,6 +2,8 @@
 2D SLAM Engine for RosMaster X3.
 Occupancy grid mapping with ICP scan matching.
 Uses LiDAR scans to build a map and track robot pose.
+Fuses LiDAR + depth camera data: in the overlapping forward ±30° zone,
+only marks cells as occupied when both sensors agree.
 """
 
 import math
@@ -18,6 +20,8 @@ MAP_SIZE_MM = GRID_SIZE * CELL_SIZE_MM
 # Log-odds parameters
 L_FREE = -0.4
 L_OCC = 0.9
+L_OCC_FUSED = 1.5        # higher confidence when both sensors agree
+L_OCC_SINGLE = 0.3       # lower confidence when only LiDAR in overlap zone
 L_MIN = -5.0
 L_MAX = 5.0
 
@@ -25,6 +29,10 @@ L_MAX = 5.0
 ICP_MAX_ITER = 20
 ICP_TOLERANCE = 0.5  # mm convergence threshold
 ICP_MAX_DIST = 500   # mm max correspondence distance
+
+# Sensor fusion parameters
+DEPTH_FOV_HALF = 30.0     # depth camera half-FOV in degrees
+FUSION_DIST_TOL = 300     # mm tolerance for matching LiDAR vs depth distance
 
 
 class SLAMEngine:
@@ -143,6 +151,57 @@ class SLAMEngine:
             if 0 <= ex < GRID_SIZE and 0 <= ey < GRID_SIZE:
                 self.grid[ey, ex] = min(L_MAX, self.grid[ey, ex] + L_OCC)
 
+    def _update_grid_fused(self, scan, world_points, pose, depth_lookup):
+        """Update occupancy grid with sensor fusion.
+
+        For points in the depth camera's FOV (±30° forward):
+        - Both sensors agree → high confidence occupied (L_OCC_FUSED)
+        - Depth contradicts LiDAR → low confidence (L_OCC_SINGLE)
+        - No depth data → normal LiDAR confidence (L_OCC)
+
+        For points outside depth FOV: normal LiDAR-only update (L_OCC).
+        Free space rays are always applied regardless of sensor fusion.
+        """
+        ox = int(pose[0] / CELL_SIZE_MM)
+        oy = int(pose[1] / CELL_SIZE_MM)
+
+        for i, wp in enumerate(world_points):
+            ex = int(wp[0] / CELL_SIZE_MM)
+            ey = int(wp[1] / CELL_SIZE_MM)
+
+            # Free cells along the ray (always applied)
+            cells = self._bresenham(ox, oy, ex, ey)
+            for cx, cy in cells[:-1]:
+                if 0 <= cx < GRID_SIZE and 0 <= cy < GRID_SIZE:
+                    self.grid[cy, cx] = max(L_MIN, self.grid[cy, cx] + L_FREE)
+
+            # Determine occupancy confidence based on sensor fusion
+            if 0 <= ex < GRID_SIZE and 0 <= ey < GRID_SIZE:
+                # Get original scan angle and distance for this point
+                if i < len(scan):
+                    angle_deg = scan[i]["angle"]
+                    lidar_dist = scan[i]["dist"]
+                else:
+                    # Fallback: use normal confidence
+                    self.grid[ey, ex] = min(L_MAX, self.grid[ey, ex] + L_OCC)
+                    continue
+
+                if self._is_in_depth_fov(angle_deg):
+                    # In overlap zone: check depth confirmation
+                    confirmed = self._check_depth_confirms(angle_deg, lidar_dist, depth_lookup)
+                    if confirmed is True:
+                        # Both sensors agree — high confidence
+                        self.grid[ey, ex] = min(L_MAX, self.grid[ey, ex] + L_OCC_FUSED)
+                    elif confirmed is False:
+                        # Sensors disagree — low confidence (likely noise)
+                        self.grid[ey, ex] = min(L_MAX, self.grid[ey, ex] + L_OCC_SINGLE)
+                    else:
+                        # No depth data at this angle — normal confidence
+                        self.grid[ey, ex] = min(L_MAX, self.grid[ey, ex] + L_OCC)
+                else:
+                    # Outside depth FOV — LiDAR only, normal confidence
+                    self.grid[ey, ex] = min(L_MAX, self.grid[ey, ex] + L_OCC)
+
     def _bresenham(self, x0, y0, x1, y1):
         """Bresenham's line algorithm."""
         cells = []
@@ -165,11 +224,66 @@ class SLAMEngine:
                 y0 += sy
         return cells
 
-    def update(self, scan, imu_yaw=None):
-        """Process a new LiDAR scan, update pose and map."""
+    def _build_depth_lookup(self, depth_line):
+        """Build a lookup dict from depth line: angle_deg → distance_mm.
+
+        Returns dict mapping integer angle to depth distance for fast lookup.
+        """
+        if not depth_line:
+            return {}
+        lookup = {}
+        for angle_deg, dist_mm in depth_line:
+            key = int(round(angle_deg))
+            lookup[key] = dist_mm
+        return lookup
+
+    def _is_in_depth_fov(self, angle_deg):
+        """Check if a LiDAR angle falls within depth camera FOV (±30° from forward)."""
+        # Normalize angle to -180..180, where 0 = forward
+        a = angle_deg % 360
+        if a > 180:
+            a -= 360
+        return abs(a) <= DEPTH_FOV_HALF
+
+    def _check_depth_confirms(self, angle_deg, lidar_dist, depth_lookup):
+        """Check if depth camera confirms a LiDAR reading at this angle.
+
+        Returns:
+            True  — depth confirms (distance agrees within tolerance)
+            False — depth contradicts (distance differs significantly)
+            None  — depth has no data at this angle (no confirmation possible)
+        """
+        a = angle_deg % 360
+        if a > 180:
+            a -= 360
+        key = int(round(a))
+
+        # Check nearby angles too (±2°) for robustness
+        for offset in [0, -1, 1, -2, 2]:
+            depth_dist = depth_lookup.get(key + offset)
+            if depth_dist is not None and depth_dist > 0:
+                if abs(lidar_dist - depth_dist) < FUSION_DIST_TOL:
+                    return True   # confirmed
+                else:
+                    return False  # contradicted
+        return None  # no depth data at this angle
+
+    def update(self, scan, imu_yaw=None, depth_line=None):
+        """Process a new LiDAR scan, update pose and map.
+
+        Args:
+            scan: list of {angle, dist} from LiDAR
+            imu_yaw: IMU yaw in radians (optional)
+            depth_line: list of (angle_deg, dist_mm) from depth camera (optional)
+                In the overlapping ±30° zone, only marks cells as occupied
+                when both LiDAR and depth camera agree on distance.
+        """
         local_points = self._filter_scan(scan)
         if len(local_points) < 20:
             return
+
+        # Build depth lookup for sensor fusion
+        depth_lookup = self._build_depth_lookup(depth_line)
 
         with self.lock:
             # Scan matching via ICP
@@ -194,9 +308,12 @@ class SLAMEngine:
 
             self.prev_points = local_points.copy()
 
-            # Transform points to world and update grid
+            # Transform points to world and update grid with sensor fusion
             world_pts = self._world_points(local_points, self.pose)
-            self._update_grid(world_pts, self.pose)
+            if depth_lookup:
+                self._update_grid_fused(scan, world_pts, self.pose, depth_lookup)
+            else:
+                self._update_grid(world_pts, self.pose)
 
             # Store pose history (every 5th scan to save memory)
             self.scan_count += 1
