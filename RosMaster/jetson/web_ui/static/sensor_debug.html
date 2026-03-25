@@ -103,6 +103,14 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
     <span>Sectors: <b id="tm-sectors">-</b></span>
 </div>
 
+<div id="heading-panel" style="background:#0d0d20;border-bottom:1px solid #222;padding:3px 16px;display:flex;gap:18px;font-size:11px;color:#888;flex-shrink:0;">
+    <span>Heading: <b id="hd-fused" style="color:#0f8">-</b>°</span>
+    <span>IMU yaw: <b id="hd-imu" style="color:#0df">-</b>°</span>
+    <span>ICP dθ: <b id="hd-icp" style="color:#ff0">-</b>°</span>
+    <span>ICP quality: <b id="hd-quality" style="color:#f80">-</b></span>
+    <canvas id="heading-compass" width="150" height="150" style="margin-left:auto;background:#0a0a1a;border:1px solid #333;border-radius:50%;"></canvas>
+</div>
+
 <div id="tab-content">
     <!-- LiDAR Tab -->
     <div id="lidar-tab" class="tab-panel active">
@@ -128,7 +136,22 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
     <div id="depth-tab" class="tab-panel"><div class="placeholder">Depth Camera — not implemented yet</div></div>
 
     <!-- IMU Tab -->
-    <div id="imu-tab" class="tab-panel"><div class="placeholder">IMU — not implemented yet</div></div>
+    <div id="imu-tab" class="tab-panel">
+        <div style="display:flex;flex:1;min-height:0;gap:4px;padding:4px;">
+            <div style="flex:3;display:flex;flex-direction:column;min-height:0;">
+                <canvas id="imu-sweep-canvas" style="width:100%;flex:1;min-height:0;background:#0a0a1a;"></canvas>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px;">
+                <canvas id="imu-compass-big" width="200" height="200" style="background:#0a0a1a;border:1px solid #333;border-radius:50%;"></canvas>
+                <div id="imu-stats" style="font-size:11px;color:#888;text-align:center;">
+                    <div>Heading: <b id="imu-st-heading" style="color:#0f8">-</b>°</div>
+                    <div>IMU yaw: <b id="imu-st-imu" style="color:#0df">-</b>°</div>
+                    <div>ICP dθ: <b id="imu-st-icp" style="color:#ff0">-</b>°/scan</div>
+                    <div>ICP quality: <b id="imu-st-quality" style="color:#f80">-</b></div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- XBee Tab -->
     <div id="xbee-tab" class="tab-panel"><div class="placeholder">XBee — not implemented yet</div></div>
@@ -695,6 +718,290 @@ function updateTimingPanel(msg) {
 
     const sec = document.getElementById('tm-sectors');
     sec.textContent = msg.collision_sectors.map(d => d >= 9999 ? '-' : Math.round(d)).join(' | ');
+
+    // Heading debug
+    if (msg.heading) {
+        const h = msg.heading;
+        document.getElementById('hd-fused').textContent = h.fused_heading;
+        document.getElementById('hd-imu').textContent = h.imu_yaw;
+        document.getElementById('hd-icp').textContent = h.icp_dtheta;
+        const qEl = document.getElementById('hd-quality');
+        qEl.textContent = h.icp_quality.toFixed(2);
+        qEl.style.color = h.icp_quality > 0.4 ? '#0f8' : h.icp_quality > 0.2 ? '#ff0' : '#f44';
+
+        // Draw compass
+        drawHeadingCompass(h);
+
+        // Update IMU tab stats
+        const stH = document.getElementById('imu-st-heading');
+        if (stH) { stH.textContent = h.fused_heading; }
+        const stI = document.getElementById('imu-st-imu');
+        if (stI) { stI.textContent = h.imu_yaw; }
+        const stIcp = document.getElementById('imu-st-icp');
+        if (stIcp) { stIcp.textContent = h.icp_dtheta; }
+        const stQ = document.getElementById('imu-st-quality');
+        if (stQ) { stQ.textContent = h.icp_quality.toFixed(2); stQ.style.color = h.icp_quality > 0.4 ? '#0f8' : h.icp_quality > 0.2 ? '#ff0' : '#f44'; }
+
+        // Draw big compass on IMU tab
+        drawImuCompassBig(h);
+
+        // Store heading history for chart
+        headingHistory.push({
+            t: Date.now() / 1000,
+            fused: h.fused_heading,
+            imu: h.imu_yaw,
+            icp_dtheta: h.icp_dtheta,
+            quality: h.icp_quality,
+        });
+        if (headingHistory.length > 120) headingHistory.shift();
+        imuSweepNeedsRedraw = true;
+    }
+}
+
+const headingHistory = [];
+
+function drawHeadingCompass(h) {
+    const canvas = document.getElementById('heading-compass');
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, hh = canvas.height;
+    const cx = w / 2, cy = hh / 2, r = Math.min(cx, cy) - 4;
+
+    ctx.clearRect(0, 0, w, hh);
+
+    // Circle
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // N/E/S/W
+    ctx.fillStyle = '#888';
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('0', cx, 14);
+    ctx.fillText('180', cx, hh - 4);
+    ctx.fillText('90', w - 8, cy + 4);
+    ctx.fillText('270', 16, cy + 4);
+
+    // IMU arrow (cyan) — negate so clockwise = clockwise on compass
+    const imuRad = -h.imu_yaw * Math.PI / 180;
+    ctx.strokeStyle = '#0df';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.sin(imuRad) * r * 0.7, cy - Math.cos(imuRad) * r * 0.7);
+    ctx.stroke();
+
+    // Fused arrow (green, thicker)
+    const fusedRad = -h.fused_heading * Math.PI / 180;
+    ctx.strokeStyle = '#0f8';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.sin(fusedRad) * r * 0.85, cy - Math.cos(fusedRad) * r * 0.85);
+    ctx.stroke();
+
+    // Center dot
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// ============================================================
+// IMU Sweep Chart
+// ============================================================
+const IMU_SWEEP_SEC = 20;  // 20 seconds visible
+let imuSweepNeedsRedraw = true;
+
+function drawImuSweep() {
+    if (!imuSweepNeedsRedraw) return;
+    imuSweepNeedsRedraw = false;
+
+    const canvas = document.getElementById('imu-sweep-canvas');
+    if (!canvas || canvas.clientWidth < 10) return;
+    const dpr2 = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth * dpr2;
+    const h = canvas.clientHeight * dpr2;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+
+    const ml = 55 * dpr2, mr = 15 * dpr2, mt = 15 * dpr2, mb = 25 * dpr2;
+    const pw = w - ml - mr, ph = h - mt - mb;
+    if (pw < 10 || ph < 10) return;
+
+    // Y range: heading -180 to +180 (top half), quality 0-1 (bottom strip)
+    const headingH = ph * 0.75;  // top 75% for heading
+    const qualityH = ph * 0.2;   // bottom 20% for quality
+    const qualityTop = mt + headingH + ph * 0.05;
+
+    // Grid for heading
+    ctx.strokeStyle = '#1a2a1a';
+    ctx.lineWidth = 1;
+    ctx.fillStyle = '#888';
+    ctx.font = (10 * dpr2) + 'px monospace';
+    ctx.textAlign = 'right';
+    for (let deg = -180; deg <= 180; deg += 90) {
+        const y = mt + headingH * (1 - (deg + 180) / 360);
+        ctx.beginPath(); ctx.moveTo(ml, y); ctx.lineTo(ml + pw, y); ctx.stroke();
+        ctx.fillText(deg + '°', ml - 4 * dpr2, y + 3 * dpr2);
+    }
+
+    // X-axis time labels
+    ctx.textAlign = 'center';
+    for (let s = 0; s <= IMU_SWEEP_SEC; s += 5) {
+        const x = ml + (s / IMU_SWEEP_SEC) * pw;
+        ctx.fillText(s + 's', x, mt + headingH + 12 * dpr2);
+    }
+
+    // Y-axis labels
+    ctx.save();
+    ctx.fillStyle = '#888';
+    ctx.font = (10 * dpr2) + 'px monospace';
+    ctx.translate(10 * dpr2, mt + headingH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.fillText('Heading (°)', 0, 0);
+    ctx.restore();
+
+    // Quality axis
+    ctx.strokeStyle = '#1a1a2a';
+    ctx.beginPath(); ctx.moveTo(ml, qualityTop); ctx.lineTo(ml + pw, qualityTop); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ml, qualityTop + qualityH); ctx.lineTo(ml + pw, qualityTop + qualityH); ctx.stroke();
+    ctx.textAlign = 'right';
+    ctx.fillText('1.0', ml - 4 * dpr2, qualityTop + 4 * dpr2);
+    ctx.fillText('0', ml - 4 * dpr2, qualityTop + qualityH + 4 * dpr2);
+
+    if (headingHistory.length < 2) {
+        ctx.fillStyle = '#444'; ctx.font = (14 * dpr2) + 'px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('Waiting for heading data...', w / 2, mt + headingH / 2);
+        return;
+    }
+
+    // Time window: last IMU_SWEEP_SEC seconds
+    const now = headingHistory[headingHistory.length - 1].t;
+    const tStart = now - IMU_SWEEP_SEC;
+    const toX = (t) => ml + ((t - tStart) / IMU_SWEEP_SEC) * pw;
+    const toY = (deg) => mt + headingH * (1 - (deg + 180) / 360);
+    const toQY = (q) => qualityTop + qualityH * (1 - q);
+
+    // Draw traces
+    const traces = [
+        { key: 'fused', color: '#00ff88', width: 2.5 },
+        { key: 'imu', color: '#00ddff', width: 1.5 },
+    ];
+
+    for (const trace of traces) {
+        ctx.strokeStyle = trace.color;
+        ctx.lineWidth = trace.width * dpr2;
+        ctx.beginPath();
+        let started = false;
+        for (const entry of headingHistory) {
+            if (entry.t < tStart) continue;
+            const x = toX(entry.t);
+            const y = toY(entry[trace.key]);
+            if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
+        }
+        ctx.stroke();
+    }
+
+    // ICP dtheta as vertical bars from zero line
+    const zeroY = toY(0);
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.5)';
+    for (const entry of headingHistory) {
+        if (entry.t < tStart) continue;
+        const x = toX(entry.t);
+        const barH = -entry.icp_dtheta * dpr2 * 2;  // scale: 1° = 2px
+        ctx.fillRect(x - 1, zeroY, 3, barH);
+    }
+
+    // Quality bars
+    for (const entry of headingHistory) {
+        if (entry.t < tStart) continue;
+        const x = toX(entry.t);
+        const qy = toQY(entry.quality);
+        const color = entry.quality > 0.4 ? '#0f8' : entry.quality > 0.2 ? '#ff0' : '#f44';
+        ctx.fillStyle = color;
+        ctx.fillRect(x - 1, qy, 3, qualityTop + qualityH - qy);
+    }
+
+    // Sweep cursor (red vertical line)
+    if (headingHistory.length > 0) {
+        const lastX = toX(headingHistory[headingHistory.length - 1].t);
+        ctx.strokeStyle = '#f00';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(lastX, mt);
+        ctx.lineTo(lastX, qualityTop + qualityH);
+        ctx.stroke();
+    }
+
+    // Legend
+    const lx = ml + 8 * dpr2, ly = mt + 12 * dpr2;
+    ctx.font = (10 * dpr2) + 'px monospace';
+    ctx.fillStyle = '#0f8'; ctx.fillText('— Fused', lx, ly);
+    ctx.fillStyle = '#0df'; ctx.fillText('— IMU', lx + 70 * dpr2, ly);
+    ctx.fillStyle = '#ff0'; ctx.fillText('| ICP dθ', lx + 130 * dpr2, ly);
+    ctx.fillStyle = '#f80'; ctx.fillText('■ Quality', lx + 200 * dpr2, ly);
+}
+
+function drawImuCompassBig(h) {
+    const canvas = document.getElementById('imu-compass-big');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, hh = canvas.height;
+    const cx = w / 2, cy = hh / 2, r = Math.min(cx, cy) - 8;
+    ctx.clearRect(0, 0, w, hh);
+
+    // Circle + ticks
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    // Tick marks every 30°
+    ctx.fillStyle = '#666';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    for (let deg = 0; deg < 360; deg += 30) {
+        const rad = deg * Math.PI / 180;
+        const inner = r * 0.85, outer = r;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.sin(rad) * inner, cy - Math.cos(rad) * inner);
+        ctx.lineTo(cx + Math.sin(rad) * outer, cy - Math.cos(rad) * outer);
+        ctx.strokeStyle = deg % 90 === 0 ? '#888' : '#444';
+        ctx.stroke();
+        if (deg % 90 === 0) {
+            ctx.fillText(deg + '°', cx + Math.sin(rad) * (r + 14), cy - Math.cos(rad) * (r + 14) + 4);
+        }
+    }
+
+    // IMU arrow (cyan) — negate angle so clockwise rotation = clockwise on compass
+    const imuRad = -h.imu_yaw * Math.PI / 180;
+    ctx.strokeStyle = '#0df';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.sin(imuRad) * r * 0.7, cy - Math.cos(imuRad) * r * 0.7);
+    ctx.stroke();
+
+    // Fused arrow (green, thicker)
+    const fusedRad = -h.fused_heading * Math.PI / 180;
+    ctx.strokeStyle = '#0f8';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.sin(fusedRad) * r * 0.85, cy - Math.cos(fusedRad) * r * 0.85);
+    ctx.stroke();
+
+    // Center dot
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+    ctx.fill();
 }
 
 // ============================================================
@@ -704,6 +1011,7 @@ function render() {
     drawTimeline();
     drawPolar();
     drawScanPlot();
+    drawImuSweep();
     requestAnimationFrame(render);
 }
 

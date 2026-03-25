@@ -341,6 +341,82 @@ class Explorer:
         self._thread.start()
         return {"ok": True}
 
+    def start_scan_test(self):
+        """Stationary 360° scan test: 2 CW + 2 CCW rotations for mapping debug."""
+        if self.state not in ("idle", "stopped"):
+            return {"error": f"Explorer busy: {self.state}"}
+        self._abort = False
+        self.state = "scanning"
+        self._thread = threading.Thread(target=self._scan_test_loop, daemon=True)
+        self._thread.start()
+        return {"ok": True}
+
+    def _rotate_by(self, target_degrees, speed=0.2):
+        """Rotate by exact degrees using IMU feedback.
+
+        Args:
+            target_degrees: positive = CCW, negative = CW
+            speed: rotation speed in rad/s (always positive, sign from target)
+        Returns True if completed, False if aborted.
+        """
+        if not self.slam:
+            return False
+
+        vz = speed if target_degrees > 0 else -speed
+        target_rad = abs(math.radians(target_degrees))
+        accumulated = 0.0
+        prev_heading = self._get_pose()[2]
+        timeout = abs(target_degrees) / math.degrees(speed) * 3  # 3x safety timeout
+
+        start = time.time()
+        while accumulated < target_rad and not self._abort:
+            if time.time() - start > timeout:
+                _log.warning(f"Rotation timeout after {timeout:.0f}s, accumulated {math.degrees(accumulated):.0f}°")
+                break
+
+            self._move_filtered(0, 0, vz)
+            time.sleep(1.0 / EXPLORE_UPDATE_HZ)
+
+            cur_heading = self._get_pose()[2]
+            # Compute delta with wrapping
+            delta = cur_heading - prev_heading
+            delta = (delta + math.pi) % (2 * math.pi) - math.pi
+            accumulated += abs(delta)
+            prev_heading = cur_heading
+
+            if int(accumulated * 10) % 10 == 0:  # log every ~6°
+                _log.debug(f"Rotate: {math.degrees(accumulated):.0f}°/{abs(target_degrees)}° heading={math.degrees(cur_heading):.0f}°")
+
+        self._stop_motors()
+        _log.info(f"Rotation done: {math.degrees(accumulated):.0f}° of {abs(target_degrees)}°")
+        return not self._abort
+
+    def _scan_test_loop(self):
+        try:
+            # Phase 1: 2x clockwise (negative degrees)
+            _log.info("Scan test: 2x clockwise rotation")
+            for turn in range(2):
+                _log.info(f"  CW rotation {turn + 1}/2")
+                if not self._rotate_by(-360):
+                    break
+                time.sleep(0.5)
+
+            if not self._abort:
+                # Phase 2: 2x counterclockwise (positive degrees)
+                _log.info("Scan test: 2x counterclockwise rotation")
+                for turn in range(2):
+                    _log.info(f"  CCW rotation {turn + 1}/2")
+                    if not self._rotate_by(360):
+                        break
+                    time.sleep(0.5)
+
+            _log.info("Scan test complete")
+        except Exception as e:
+            _log.error(f"Scan test error: {e}", exc_info=True)
+        finally:
+            self._stop_motors()
+            self.state = "idle"
+
     def stop(self):
         self._abort = True
         self._stop_motors()

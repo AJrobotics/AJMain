@@ -350,6 +350,9 @@ class ExplorerHandler(tornado.web.RequestHandler):
                 _start_recording()
             elif action == "return_home":
                 result = explorer.return_home()
+            elif action == "scan_test":
+                result = explorer.start_scan_test()
+                _start_recording()
             elif action == "stop":
                 result = explorer.stop()
                 _stop_recording()
@@ -608,6 +611,7 @@ def broadcast_debug():
         timing["collision_us"] = round((t1 - t0) * 1e6)
         timing["collision_sectors"] = collision.get_sector_distances()
         timing["collision_level"] = collision.get_status()["level"]
+        timing["heading"] = slam.get_heading_debug()
 
         msg = json.dumps(timing)
         for client in (debug_clients | timing_clients).copy():
@@ -633,6 +637,9 @@ def _stop_recording():
 def _tick_recording():
     if _recorder:
         _recorder.add_frame()
+        # Auto-stop recording when explorer/scan test finishes
+        if explorer.state in ("idle", "stopped") and _recorder.frame_idx > 5:
+            _stop_recording()
 
 
 def broadcast_lidar():

@@ -154,7 +154,8 @@ jetson/
     static/
       index.html             # Dashboard UI
       lidar.js               # All frontend JS
-      sensor_debug.html      # Sensor debug tool
+      sensor_debug.html      # Sensor debug tool (LiDAR + IMU tabs)
+      mapping_debug.html     # Mapping debug tool (Live/Offline, recording playback)
 ```
 
 ## Key Libraries on Jetson
@@ -174,8 +175,8 @@ jetson/
 ## Collision Avoidance (HIGHEST PRIORITY)
 **Collision avoidance has the highest priority in the system. No code path may bypass it.**
 - 8 sectors (45° each), fuses LiDAR (360°) + depth camera (forward)
-- STOP < 200mm, SLOW < 500mm, CAUTION < 800mm
-- **HARD SAFETY**: if ANY non-ignored sector < 200mm, ALL translational motion is blocked regardless of direction. Only rotation allowed.
+- STOP < 300mm, SLOW < 500mm, CAUTION < 800mm
+- **HARD SAFETY**: if ANY non-ignored sector < 300mm, ALL translational motion is blocked regardless of direction. Only rotation allowed.
 - Rotation always allowed (even during emergency stop)
 - Rear 140° ignore zone excludes LiDAR points behind robot (applied in LiDAR process)
 - **Reads pre-computed sector distances from shared memory** — does NOT process raw sensor data
@@ -214,22 +215,57 @@ jetson/
 
 ## SLAM
 - Custom Python: occupancy grid (600x600, 50mm/cell) + ICP scan matching
-- Pose tracking with IMU yaw fusion
-- **Sensor fusion**: in ±30° forward overlap zone, LiDAR points confirmed by depth camera get higher confidence (L_OCC_FUSED=1.5), contradicted points get lower confidence (L_OCC_SINGLE=0.3)
-- Frontier-based autonomous exploration
-- Return-to-home via breadcrumb trail
-- SLAM runs in background thread, not Tornado event loop
-- **Map display thresholds**: solid walls (log-odds > 0.9), free space (< -1.5), hint walls (0.8-2.0)
-- **Walls-only canvas**: shows only confirmed wall cells (log-odds > 0.9) as white on black
+- **Heading: 90% IMU + 10% ICP** (IMU is primary, ICP fine-tunes when quality ≥ 0.4)
+  - IMU yaw is **negated** before use (`imu_corrected = -imu_yaw`) — IMU convention opposite to math convention
+  - IMU offset calibrated on first scan to align with SLAM coordinate system
+  - When ICP quality < 0.4: 100% IMU heading (no ICP rotation)
+  - Previous attempts: 70/30 ICP/IMU blend caused ±30° oscillation; 100% IMU was stable but no fine-tuning
+- **Translation: ICP only, capped at 50mm/scan** (allows 0.15m/s at 5Hz = 30mm + margin)
+  - Previous 100mm cap caused ~200mm drift per rotation; 50mm cap is a balance between tracking real movement and preventing drift
+  - 20mm cap was too tight — rejected most translations, robot couldn't track forward movement
+  - Remaining drift (~80mm/rotation) is from LiDAR not at center of rotation (robot wobbles during turns)
+- **ICP quality metric**: fraction of points within 100mm of target. Reject translation if quality < 0.2
+- **Sensor fusion**: in ±30° forward overlap zone, LiDAR+depth cross-validation (L_OCC_FUSED=1.5, L_OCC_SINGLE=0.3)
+- **Map persistence**: save/load to `/home/jetson/RosMaster/maps/` as compressed numpy `.npz`
+- **Wall line extraction**: Hough Transform → angle snapping (0°/90°) → parallel line collapse → collinear merge
+- **Simple loop closure**: detects revisited poses (300mm, 200 scan gap, quality > 0.4, cooldown 100 scans)
+  - Corrects **position only** — does NOT change heading (IMU handles heading)
+  - Previous bug: loop closure applied ICP rotation to pose, causing -123° heading jumps that contradicted IMU
+- SLAM runs in background thread at 5 Hz, not Tornado event loop
+- **Map display thresholds**: solid walls (log-odds > 2.0), free space (< -1.5), hint walls (0.8-2.0)
+- **Future improvement**: landmark-based localization — detect wall features (corners, edges) as anchoring points to correct robot position, eliminating ICP drift
 
 ## Explorer
 - Initial slow 360° scan at 0.2 rad/s before exploration (~31 sec)
+- **Scan test**: 2x CW + 2x CCW full rotations from fixed position (for mapping debug)
+  - Uses IMU-tracked cumulative rotation (not timer) — stops at exactly 360°
+  - Button on dashboard: "Scan"
 - Navigation turn speed: 0.3 rad/s (slow for sensor fusion accuracy)
-- Forward speed: 0.08 m/s (slow for safety)
+- Forward speed: 0.08 m/s (adjustable via dashboard slider, range 0.02-0.15 m/s)
+- Stuck spinning timeout: 60 steps (~12 sec), faster rotation (1.5x) for turns > 90°
 - Frontier search: numpy vectorized (handles 10,000+ frontiers in <0.3s)
 - Frontier clustering: grid-based binning O(n) instead of O(n²)
 - Collision-aware: skips blocked targets, picks next frontier
-- Logs frontier count, cluster count, navigation targets, and collision blocks
+- **File logging** to `/tmp/explorer.log` with detailed turn/forward/collision data
+- **Video recording**: starts automatically with exploration/scan test
+  - H.264 MP4 at 1 FPS, 320x120 (RGB + depth heatmap side-by-side)
+  - JSON log with LiDAR scan (360°), pose, sectors per frame
+  - Saved to `/home/jetson/RosMaster/maps/recordings/`
+  - Auto-stops when exploration finishes
+
+## Mapping Debug (http://192.168.1.99:8080/static/mapping_debug.html)
+- **Live/Offline mode** dropdown
+- **Live**: real-time occupancy grid + trajectory + wall lines + robot position
+- **Offline**: load recording, step through frames, see LiDAR scan overlay on map
+  - Yellow dots: LiDAR scan at selected moment (world coordinates)
+  - Cyan trajectory: robot path up to that point
+  - Orange FOV cone: depth camera field of view
+  - Video player synced with pose log table
+  - Mini LiDAR polar plot in side panel
+- **Interactive map**: zoom (scroll), pan (drag), click cell to inspect log-odds
+- **Save/Load/Reset** map buttons
+- **Wall lines** view: extracted straight wall segments
+- **Recording list** with playback
 
 ## Known Issues
 - **STM32 USB intermittent**: sometimes only 1 CH340 appears instead of 2. The STM32 driver board's CH340 USB path can change between boots depending on expansion board power-up timing. Server `init_bot()` tests battery voltage > 1V to verify connection.

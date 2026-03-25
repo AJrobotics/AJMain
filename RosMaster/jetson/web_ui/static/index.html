@@ -221,6 +221,7 @@
                     <div class="panel-row"><span class="panel-label">Speed</span><span class="panel-value"><input type="range" id="explore-speed" min="20" max="150" value="80" step="10" style="width:80px;vertical-align:middle;" oninput="setExploreSpeed(this.value)"><span id="explore-speed-val" style="margin-left:4px;">0.08</span> m/s</span></div>
                     <div style="display:flex;gap:3px;margin-top:6px;flex-wrap:wrap;">
                         <button class="cal-btn cal-run" onclick="explorerCmd('start')">Explore</button>
+                        <button class="cal-btn" onclick="explorerCmd('scan_test')" style="background:#1a3a3a;color:#0df;">Scan</button>
                         <button class="cal-btn" onclick="explorerCmd('return_home')">Return</button>
                         <button class="cal-btn cal-abort" onclick="explorerCmd('stop')">Stop</button>
                         <button class="cal-btn" onclick="explorerCmd('reset_map')">Reset Map</button>

@@ -65,6 +65,13 @@ class SLAMEngine:
         # Loop closure: store (pose, scan_points) at intervals
         self._scan_store = []  # list of (scan_idx, pose, points)
         self._loop_closure_count = 0
+        # IMU-only heading: offset aligns IMU reference to SLAM coordinate system
+        self._imu_yaw_offset = None   # set on first scan with IMU data
+        # Debug: heading sources
+        self._debug_icp_theta = 0.0   # last ICP heading change (rad)
+        self._debug_imu_yaw = 0.0     # last raw IMU yaw (rad)
+        self._debug_icp_quality = 0.0 # last ICP match quality
+        self._debug_fused_theta = 0.0 # heading after fusion
         # Wall lines cache
         self._wall_lines = []
         self._wall_lines_scan = -1  # scan_count when last computed
@@ -364,22 +371,51 @@ class SLAMEngine:
                 dy = T[1, 2]
                 dtheta = math.atan2(T[1, 0], T[0, 0])
 
-                # Reject wild transforms: cap translation to 100mm and rotation to 15° per scan
                 trans = math.hypot(dx, dy)
-                if quality < 0.2 or trans > 100 or abs(math.degrees(dtheta)) > 15:
-                    # Bad match — use IMU only for rotation, no translation
-                    dx, dy, dtheta = 0, 0, 0
+                self._debug_icp_quality = quality
+                self._debug_icp_theta = dtheta
 
-                # Update pose
+                # --- Translation: ICP with reasonable cap ---
+                # Max 50mm per scan (robot at 0.15m/s max, 5Hz = 30mm, plus margin)
+                # Reject if quality too low or translation too large
+                if quality < 0.2 or trans > 50:
+                    dx, dy = 0, 0
+
+                # Update position from ICP translation (rotated into world frame)
                 cos_t = math.cos(self.pose[2])
                 sin_t = math.sin(self.pose[2])
                 self.pose[0] += cos_t * dx - sin_t * dy
                 self.pose[1] += sin_t * dx + cos_t * dy
-                self.pose[2] += dtheta
 
-                # Use IMU yaw as correction if available
+                # --- Heading: IMU primary + small ICP correction ---
+                # Negate IMU yaw: IMU convention → math convention
                 if imu_yaw is not None:
-                    self.pose[2] = 0.7 * self.pose[2] + 0.3 * imu_yaw
+                    self._debug_imu_yaw = imu_yaw
+                    imu_corrected = -imu_yaw
+
+                    if self._imu_yaw_offset is None:
+                        self._imu_yaw_offset = imu_corrected - self.pose[2]
+
+                    # IMU heading (with offset)
+                    imu_heading = imu_corrected - self._imu_yaw_offset
+                    imu_heading = (imu_heading + math.pi) % (2 * math.pi) - math.pi
+
+                    # If ICP quality is good and rotation is small, blend in ICP rotation
+                    # 90% IMU + 10% ICP correction — IMU is primary, ICP just fine-tunes
+                    if quality >= 0.4 and abs(math.degrees(dtheta)) < 10:
+                        # Apply ICP rotation to current pose
+                        icp_heading = self.pose[2] + dtheta
+                        icp_heading = (icp_heading + math.pi) % (2 * math.pi) - math.pi
+                        # Blend: 90% IMU, 10% ICP (via shortest angular path)
+                        diff = (icp_heading - imu_heading + math.pi) % (2 * math.pi) - math.pi
+                        self.pose[2] = imu_heading + 0.1 * diff
+                    else:
+                        # ICP unreliable — use IMU only
+                        self.pose[2] = imu_heading
+
+                    self.pose[2] = (self.pose[2] + math.pi) % (2 * math.pi) - math.pi
+
+                self._debug_fused_theta = self.pose[2]
 
             self.prev_points = local_points.copy()
 
@@ -591,11 +627,12 @@ class SLAMEngine:
                 self._loop_closure_count += 1
                 self._last_closure_scan = cur_idx
                 print(f"Loop closure #{self._loop_closure_count}: correction dx={dx:.0f} dy={dy:.0f} dtheta={math.degrees(dtheta):.1f}° quality={quality:.2f} (near scan {stored_idx})", flush=True)
+                # Apply position correction only — heading comes from IMU
                 cos_t = math.cos(self.pose[2])
                 sin_t = math.sin(self.pose[2])
                 self.pose[0] += cos_t * dx - sin_t * dy
                 self.pose[1] += sin_t * dx + cos_t * dy
-                self.pose[2] += dtheta
+                # Do NOT apply dtheta — IMU handles heading
                 break
 
     # --- Map Persistence ---
@@ -875,6 +912,16 @@ class SLAMEngine:
 
         return merged
 
+    def get_heading_debug(self):
+        """Return heading debug info for sensor debug UI."""
+        return {
+            "icp_dtheta": round(math.degrees(self._debug_icp_theta), 1),
+            "imu_yaw": round(math.degrees(self._debug_imu_yaw), 1),
+            "icp_quality": round(self._debug_icp_quality, 3),
+            "fused_heading": round(math.degrees(self._debug_fused_theta), 1),
+            "pose_heading": round(math.degrees(self.pose[2]), 1),
+        }
+
     def get_pose(self):
         with self.lock:
             return self.pose.copy()
@@ -896,5 +943,6 @@ class SLAMEngine:
             self.scan_count = 0
             self._scan_store.clear()
             self._loop_closure_count = 0
+            self._imu_yaw_offset = None
             self._wall_lines = []
             self._wall_lines_scan = -1
