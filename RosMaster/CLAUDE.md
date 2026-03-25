@@ -108,11 +108,15 @@ jetson/
 - Collision avoidance intercepts all move commands
 - Rear 120° ignore zone (configurable) for cables/devices
 
-## Collision Avoidance
+## Collision Avoidance (HIGHEST PRIORITY)
+**Collision avoidance has the highest priority in the system. No code path may bypass it.**
 - 8 sectors (45° each), fuses LiDAR (360°) + depth camera (forward)
 - STOP < 200mm, SLOW < 500mm, CAUTION < 800mm
-- Rotation always allowed
+- **HARD SAFETY**: if ANY non-ignored sector < 200mm, ALL translational motion is blocked regardless of direction. Only rotation allowed.
+- Rotation always allowed (even during emergency stop)
 - Rear ignore zone excludes LiDAR points behind robot
+- All motor commands (explorer, calibration, TCP) must go through `filter_motion()`
+- Never add code that calls `set_car_motion()` directly without collision filtering
 
 ## LiDAR Configuration
 - **RPLidar S2** (Model 113, FW 1.2, HW 18)

@@ -97,8 +97,15 @@ class CollisionAvoidance:
                 min_depth = float(np.percentile(valid, 5))  # 5th percentile for robustness
                 sectors[sector_idx] = min(sectors[sector_idx], min_depth)
 
+    @property
+    def min_dist(self):
+        """Minimum distance across all active sectors."""
+        return min(self._sector_distances)
+
     def filter_motion(self, vx, vy, vz):
         """Filter a motion command for safety.
+
+        HIGHEST PRIORITY: collision avoidance always overrides any movement.
 
         Args:
             vx: forward/backward speed (m/s), positive=forward
@@ -112,12 +119,23 @@ class CollisionAvoidance:
         if not self.enabled:
             return vx, vy, vz
 
+        self.update_sectors()
+
+        # HARD SAFETY: if ANY non-ignored sector is below STOP_DIST,
+        # block ALL translational motion regardless of direction
+        for i in range(NUM_SECTORS):
+            # Skip rear ignore zone sectors
+            sector_center = i * SECTOR_SIZE
+            angle_from_rear = abs(((sector_center - 180) + 180) % 360 - 180)
+            if angle_from_rear < self.ignore_angle / 2.0:
+                continue
+            if self._sector_distances[i] < STOP_DIST:
+                return 0, 0, vz  # emergency stop, rotation only
+
         # No translational movement — nothing to filter
         speed = math.sqrt(vx * vx + vy * vy)
         if speed < 0.001:
             return vx, vy, vz
-
-        self.update_sectors()
 
         # Determine movement direction in degrees (0=front, clockwise)
         # vx=forward, vy=left → angle: atan2(-vy, vx) for clockwise convention
