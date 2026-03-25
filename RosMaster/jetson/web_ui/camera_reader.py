@@ -29,7 +29,11 @@ class CameraReader:
         self._thread.start()
 
     def _read_loop(self):
-        cap = cv2.VideoCapture(self.device_id)
+        # Force V4L2 backend — GStreamer fails on Jetson with Astra RGB
+        cap = cv2.VideoCapture(self.device_id, cv2.CAP_V4L2)
+        if not cap.isOpened():
+            # Fallback to default
+            cap = cv2.VideoCapture(self.device_id)
         if not cap.isOpened():
             print(f"{self.name}: Cannot open /dev/video{self.device_id}")
             self.connected = False

@@ -77,7 +77,11 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
     <button class="hdr-btn" onclick="loadMap()">Load</button>
     <button class="hdr-btn" onclick="fetchGrid()">Refresh Grid</button>
     <button class="hdr-btn danger" onclick="resetMap()">Reset</button>
-    <span id="conn-info">Disconnected</span>
+    <select id="mode-select" onchange="setMode(this.value)" style="margin-left:auto;background:#1a1a3a;color:#0f8;border:1px solid #444;padding:4px 8px;font-family:inherit;font-size:12px;border-radius:3px;">
+        <option value="live">Live</option>
+        <option value="offline">Offline</option>
+    </select>
+    <span id="conn-info" style="margin-left:8px;">Disconnected</span>
 </div>
 
 <div id="stats-bar">
@@ -113,6 +117,22 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
             <div class="sp-title">Saved Maps</div>
             <div id="map-list">Loading...</div>
         </div>
+        <div class="sp-section">
+            <div class="sp-title">Recordings</div>
+            <div id="rec-list">Loading...</div>
+        </div>
+        <div class="sp-section" id="rec-viewer" style="display:none;">
+            <div class="sp-title">Playback</div>
+            <video id="rec-video" controls style="width:100%;background:#000;border:1px solid #333;"></video>
+            <div id="rec-pose-info" style="font-size:10px;color:#0f8;margin-top:4px;">-</div>
+            <canvas id="rec-lidar-canvas" width="200" height="200" style="width:100%;background:#0a0a1a;border:1px solid #333;margin-top:4px;"></canvas>
+            <div id="rec-log-table" style="max-height:200px;overflow-y:auto;margin-top:4px;">
+                <table style="width:100%;border-collapse:collapse;font-size:10px;">
+                    <thead><tr style="color:#00d4ff;"><th>T</th><th>Pose</th><th>Min Sec</th></tr></thead>
+                    <tbody id="rec-log-body"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -127,6 +147,8 @@ let pose = [15000, 15000, 0];
 let poseHistory = [];
 let viewMode = 'raw';       // raw, walls, floor
 let needsRedraw = true;
+let selectedRecEntry = null; // recording entry to overlay on main canvas
+let appMode = 'live';        // live or offline
 
 // Zoom/pan state
 let zoom = 1.0;
@@ -138,16 +160,42 @@ const ctx = canvas.getContext('2d');
 let dpr = window.devicePixelRatio || 1;
 
 // ============================================================
+// Mode switching (Live / Offline)
+// ============================================================
+function setMode(mode) {
+    appMode = mode;
+    const info = document.getElementById('conn-info');
+    if (mode === 'offline') {
+        // Disconnect live WebSocket
+        if (ws) { ws.onclose = null; ws.close(); ws = null; }
+        info.textContent = 'Offline';
+        info.style.color = '#f80';
+        selectedRecEntry = null;
+        needsRedraw = true;
+    } else {
+        // Reconnect live
+        info.textContent = 'Connecting...';
+        info.style.color = '#888';
+        selectedRecEntry = null;
+        connectWS();
+        fetchGrid();
+        needsRedraw = true;
+    }
+}
+
+// ============================================================
 // WebSocket for live SLAM updates
 // ============================================================
 let ws = null;
 function connectWS() {
+    if (appMode === 'offline') return;
     const host = location.host || '192.168.1.99:8080';
     ws = new WebSocket('ws://' + host + '/ws/slam');
     ws.onopen = () => { document.getElementById('conn-info').textContent = 'Live'; document.getElementById('conn-info').style.color = '#0f8'; };
-    ws.onclose = () => { document.getElementById('conn-info').textContent = 'Disconnected'; document.getElementById('conn-info').style.color = '#888'; setTimeout(connectWS, 3000); };
+    ws.onclose = () => { if (appMode === 'live') { document.getElementById('conn-info').textContent = 'Disconnected'; document.getElementById('conn-info').style.color = '#888'; setTimeout(connectWS, 3000); } };
     ws.onerror = () => ws.close();
     ws.onmessage = (e) => {
+        if (appMode === 'offline') return;  // ignore live data in offline mode
         const msg = JSON.parse(e.data);
         if (msg.type === 'slam') {
             if (msg.pose) pose = msg.pose;
@@ -357,6 +405,7 @@ function draw() {
     if (document.getElementById('ov-traj').checked) drawTrajectory();
     if (document.getElementById('ov-walls').checked && viewMode === 'raw') drawWallLines();
     if (document.getElementById('ov-robot').checked) drawRobot();
+    if (selectedRecEntry) drawRecScanOnMap(selectedRecEntry);
 
     ctx.restore();
 }
@@ -450,6 +499,70 @@ function drawRobot() {
 }
 
 // ============================================================
+// Recording scan overlay on main map
+// ============================================================
+function drawRecScanOnMap(entry) {
+    if (!entry.scan || entry.scan.length === 0) return;
+
+    const px = entry.pose[0] / CELL;  // robot position in grid coords
+    const py = entry.pose[1] / CELL;
+    const theta = entry.pose[2] * Math.PI / 180;
+
+    // Draw robot position marker (larger, yellow)
+    const markerSize = 8 / zoom;
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
+    ctx.beginPath();
+    ctx.arc(px, py, markerSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Direction arrow
+    ctx.strokeStyle = '#ff0';
+    ctx.lineWidth = 3 / zoom;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + Math.cos(theta) * markerSize * 3, py + Math.sin(theta) * markerSize * 3);
+    ctx.stroke();
+
+    // Draw LiDAR scan points transformed to world coordinates
+    const dotSize = 2 / zoom;
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.7)';
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+
+    ctx.beginPath();
+    for (const [angle, dist] of entry.scan) {
+        if (dist < 25) continue;
+        // Local coords (robot frame)
+        const rad = angle * Math.PI / 180;
+        const lx = dist * Math.cos(rad);
+        const ly = dist * Math.sin(rad);
+        // World coords (rotated by robot heading)
+        const wx = px + (cosT * lx - sinT * ly) / CELL;
+        const wy = py + (sinT * lx + cosT * ly) / CELL;
+        ctx.rect(wx - dotSize/2, wy - dotSize/2, dotSize, dotSize);
+    }
+    ctx.fill();
+
+    // Draw depth FOV cone (±30° from heading)
+    ctx.strokeStyle = 'rgba(255, 165, 0, 0.4)';
+    ctx.lineWidth = 1 / zoom;
+    const fovLen = 80 / zoom;  // length of FOV lines in grid cells
+    const fovHalf = 30 * Math.PI / 180;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + Math.cos(theta - fovHalf) * fovLen, py + Math.sin(theta - fovHalf) * fovLen);
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + Math.cos(theta + fovHalf) * fovLen, py + Math.sin(theta + fovHalf) * fovLen);
+    ctx.stroke();
+
+    // Label
+    ctx.fillStyle = '#ff0';
+    ctx.font = (10 / zoom) + 'px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('T+' + entry.t + 's  ' + entry.scan.length + 'pts', px + markerSize * 2, py - markerSize);
+}
+
+// ============================================================
 // Auto-fit view
 // ============================================================
 function fitView() {
@@ -485,10 +598,174 @@ function render() {
     requestAnimationFrame(render);
 }
 
-// Periodic data refresh
+// ============================================================
+// Recordings
+// ============================================================
+let currentRecLog = null;
+
+async function fetchRecordings() {
+    try {
+        const r = await fetch(API + '?action=recordings');
+        const d = await r.json();
+        const el = document.getElementById('rec-list');
+        if (!d.recordings || d.recordings.length === 0) { el.textContent = 'No recordings'; return; }
+        el.innerHTML = d.recordings.map(r =>
+            '<div class="map-item" onclick="openRecording(\'' + r.name + '\',\'' + r.video + '\')">' +
+            '<span>' + r.video + '</span><span style="color:#888">' + r.frames + 'f / ' + Math.round(r.duration) + 's</span></div>'
+        ).join('');
+    } catch(e) {}
+}
+
+async function openRecording(name, videoFile) {
+    // Auto-switch to offline mode
+    document.getElementById('mode-select').value = 'offline';
+    setMode('offline');
+
+    document.getElementById('rec-viewer').style.display = 'block';
+    const video = document.getElementById('rec-video');
+    video.src = '/recordings/' + videoFile;
+
+    // Load pose log
+    try {
+        const r = await fetch(API + '?action=recording_log&name=' + name);
+        const d = await r.json();
+        currentRecLog = d.log || [];
+        // Build trajectory from recording for offline display
+        poseHistory = currentRecLog.map(e => e.pose);
+        if (currentRecLog.length > 0) {
+            pose = currentRecLog[0].pose;
+            selectedRecEntry = currentRecLog[0];
+        }
+        // Update stats bar with recording info
+        document.getElementById('st-scans').textContent = d.frames || currentRecLog.length;
+        document.getElementById('st-pose').textContent = 'Recording: ' + (d.duration || 0) + 's';
+        document.getElementById('st-coverage').textContent = '-';
+        document.getElementById('st-loops').textContent = '-';
+        document.getElementById('st-cells').textContent = currentRecLog.length + ' frames';
+        needsRedraw = true;
+
+        const tbody = document.getElementById('rec-log-body');
+        tbody.innerHTML = currentRecLog.map((entry, i) =>
+            '<tr style="cursor:pointer;border-bottom:1px solid #1a1a2a;" onclick="seekRecording(' + i + ')">' +
+            '<td style="padding:1px 4px;">' + entry.t + 's</td>' +
+            '<td style="padding:1px 4px;color:#0f8;">(' + entry.pose[0] + ',' + entry.pose[1] + ',' + entry.pose[2] + '\u00B0)</td>' +
+            '<td style="padding:1px 4px;color:#ff0;">' + Math.min(...entry.sectors) + 'mm</td></tr>'
+        ).join('');
+    } catch(e) { console.error(e); }
+
+    // Sync pose display + LiDAR with video time
+    video.addEventListener('timeupdate', () => {
+        if (!currentRecLog) return;
+        const t = video.currentTime;
+        const idx = Math.min(Math.floor(t), currentRecLog.length - 1);
+        if (idx >= 0 && idx < currentRecLog.length) {
+            const entry = currentRecLog[idx];
+            document.getElementById('rec-pose-info').textContent =
+                'T+' + entry.t + 's  Pose: (' + entry.pose.join(', ') + ')  MinSec: ' + Math.min(...entry.sectors) + 'mm';
+            // Highlight row
+            document.querySelectorAll('#rec-log-body tr').forEach((tr, i) => {
+                tr.style.background = i === idx ? '#1a2a1a' : '';
+            });
+            // Draw LiDAR scan in side panel + main canvas
+            selectedRecEntry = entry;
+            drawRecLidar(entry);
+            needsRedraw = true;
+        }
+    });
+}
+
+function seekRecording(frameIdx) {
+    const video = document.getElementById('rec-video');
+    video.currentTime = frameIdx;  // 1 FPS so frame index = seconds
+    if (currentRecLog && frameIdx < currentRecLog.length) {
+        selectedRecEntry = currentRecLog[frameIdx];
+        drawRecLidar(selectedRecEntry);
+        needsRedraw = true;
+    }
+}
+
+function drawRecLidar(entry) {
+    const canvas = document.getElementById('rec-lidar-canvas');
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const cx = w / 2, cy = h / 2;
+    const radius = Math.min(cx, cy) - 10;
+
+    // Range rings
+    ctx.strokeStyle = '#1a2a2a';
+    ctx.lineWidth = 0.5;
+    for (const frac of [0.25, 0.5, 0.75, 1.0]) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius * frac, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+    // Cross
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius);
+    ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy);
+    ctx.stroke();
+
+    if (!entry.scan || entry.scan.length === 0) {
+        ctx.fillStyle = '#444'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('No scan data', cx, cy);
+        return;
+    }
+
+    // Find max dist for scaling
+    let maxDist = 0;
+    for (const [a, d] of entry.scan) { if (d > maxDist) maxDist = d; }
+    maxDist = Math.max(maxDist, 500);
+    const scale = radius / maxDist;
+
+    // Draw scan points
+    ctx.fillStyle = '#0f8';
+    for (const [angle, dist] of entry.scan) {
+        if (dist < 25) continue;
+        const rad = (angle - 90) * Math.PI / 180;
+        const px = cx + Math.cos(rad) * dist * scale;
+        const py = cy + Math.sin(rad) * dist * scale;
+        ctx.fillRect(px - 1, py - 1, 2, 2);
+    }
+
+    // Draw sectors as colored arcs
+    if (entry.sectors) {
+        for (let i = 0; i < 8; i++) {
+            const d = entry.sectors[i];
+            if (d >= 9999) continue;
+            const color = d < 300 ? 'rgba(255,0,0,0.3)' : d < 500 ? 'rgba(255,128,0,0.3)' : d < 800 ? 'rgba(255,255,0,0.2)' : 'rgba(0,255,0,0.1)';
+            const a1 = (i * 45 - 22.5 - 90) * Math.PI / 180;
+            const a2 = (i * 45 + 22.5 - 90) * Math.PI / 180;
+            const r = Math.min(d * scale, radius);
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, r, a1, a2);
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+
+    // Robot direction arrow
+    const theta = entry.pose[2] * Math.PI / 180;
+    ctx.strokeStyle = '#f00'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(theta - Math.PI/2) * 15, cy + Math.sin(theta - Math.PI/2) * 15);
+    ctx.stroke();
+
+    // Label
+    ctx.fillStyle = '#888'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('T+' + entry.t + 's  ' + entry.scan.length + ' pts', cx, h - 4);
+}
+
+// Periodic data refresh (only in live mode)
 setInterval(() => {
-    fetchStats();
-    fetchWallLines();
+    if (appMode === 'live') {
+        fetchStats();
+        fetchWallLines();
+    }
 }, 3000);
 
 // ============================================================
@@ -502,6 +779,7 @@ setTimeout(async () => {
     fetchStats();
     fetchWallLines();
     fetchMapList();
+    fetchRecordings();
     render();
 }, 100);
 </script>

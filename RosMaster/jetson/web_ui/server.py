@@ -52,6 +52,112 @@ slam_clients = set()
 # Persistent Rosmaster instance for status (uses CH340 on ttyUSB1/ttyUSB2, not ttyUSB0)
 bot = None
 
+# --- Exploration Video Recorder ---
+RECORDING_DIR = "/home/jetson/RosMaster/maps/recordings"
+_recorder = None  # active VideoWriter during exploration
+
+
+class ExploreRecorder:
+    """Records RGB + depth frames as MP4 during exploration, with pose log."""
+
+    def __init__(self):
+        import cv2
+        os.makedirs(RECORDING_DIR, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        self.video_path = os.path.join(RECORDING_DIR, f"explore_{ts}.mp4")
+        self.log_path = os.path.join(RECORDING_DIR, f"explore_{ts}.json")
+        # Side-by-side: RGB (160x120) + Depth heatmap (160x120) = 320x120
+        self.width, self.height = 320, 120
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 — browser compatible
+        self.writer = cv2.VideoWriter(self.video_path, fourcc, 1.0, (self.width, self.height))
+        self.pose_log = []  # list of {time, pose, sectors, frame_idx}
+        self.frame_idx = 0
+        self.start_time = time.time()
+        print(f"Recording started: {self.video_path}", flush=True)
+
+    def add_frame(self):
+        import cv2, base64
+        try:
+            # Get RGB frame
+            rgb_b64 = cam_primary.get_frame()
+            rgb_img = None
+            if rgb_b64:
+                rgb_bytes = base64.b64decode(rgb_b64)
+                rgb_arr = np.frombuffer(rgb_bytes, dtype=np.uint8)
+                rgb_img = cv2.imdecode(rgb_arr, cv2.IMREAD_COLOR)
+                rgb_img = cv2.resize(rgb_img, (160, 120))
+
+            # Get depth heatmap
+            depth_b64, depth_stats = depth.get_frame()
+            depth_img = None
+            if depth_b64:
+                depth_bytes = base64.b64decode(depth_b64)
+                depth_arr = np.frombuffer(depth_bytes, dtype=np.uint8)
+                depth_img = cv2.imdecode(depth_arr, cv2.IMREAD_COLOR)
+                depth_img = cv2.resize(depth_img, (160, 120))
+
+            # Compose side-by-side frame
+            frame = np.zeros((120, 320, 3), dtype=np.uint8)
+            if rgb_img is not None:
+                frame[:, :160] = rgb_img
+            if depth_img is not None:
+                frame[:, 160:] = depth_img
+
+            # Overlay pose text + recording indicator
+            pose = slam.get_pose()
+            elapsed = time.time() - self.start_time
+            text = f"T+{int(elapsed)}s ({pose[0]:.0f},{pose[1]:.0f},{math.degrees(pose[2]):.0f})"
+            cv2.putText(frame, text, (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
+            cv2.circle(frame, (310, 10), 5, (0, 0, 255), -1)  # red dot = recording
+
+            self.writer.write(frame)
+
+            # Get LiDAR scan
+            scan = lidar.get_scan()
+            scan_compact = [[p["angle"], p["dist"]] for p in scan] if scan else []
+
+            # Get SLAM map stats for this frame
+            sectors = collision.get_sector_distances() if collision else [9999]*8
+            scan_count = slam.scan_count
+
+            self.pose_log.append({
+                "t": round(elapsed, 1),
+                "pose": [round(pose[0]), round(pose[1]), round(math.degrees(pose[2]))],
+                "sectors": [round(s) for s in sectors],
+                "scan": scan_compact,  # full 360° LiDAR data
+                "scan_count": scan_count,
+                "frame": self.frame_idx,
+            })
+            self.frame_idx += 1
+        except Exception as e:
+            print(f"Recorder frame error: {e}", flush=True)
+
+    def stop(self):
+        try:
+            self.writer.release()
+        except Exception:
+            pass
+        # Save pose log
+        try:
+            with open(self.log_path, 'w') as f:
+                json.dump({
+                    "video": os.path.basename(self.video_path),
+                    "frames": self.frame_idx,
+                    "duration": round(time.time() - self.start_time, 1),
+                    "log": self.pose_log,
+                }, f)
+        except Exception as e:
+            print(f"Recorder log save error: {e}", flush=True)
+        print(f"Recording saved: {self.video_path} ({self.frame_idx} frames)", flush=True)
+
+    def __del__(self):
+        """Safety net: release video writer if not properly stopped."""
+        try:
+            if self.writer and self.writer.isOpened():
+                self.writer.release()
+        except Exception:
+            pass
+
 
 def init_bot():
     global bot
@@ -241,10 +347,12 @@ class ExplorerHandler(tornado.web.RequestHandler):
             action = data.get("action", "")
             if action == "start":
                 result = explorer.start_exploration()
+                _start_recording()
             elif action == "return_home":
                 result = explorer.return_home()
             elif action == "stop":
                 result = explorer.stop()
+                _stop_recording()
             elif action == "reset_map":
                 slam.reset()
                 result = {"ok": True}
@@ -281,6 +389,35 @@ class SlamDataHandler(tornado.web.RequestHandler):
                 "cell_mm": CELL_SIZE_MM,
                 "compressed_size": len(compressed),
             }))
+        elif action == "recordings":
+            rec_dir = RECORDING_DIR
+            recordings = []
+            if os.path.isdir(rec_dir):
+                for f in os.listdir(rec_dir):
+                    if f.endswith(".json"):
+                        path = os.path.join(rec_dir, f)
+                        try:
+                            with open(path) as jf:
+                                meta = json.load(jf)
+                            recordings.append({
+                                "name": f[:-5],
+                                "video": meta.get("video", ""),
+                                "frames": meta.get("frames", 0),
+                                "duration": meta.get("duration", 0),
+                                "log_file": f,
+                            })
+                        except Exception:
+                            pass
+            recordings.sort(key=lambda r: r["name"], reverse=True)
+            self.write(json.dumps({"recordings": recordings}))
+        elif action == "recording_log":
+            name = self.get_argument("name", "")
+            path = os.path.join(RECORDING_DIR, name + ".json")
+            if os.path.exists(path):
+                with open(path) as f:
+                    self.write(f.read())
+            else:
+                self.write(json.dumps({"error": "Not found"}))
         elif action == "stats":
             with slam.lock:
                 pose = slam.pose.copy()
@@ -481,6 +618,23 @@ def broadcast_debug():
                 timing_clients.discard(client)
 
 
+def _start_recording():
+    global _recorder
+    if _recorder:
+        _stop_recording()
+    _recorder = ExploreRecorder()
+
+def _stop_recording():
+    global _recorder
+    if _recorder:
+        _recorder.stop()
+        _recorder = None
+
+def _tick_recording():
+    if _recorder:
+        _recorder.add_frame()
+
+
 def broadcast_lidar():
     if not lidar_clients:
         return
@@ -672,6 +826,7 @@ def broadcast_slam():
         "wall_count": wall_count,
         "pose": {"x": round(pose[0]), "y": round(pose[1]), "theta": round(math.degrees(pose[2]), 1)},
         "explorer": status,
+        "recording": os.path.basename(_recorder.video_path) if _recorder else None,
         "scans": slam.scan_count,
     })
     dead = set()
@@ -759,6 +914,7 @@ def make_app():
         (r"/ws/debug", DebugWSHandler),
         (r"/ws/timing", TimingWSHandler),
         (r"/static/(.*)", tornado.web.StaticFileHandler, {"path": STATIC_DIR}),
+        (r"/recordings/(.*)", tornado.web.StaticFileHandler, {"path": RECORDING_DIR}),
     ], debug=False)
 
 
@@ -805,6 +961,8 @@ def main():
 
     loop = tornado.ioloop.IOLoop.current()
 
+    # Exploration video recording at 1 FPS
+    tornado.ioloop.PeriodicCallback(_tick_recording, 1000).start()
     # LiDAR at ~10 Hz
     tornado.ioloop.PeriodicCallback(broadcast_lidar, 1000).start()  # 1 Hz
     # Depth at ~5 Hz
@@ -828,6 +986,7 @@ def main():
     def shutdown():
         global bot
         print("\nShutting down...")
+        _stop_recording()  # save any in-progress recording
         lidar.stop()
         depth.stop()
         cam_primary.stop()

@@ -710,6 +710,14 @@ function connectSlamWS() {
                                    data.explorer.state === 'arrived' ? '#00d4ff' : '#e0e0e0';
                 document.getElementById('explorer-frontiers').textContent = data.explorer.num_frontiers;
             }
+            const recEl = document.getElementById('explorer-recording');
+            if (data.recording) {
+                recEl.textContent = data.recording;
+                recEl.style.color = '#f44';
+            } else {
+                recEl.textContent = '-';
+                recEl.style.color = '#888';
+            }
         }
     };
 
