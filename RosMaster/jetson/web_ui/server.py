@@ -125,7 +125,7 @@ ros2_slam_process = None
 class SlamMethodHandler(tornado.web.RequestHandler):
     def post(self):
         global current_slam_method, ros2_slam_process
-        import subprocess
+        import subprocess, os, signal as _sig
         try:
             data = json.loads(self.request.body)
             method = data.get("method", "custom")
@@ -141,7 +141,6 @@ class SlamMethodHandler(tornado.web.RequestHandler):
             # --- Stop previous method ---
             # Kill any ROS2 SLAM processes
             if ros2_slam_process:
-                import os, signal as _sig
                 try:
                     os.killpg(os.getpgid(ros2_slam_process.pid), _sig.SIGTERM)
                 except Exception:
@@ -247,6 +246,71 @@ class ExplorerHandler(tornado.web.RequestHandler):
             elif action == "stop":
                 result = explorer.stop()
             elif action == "reset_map":
+                slam.reset()
+                result = {"ok": True}
+            elif action == "set_speed":
+                speed = float(data.get("speed", 0.08))
+                speed = max(0.02, min(0.15, speed))
+                explorer.explore_speed = speed
+                result = {"ok": True, "speed": speed}
+            else:
+                result = {"ok": False, "error": f"Unknown action: {action}"}
+            self.write(json.dumps(result))
+        except Exception as e:
+            self.write(json.dumps({"ok": False, "error": str(e)}))
+
+
+class SlamDataHandler(tornado.web.RequestHandler):
+    def get(self):
+        """List saved maps, get wall lines, grid data, or stats."""
+        import base64, zlib
+        action = self.get_argument("action", "list_maps")
+        if action == "list_maps":
+            self.write(json.dumps({"maps": slam.list_maps()}))
+        elif action == "wall_lines":
+            lines = slam.extract_wall_lines()
+            self.write(json.dumps({"lines": lines, "count": len(lines)}))
+        elif action == "grid_data":
+            with slam.lock:
+                raw = slam.grid.tobytes()
+            compressed = zlib.compress(raw)
+            b64 = base64.b64encode(compressed).decode('ascii')
+            self.write(json.dumps({
+                "grid_b64": b64,
+                "rows": GRID_SIZE, "cols": GRID_SIZE,
+                "cell_mm": CELL_SIZE_MM,
+                "compressed_size": len(compressed),
+            }))
+        elif action == "stats":
+            with slam.lock:
+                pose = slam.pose.copy()
+                grid = slam.grid
+                explored = int(np.sum(np.abs(grid) > 0.5))
+                total = GRID_SIZE * GRID_SIZE
+                coverage = round(explored / total * 100, 1)
+            self.write(json.dumps({
+                "scan_count": slam.scan_count,
+                "pose": [round(pose[0]), round(pose[1]), round(math.degrees(pose[2]))],
+                "coverage_pct": coverage,
+                "explored_cells": explored,
+                "loop_closures": slam._loop_closure_count,
+                "grid_size": GRID_SIZE,
+                "cell_mm": CELL_SIZE_MM,
+                "pose_history_len": len(slam.pose_history),
+            }))
+        else:
+            self.write(json.dumps({"error": f"Unknown action: {action}"}))
+
+    def post(self):
+        try:
+            data = json.loads(self.request.body)
+            action = data.get("action", "")
+            name = data.get("name", "default")
+            if action == "save":
+                result = slam.save_map(name)
+            elif action == "load":
+                result = slam.load_map(name)
+            elif action == "reset":
                 slam.reset()
                 result = {"ok": True}
             else:
@@ -689,6 +753,7 @@ def make_app():
         (r"/api/slam_method", SlamMethodHandler),
         (r"/api/calibration", CalibrationHandler),
         (r"/api/explorer", ExplorerHandler),
+        (r"/api/slam_data", SlamDataHandler),
         (r"/ws/slam", SlamWSHandler),
         (r"/ws/status", StatusWSHandler),
         (r"/ws/debug", DebugWSHandler),

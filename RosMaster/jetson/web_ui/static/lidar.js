@@ -731,6 +731,17 @@ function explorerCmd(action) {
 
 window.explorerCmd = explorerCmd;
 
+function setExploreSpeed(val) {
+    const speed = (val / 1000).toFixed(3);
+    document.getElementById('explore-speed-val').textContent = (val / 1000).toFixed(2);
+    fetch('/api/explorer', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'set_speed', speed: parseFloat(speed)}),
+    });
+}
+window.setExploreSpeed = setExploreSpeed;
+
 function setSlamMethod(method) {
     const status = document.getElementById('controls-status');
     status.textContent = 'Switching mapping method...';

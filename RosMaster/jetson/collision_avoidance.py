@@ -9,7 +9,7 @@ HIGHEST PRIORITY: No code path may bypass collision avoidance.
 import math
 
 # Safety zone thresholds (mm)
-STOP_DIST = 200       # Emergency stop
+STOP_DIST = 300       # Emergency stop (was 200, raised for safety margin)
 SLOW_DIST = 500       # 30% speed
 CAUTION_DIST = 800    # 70% speed
 
@@ -86,10 +86,14 @@ class CollisionAvoidance:
         if speed < 0.001:
             return vx, vy, vz
 
-        # Determine movement direction in degrees (0=front, clockwise)
-        move_angle_deg = math.degrees(math.atan2(-vy, vx)) % 360
+        # HARD SAFETY: if ANY non-ignored sector is below STOP distance,
+        # block ALL translational motion regardless of movement direction.
+        global_min = min(self._sector_distances)
+        if global_min < STOP_DIST:
+            return 0, 0, vz  # only rotation allowed
 
-        # Check wide arc: target sector + 2 neighbors on each side (5 sectors = 225°)
+        # Directional check: scale speed based on obstacles in movement direction
+        move_angle_deg = math.degrees(math.atan2(-vy, vx)) % 360
         target = self._angle_to_sector(move_angle_deg)
         neighbors = [
             (target - 2) % NUM_SECTORS,
@@ -98,16 +102,15 @@ class CollisionAvoidance:
             (target + 1) % NUM_SECTORS,
             (target + 2) % NUM_SECTORS,
         ]
+        dir_min = min(self._sector_distances[s] for s in neighbors)
 
-        # Find minimum distance in the wide movement arc
-        min_dist = min(self._sector_distances[s] for s in neighbors)
-
-        # Scale speed based on distance
-        if min_dist < STOP_DIST:
+        # Scale speed: use the WORSE of global and directional minimums
+        check_min = min(global_min, dir_min)
+        if check_min < STOP_DIST:
             scale = 0.0
-        elif min_dist < SLOW_DIST:
+        elif check_min < SLOW_DIST:
             scale = 0.3
-        elif min_dist < CAUTION_DIST:
+        elif check_min < CAUTION_DIST:
             scale = 0.7
         else:
             scale = 1.0

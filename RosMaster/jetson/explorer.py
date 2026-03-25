@@ -36,6 +36,7 @@ class Explorer:
         self.slam = slam
         self.bot = bot
         self.collision = collision
+        self.explore_speed = EXPLORE_SPEED  # can be changed live via API
         self.ignore_angle = ignore_angle
 
         self.state = "idle"  # idle, exploring, returning, arrived, stopped
@@ -179,6 +180,8 @@ class Explorer:
 
     def _navigate_to(self, target_x, target_y):
         """Navigate to a target position using simple heading control."""
+        turn_steps = 0  # count consecutive turn steps to detect spinning
+        MAX_TURN_STEPS = 60  # ~12 seconds at 5 Hz — enough for full 180° turn
         while not self._abort:
             pose = self._get_pose()
             dx = target_x - pose[0]
@@ -195,13 +198,23 @@ class Explorer:
             heading_error = (heading_error + math.pi) % (2 * math.pi) - math.pi
 
             if abs(heading_error) > HEADING_TOLERANCE:
-                # Rotate toward target
+                # Rotate toward target — always turn the shorter direction
                 vz = ROTATION_SPEED if heading_error > 0 else -ROTATION_SPEED
+                # For large turns (>90°), use faster rotation
+                if abs(heading_error) > math.radians(90):
+                    vz *= 1.5
                 self._move_filtered(0, 0, vz)
-                _log.debug(f"TURN err={math.degrees(heading_error):.1f}° dist={dist:.0f}mm")
+                turn_steps += 1
+                _log.debug(f"TURN err={math.degrees(heading_error):.1f}° dist={dist:.0f}mm steps={turn_steps}")
+                # Stuck spinning detection — if not converging after ~10 seconds
+                if turn_steps > MAX_TURN_STEPS:
+                    _log.warning(f"Stuck spinning ({turn_steps} steps), skipping target")
+                    self._stop_motors()
+                    return False
             else:
                 # Move forward — check collision first
-                vx = min(EXPLORE_SPEED, dist / 1000.0)
+                turn_steps = 0  # reset spin counter
+                vx = min(self.explore_speed, dist / 1000.0)
                 actual_vx, _, _ = self._move_filtered(vx, 0, heading_error * 0.3)
                 sectors = self.collision.get_sector_distances() if self.collision else [9999]*8
                 _log.debug(f"FWD vx={vx:.3f}→{actual_vx:.3f} dist={dist:.0f}mm min_sec={min(sectors):.0f}mm")

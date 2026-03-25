@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RosMaster Mapping Debug</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', monospace; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+#header {
+    background: #12122a; border-bottom: 1px solid #333; padding: 6px 16px;
+    display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+}
+#header h1 { color: #00d4ff; font-size: 16px; white-space: nowrap; }
+.view-btn {
+    background: #1a1a3a; color: #888; border: 1px solid #333;
+    padding: 4px 14px; cursor: pointer; font-family: inherit; font-size: 12px;
+    border-radius: 3px; transition: background 0.15s;
+}
+.view-btn:hover { background: #252550; color: #aaa; }
+.view-btn.active { background: #0a0a1a; color: #00d4ff; border-color: #00d4ff; }
+.hdr-btn {
+    background: #1a3a1a; color: #0f8; border: 1px solid #0a4a0a; padding: 4px 12px;
+    cursor: pointer; font-family: inherit; font-size: 12px; border-radius: 3px;
+}
+.hdr-btn:hover { background: #1a4a1a; }
+.hdr-btn.danger { background: #3a1a1a; color: #f88; border-color: #4a0a0a; }
+.hdr-btn.danger:hover { background: #4a1a1a; }
+#conn-info { margin-left: auto; font-size: 11px; color: #888; }
+
+#stats-bar {
+    background: #0d0d20; border-bottom: 1px solid #222; padding: 3px 16px;
+    display: flex; gap: 18px; font-size: 11px; color: #888; flex-shrink: 0;
+}
+#stats-bar b { color: #0f8; }
+
+#content { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+
+#map-wrap {
+    flex: 1; position: relative; overflow: hidden; background: #080810;
+    cursor: crosshair;
+}
+#map-canvas { position: absolute; top: 0; left: 0; }
+#map-coords {
+    position: absolute; bottom: 4px; left: 8px; font-size: 10px; color: #666;
+}
+
+#side-panel {
+    width: 280px; flex-shrink: 0; overflow-y: auto; border-left: 1px solid #333;
+    background: #0d0d20; padding: 8px; font-size: 11px;
+}
+.sp-section { margin-bottom: 10px; }
+.sp-title { color: #00d4ff; font-size: 12px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px; }
+.sp-row { display: flex; justify-content: space-between; padding: 1px 0; }
+.sp-row span:last-child { color: #0f8; }
+.sp-check { display: flex; align-items: center; gap: 6px; padding: 1px 0; cursor: pointer; }
+.sp-check input { cursor: pointer; }
+#cell-inspector { color: #ff0; }
+#map-list { max-height: 120px; overflow-y: auto; }
+.map-item {
+    display: flex; justify-content: space-between; padding: 2px 4px; cursor: pointer;
+    border-bottom: 1px solid #1a1a2a;
+}
+.map-item:hover { background: #1a1a3a; }
+#wall-info span { color: #0df; }
+</style>
+</head>
+<body>
+
+<div id="header">
+    <h1>MAPPING DEBUG</h1>
+    <button class="view-btn active" data-view="raw" onclick="setView('raw')">Raw Map</button>
+    <button class="view-btn" data-view="walls" onclick="setView('walls')">Wall Lines</button>
+    <button class="view-btn" data-view="floor" onclick="setView('floor')">Floor Plan</button>
+    <button class="hdr-btn" onclick="saveMap()">Save</button>
+    <button class="hdr-btn" onclick="loadMap()">Load</button>
+    <button class="hdr-btn" onclick="fetchGrid()">Refresh Grid</button>
+    <button class="hdr-btn danger" onclick="resetMap()">Reset</button>
+    <span id="conn-info">Disconnected</span>
+</div>
+
+<div id="stats-bar">
+    <span>Scans: <b id="st-scans">-</b></span>
+    <span>Pose: <b id="st-pose">-</b></span>
+    <span>Coverage: <b id="st-coverage">-</b>%</span>
+    <span>Loop closures: <b id="st-loops">-</b></span>
+    <span>Cells: <b id="st-cells">-</b></span>
+</div>
+
+<div id="content">
+    <div id="map-wrap">
+        <canvas id="map-canvas"></canvas>
+        <div id="map-coords">-</div>
+    </div>
+    <div id="side-panel">
+        <div class="sp-section">
+            <div class="sp-title">Overlays</div>
+            <label class="sp-check"><input type="checkbox" id="ov-grid" checked onchange="needsRedraw=true">Occupancy Grid</label>
+            <label class="sp-check"><input type="checkbox" id="ov-traj" checked onchange="needsRedraw=true">Trajectory</label>
+            <label class="sp-check"><input type="checkbox" id="ov-walls" checked onchange="needsRedraw=true">Wall Lines</label>
+            <label class="sp-check"><input type="checkbox" id="ov-robot" checked onchange="needsRedraw=true">Robot Position</label>
+        </div>
+        <div class="sp-section">
+            <div class="sp-title">Cell Inspector</div>
+            <div id="cell-inspector">Click a cell on the map</div>
+        </div>
+        <div class="sp-section">
+            <div class="sp-title" id="wall-info">Wall Lines</div>
+            <div id="wall-stats">-</div>
+        </div>
+        <div class="sp-section">
+            <div class="sp-title">Saved Maps</div>
+            <div id="map-list">Loading...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ============================================================
+// State
+// ============================================================
+const GRID = 600, CELL = 50;
+let gridData = null;        // Float32Array (600x600)
+let wallLines = [];
+let pose = [15000, 15000, 0];
+let poseHistory = [];
+let viewMode = 'raw';       // raw, walls, floor
+let needsRedraw = true;
+
+// Zoom/pan state
+let zoom = 1.0;
+let panX = 0, panY = 0;
+let dragging = false, dragStartX = 0, dragStartY = 0, panStartX = 0, panStartY = 0;
+
+const canvas = document.getElementById('map-canvas');
+const ctx = canvas.getContext('2d');
+let dpr = window.devicePixelRatio || 1;
+
+// ============================================================
+// WebSocket for live SLAM updates
+// ============================================================
+let ws = null;
+function connectWS() {
+    const host = location.host || '192.168.1.99:8080';
+    ws = new WebSocket('ws://' + host + '/ws/slam');
+    ws.onopen = () => { document.getElementById('conn-info').textContent = 'Live'; document.getElementById('conn-info').style.color = '#0f8'; };
+    ws.onclose = () => { document.getElementById('conn-info').textContent = 'Disconnected'; document.getElementById('conn-info').style.color = '#888'; setTimeout(connectWS, 3000); };
+    ws.onerror = () => ws.close();
+    ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'slam') {
+            if (msg.pose) pose = msg.pose;
+            if (msg.history) poseHistory = msg.history;
+            needsRedraw = true;
+        }
+    };
+}
+
+// ============================================================
+// API calls
+// ============================================================
+const API = '/api/slam_data';
+
+async function fetchGrid() {
+    try {
+        const r = await fetch(API + '?action=grid_data');
+        const d = await r.json();
+        // Decompress: base64 → binary → zlib decompress → Float32Array
+        const compressed = Uint8Array.from(atob(d.grid_b64), c => c.charCodeAt(0));
+        const raw = await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer();
+        gridData = new Float32Array(raw);
+        needsRedraw = true;
+        console.log('Grid loaded:', gridData.length, 'cells');
+    } catch(e) { console.error('fetchGrid:', e); }
+}
+
+async function fetchWallLines() {
+    try {
+        const r = await fetch(API + '?action=wall_lines');
+        const d = await r.json();
+        wallLines = d.lines || [];
+        document.getElementById('wall-stats').innerHTML =
+            '<span>' + wallLines.length + ' segments</span>';
+        needsRedraw = true;
+    } catch(e) { console.error('fetchWallLines:', e); }
+}
+
+async function fetchStats() {
+    try {
+        const r = await fetch(API + '?action=stats');
+        const d = await r.json();
+        document.getElementById('st-scans').textContent = d.scan_count;
+        document.getElementById('st-pose').textContent = '(' + d.pose[0] + ', ' + d.pose[1] + ', ' + d.pose[2] + '\u00B0)';
+        document.getElementById('st-coverage').textContent = d.coverage_pct;
+        document.getElementById('st-loops').textContent = d.loop_closures;
+        document.getElementById('st-cells').textContent = d.explored_cells + '/' + (d.grid_size * d.grid_size);
+    } catch(e) {}
+}
+
+async function fetchMapList() {
+    try {
+        const r = await fetch(API + '?action=list_maps');
+        const d = await r.json();
+        const el = document.getElementById('map-list');
+        if (!d.maps || d.maps.length === 0) { el.textContent = 'No saved maps'; return; }
+        el.innerHTML = d.maps.map(m =>
+            '<div class="map-item" onclick="loadMap(\'' + m.name + '\')">' +
+            '<span>' + m.name + '</span><span style="color:#888">' + Math.round(m.size/1024) + 'KB</span></div>'
+        ).join('');
+    } catch(e) {}
+}
+
+async function saveMap() {
+    const name = prompt('Map name:', 'default');
+    if (!name) return;
+    const r = await fetch(API, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action:'save', name}) });
+    const d = await r.json();
+    if (d.ok) { alert('Saved: ' + d.path); fetchMapList(); }
+    else alert('Error: ' + d.error);
+}
+
+async function loadMap(name) {
+    name = name || prompt('Map name:', 'default');
+    if (!name) return;
+    const r = await fetch(API, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action:'load', name}) });
+    const d = await r.json();
+    if (d.ok) { fetchGrid(); fetchStats(); fetchWallLines(); }
+    else alert('Error: ' + d.error);
+}
+
+async function resetMap() {
+    if (!confirm('Reset map? This clears all data.')) return;
+    await fetch(API, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action:'reset'}) });
+    fetchGrid(); fetchStats();
+}
+
+// ============================================================
+// View mode
+// ============================================================
+function setView(mode) {
+    viewMode = mode;
+    document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === mode));
+    needsRedraw = true;
+}
+
+// ============================================================
+// Canvas setup
+// ============================================================
+function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+    const wrap = document.getElementById('map-wrap');
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    needsRedraw = true;
+}
+window.addEventListener('resize', resizeCanvas);
+
+// ============================================================
+// Zoom & Pan
+// ============================================================
+const mapWrap = document.getElementById('map-wrap');
+
+mapWrap.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = mapWrap.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * dpr;
+    const my = (e.clientY - rect.top) * dpr;
+    const oldZoom = zoom;
+    zoom *= e.deltaY < 0 ? 1.15 : 0.87;
+    zoom = Math.max(0.2, Math.min(20, zoom));
+    // Zoom toward cursor
+    panX = mx - (mx - panX) * (zoom / oldZoom);
+    panY = my - (my - panY) * (zoom / oldZoom);
+    needsRedraw = true;
+});
+
+mapWrap.addEventListener('mousedown', (e) => {
+    if (e.button === 0) { dragging = true; dragStartX = e.clientX; dragStartY = e.clientY; panStartX = panX; panStartY = panY; }
+});
+window.addEventListener('mousemove', (e) => {
+    if (dragging) {
+        panX = panStartX + (e.clientX - dragStartX) * dpr;
+        panY = panStartY + (e.clientY - dragStartY) * dpr;
+        needsRedraw = true;
+    }
+    // Update coords display
+    const rect = mapWrap.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * dpr;
+    const my = (e.clientY - rect.top) * dpr;
+    const gx = (mx - panX) / zoom;
+    const gy = (my - panY) / zoom;
+    const wx = Math.round(gx * CELL);
+    const wy = Math.round(gy * CELL);
+    const ci = Math.floor(gx), cj = Math.floor(gy);
+    let logodds = '-';
+    if (gridData && ci >= 0 && ci < GRID && cj >= 0 && cj < GRID) {
+        logodds = gridData[cj * GRID + ci].toFixed(2);
+    }
+    document.getElementById('map-coords').textContent =
+        'Cell (' + ci + ',' + cj + ')  World (' + wx + ',' + wy + 'mm)  Log-odds: ' + logodds;
+});
+window.addEventListener('mouseup', () => { dragging = false; });
+
+// Cell click inspector
+mapWrap.addEventListener('click', (e) => {
+    if (Math.abs(e.clientX - dragStartX) > 3 || Math.abs(e.clientY - dragStartY) > 3) return; // was a drag
+    const rect = mapWrap.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * dpr;
+    const my = (e.clientY - rect.top) * dpr;
+    const ci = Math.floor((mx - panX) / zoom);
+    const cj = Math.floor((my - panY) / zoom);
+    if (!gridData || ci < 0 || ci >= GRID || cj < 0 || cj >= GRID) return;
+    const val = gridData[cj * GRID + ci];
+    let state = 'UNKNOWN';
+    if (val > 2.0) state = 'WALL (confirmed)';
+    else if (val > 0.8) state = 'WALL (hint)';
+    else if (val < -1.5) state = 'FREE';
+    else if (Math.abs(val) > 0.1) state = 'WEAK';
+    document.getElementById('cell-inspector').innerHTML =
+        'Cell (' + ci + ', ' + cj + ')<br>Log-odds: <b>' + val.toFixed(3) + '</b><br>State: <b>' + state + '</b>';
+    needsRedraw = true;
+});
+
+// ============================================================
+// Drawing
+// ============================================================
+function logoddsColor(v) {
+    if (v > 3.0) return [180, 0, 0];      // dark red: strong wall
+    if (v > 2.0) return [255, 40, 40];     // red: confirmed wall
+    if (v > 0.8) return [255, 140, 40];    // orange: hint wall
+    if (v < -3.0) return [0, 80, 0];       // dark green: very free
+    if (v < -1.5) return [40, 180, 40];    // green: free
+    return [60, 60, 70];                    // gray: unknown
+}
+
+function draw() {
+    if (!needsRedraw) return;
+    needsRedraw = false;
+
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.save();
+    ctx.translate(panX, panY);
+    ctx.scale(zoom, zoom);
+
+    if (viewMode === 'raw' || viewMode === 'floor') {
+        drawGrid();
+    }
+    if (viewMode === 'walls' || viewMode === 'floor') {
+        drawWallLinesView();
+    }
+    if (document.getElementById('ov-traj').checked) drawTrajectory();
+    if (document.getElementById('ov-walls').checked && viewMode === 'raw') drawWallLines();
+    if (document.getElementById('ov-robot').checked) drawRobot();
+
+    ctx.restore();
+}
+
+function drawGrid() {
+    if (!gridData || !document.getElementById('ov-grid').checked) return;
+    // Create ImageData for the grid
+    const imgData = ctx.createImageData(GRID, GRID);
+    const d = imgData.data;
+    for (let j = 0; j < GRID; j++) {
+        for (let i = 0; i < GRID; i++) {
+            const idx = (j * GRID + i) * 4;
+            const val = gridData[j * GRID + i];
+            const [r, g, b] = logoddsColor(val);
+            d[idx] = r; d[idx+1] = g; d[idx+2] = b; d[idx+3] = 255;
+        }
+    }
+    // Draw to offscreen canvas, then scale
+    const offscreen = new OffscreenCanvas(GRID, GRID);
+    const octx = offscreen.getContext('2d');
+    octx.putImageData(imgData, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(offscreen, 0, 0);
+}
+
+function drawTrajectory() {
+    if (poseHistory.length < 2) return;
+    ctx.strokeStyle = 'rgba(0, 200, 255, 0.6)';
+    ctx.lineWidth = 1.5 / zoom;
+    ctx.beginPath();
+    for (let i = 0; i < poseHistory.length; i++) {
+        const x = poseHistory[i][0] / CELL;
+        const y = poseHistory[i][1] / CELL;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+}
+
+function drawWallLines() {
+    if (wallLines.length === 0) return;
+    ctx.strokeStyle = '#00aaff';
+    ctx.lineWidth = 2 / zoom;
+    for (const [x1, y1, x2, y2] of wallLines) {
+        ctx.beginPath();
+        ctx.moveTo(x1 / CELL, y1 / CELL);
+        ctx.lineTo(x2 / CELL, y2 / CELL);
+        ctx.stroke();
+    }
+}
+
+function drawWallLinesView() {
+    // Wall lines as thick black on white background
+    if (wallLines.length === 0) return;
+    // White background
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, GRID, GRID);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3 / zoom;
+    for (const [x1, y1, x2, y2] of wallLines) {
+        ctx.beginPath();
+        ctx.moveTo(x1 / CELL, y1 / CELL);
+        ctx.lineTo(x2 / CELL, y2 / CELL);
+        ctx.stroke();
+    }
+}
+
+function drawRobot() {
+    const rx = pose[0] / CELL, ry = pose[1] / CELL;
+    const theta = pose[2] * Math.PI / 180; // pose[2] is degrees from API
+    const size = 6 / zoom;
+    // Robot body
+    ctx.fillStyle = '#f00';
+    ctx.beginPath();
+    ctx.arc(rx, ry, size, 0, Math.PI * 2);
+    ctx.fill();
+    // Direction arrow
+    ctx.strokeStyle = '#ff0';
+    ctx.lineWidth = 2 / zoom;
+    ctx.beginPath();
+    ctx.moveTo(rx, ry);
+    ctx.lineTo(rx + Math.cos(theta) * size * 2.5, ry + Math.sin(theta) * size * 2.5);
+    ctx.stroke();
+    // Home marker
+    if (poseHistory.length > 0) {
+        const hx = poseHistory[0][0] / CELL, hy = poseHistory[0][1] / CELL;
+        ctx.fillStyle = '#0f0';
+        ctx.beginPath();
+        ctx.arc(hx, hy, size * 0.7, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// ============================================================
+// Auto-fit view
+// ============================================================
+function fitView() {
+    if (!gridData) return;
+    // Find explored bounds
+    let minX = GRID, maxX = 0, minY = GRID, maxY = 0;
+    for (let j = 0; j < GRID; j++) {
+        for (let i = 0; i < GRID; i++) {
+            if (Math.abs(gridData[j * GRID + i]) > 0.5) {
+                if (i < minX) minX = i;
+                if (i > maxX) maxX = i;
+                if (j < minY) minY = j;
+                if (j > maxY) maxY = j;
+            }
+        }
+    }
+    if (maxX <= minX || maxY <= minY) return;
+
+    const w = canvas.width, h = canvas.height;
+    const margin = 20;
+    const gw = maxX - minX + 1, gh = maxY - minY + 1;
+    zoom = Math.min((w - margin * 2) / gw, (h - margin * 2) / gh);
+    panX = w / 2 - (minX + gw / 2) * zoom;
+    panY = h / 2 - (minY + gh / 2) * zoom;
+    needsRedraw = true;
+}
+
+// ============================================================
+// Render loop + periodic updates
+// ============================================================
+function render() {
+    draw();
+    requestAnimationFrame(render);
+}
+
+// Periodic data refresh
+setInterval(() => {
+    fetchStats();
+    fetchWallLines();
+}, 3000);
+
+// ============================================================
+// Init
+// ============================================================
+setTimeout(async () => {
+    resizeCanvas();
+    connectWS();
+    await fetchGrid();
+    fitView();
+    fetchStats();
+    fetchWallLines();
+    fetchMapList();
+    render();
+}, 100);
+</script>
+</body>
+</html>
