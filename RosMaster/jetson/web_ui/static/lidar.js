@@ -7,6 +7,14 @@
 const canvas = document.getElementById('lidar-canvas');
 const ctx = canvas.getContext('2d');
 
+// Oscilloscope canvas — sweep mode
+const oscopeCanvas = document.getElementById('oscope-canvas');
+const oscopeCtx = oscopeCanvas.getContext('2d');
+const OSCOPE_MAX_SEC = 30;       // total sweep width in seconds
+const oscopeSlots = new Array(OSCOPE_MAX_SEC).fill(null);  // circular buffer of {points:[]}
+let oscopeWritePos = 0;          // current write position (sweeps left to right)
+let oscopeInitialized = false;   // whether background has been drawn
+
 // State
 let scanPoints = [];
 let needsRedraw = true;
@@ -40,6 +48,214 @@ function resizeCanvas() {
     canvas.style.width = rect.width + 'px';
     canvas.style.height = rect.height + 'px';
     needsRedraw = true;
+}
+
+function resizeOscopeCanvas() {
+    const rect = oscopeCanvas.parentElement.getBoundingClientRect();
+    oscopeCanvas.width = rect.width * window.devicePixelRatio;
+    oscopeCanvas.height = rect.height * window.devicePixelRatio;
+    oscopeCanvas.style.width = rect.width + 'px';
+    oscopeCanvas.style.height = rect.height + 'px';
+    oscopeInitialized = false;
+    oscopeDrawBackground();
+    // Redraw all existing data
+    for (let i = 0; i < OSCOPE_MAX_SEC; i++) {
+        if (oscopeSlots[i]) oscopeDrawColumn(i);
+    }
+    oscopeDrawCursor(oscopeWritePos);
+    oscopeDrawStats();
+}
+
+function oscopeMargin() {
+    const dpr = window.devicePixelRatio;
+    return { left: 70 * dpr, right: 120 * dpr, top: 8 * dpr, bottom: 22 * dpr };
+}
+
+function oscopeDrawBackground() {
+    const dpr = window.devicePixelRatio;
+    const w = oscopeCanvas.width;
+    const h = oscopeCanvas.height;
+    const margin = oscopeMargin();
+    const plotW = w - margin.left - margin.right;
+    const plotH = h - margin.top - margin.bottom;
+    const yMax = 2000, yStep = 500;
+
+    oscopeCtx.fillStyle = BG_COLOR;
+    oscopeCtx.fillRect(0, 0, w, h);
+
+    // Y grid + labels
+    oscopeCtx.setLineDash([4, 4]);
+    for (let val = 0; val <= yMax; val += yStep) {
+        const y = margin.top + plotH * (1 - val / yMax);
+        oscopeCtx.strokeStyle = '#2a4a3a';
+        oscopeCtx.beginPath();
+        oscopeCtx.moveTo(margin.left, y);
+        oscopeCtx.lineTo(margin.left + plotW, y);
+        oscopeCtx.stroke();
+        oscopeCtx.setLineDash([]);
+        oscopeCtx.strokeStyle = '#88ccaa';
+        oscopeCtx.beginPath();
+        oscopeCtx.moveTo(margin.left - 4 * dpr, y);
+        oscopeCtx.lineTo(margin.left, y);
+        oscopeCtx.stroke();
+        oscopeCtx.setLineDash([4, 4]);
+        oscopeCtx.fillStyle = '#ffffff';
+        oscopeCtx.font = 'bold ' + (13 * dpr) + 'px monospace';
+        oscopeCtx.textAlign = 'right';
+        oscopeCtx.fillText(val.toString(), margin.left - 8 * dpr, y + 5 * dpr);
+    }
+    oscopeCtx.setLineDash([]);
+    oscopeCtx.textAlign = 'left';
+
+    // Axes
+    const yZero = margin.top + plotH;
+    oscopeCtx.strokeStyle = '#444466';
+    oscopeCtx.lineWidth = 1;
+    oscopeCtx.beginPath();
+    oscopeCtx.moveTo(margin.left, yZero);
+    oscopeCtx.lineTo(margin.left + plotW, yZero);
+    oscopeCtx.stroke();
+    oscopeCtx.beginPath();
+    oscopeCtx.moveTo(margin.left, margin.top);
+    oscopeCtx.lineTo(margin.left, yZero);
+    oscopeCtx.stroke();
+
+    // X ticks
+    const colW = plotW / OSCOPE_MAX_SEC;
+    oscopeCtx.fillStyle = '#88ccaa';
+    oscopeCtx.font = (10 * dpr) + 'px monospace';
+    for (let i = 0; i < OSCOPE_MAX_SEC; i += 5) {
+        const x = margin.left + i * colW + colW / 2;
+        oscopeCtx.fillText(i + 's', x - 4 * dpr, yZero + 14 * dpr);
+    }
+
+    // Axis titles
+    oscopeCtx.save();
+    oscopeCtx.fillStyle = '#00d4ff';
+    oscopeCtx.font = (12 * dpr) + 'px monospace';
+    oscopeCtx.translate(10 * dpr, margin.top + plotH / 2);
+    oscopeCtx.rotate(-Math.PI / 2);
+    oscopeCtx.textAlign = 'center';
+    oscopeCtx.fillText('Points/scan', 0, 0);
+    oscopeCtx.restore();
+    oscopeCtx.fillStyle = '#88ccaa';
+    oscopeCtx.font = (12 * dpr) + 'px monospace';
+    oscopeCtx.textAlign = 'center';
+    oscopeCtx.fillText('Time (sweep)', margin.left + plotW / 2, h - 2 * dpr);
+    oscopeCtx.textAlign = 'left';
+
+    oscopeInitialized = true;
+}
+
+function oscopeAddData(scanCounts) {
+    if (!oscopeInitialized) oscopeDrawBackground();
+    oscopeSlots[oscopeWritePos] = { points: scanCounts };
+    const prevPos = oscopeWritePos;
+    oscopeWritePos = (oscopeWritePos + 1) % OSCOPE_MAX_SEC;
+    oscopeDrawColumn(prevPos);
+    oscopeDrawCursor(oscopeWritePos);
+    oscopeDrawStats();
+}
+
+function oscopeDrawColumn(idx) {
+    const dpr = window.devicePixelRatio;
+    const margin = oscopeMargin();
+    const w = oscopeCanvas.width;
+    const plotW = w - margin.left - margin.right;
+    const plotH = oscopeCanvas.height - margin.top - margin.bottom;
+    const colW = plotW / OSCOPE_MAX_SEC;
+    const yMax = 2000;
+    const x = margin.left + idx * colW;
+
+    // Clear column
+    oscopeCtx.fillStyle = BG_COLOR;
+    oscopeCtx.fillRect(x, margin.top, colW, plotH);
+
+    // Redraw grid in column
+    oscopeCtx.setLineDash([4, 4]);
+    oscopeCtx.strokeStyle = '#2a4a3a';
+    for (let val = 0; val <= yMax; val += 500) {
+        const y = margin.top + plotH * (1 - val / yMax);
+        oscopeCtx.beginPath();
+        oscopeCtx.moveTo(x, y);
+        oscopeCtx.lineTo(x + colW, y);
+        oscopeCtx.stroke();
+    }
+    oscopeCtx.setLineDash([]);
+
+    // Draw dots
+    const slot = oscopeSlots[idx];
+    if (!slot || !slot.points || slot.points.length === 0) return;
+    const numPts = slot.points.length;
+    const spreadW = colW * 0.7;
+    const cx = x + colW / 2;
+    const dotSize = 3 * dpr;
+    oscopeCtx.fillStyle = '#00ff88';
+    for (let j = 0; j < numPts; j++) {
+        const pts = slot.points[j];
+        const y = margin.top + plotH * (1 - Math.min(pts, yMax) / yMax);
+        const dx = numPts > 1 ? (j / (numPts - 1) - 0.5) * spreadW : 0;
+        oscopeCtx.beginPath();
+        oscopeCtx.arc(cx + dx, y, dotSize, 0, Math.PI * 2);
+        oscopeCtx.fill();
+    }
+}
+
+function oscopeDrawCursor(pos) {
+    const dpr = window.devicePixelRatio;
+    const margin = oscopeMargin();
+    const plotW = oscopeCanvas.width - margin.left - margin.right;
+    const plotH = oscopeCanvas.height - margin.top - margin.bottom;
+    const colW = plotW / OSCOPE_MAX_SEC;
+    const x = margin.left + pos * colW;
+
+    // Dark column + red cursor line
+    oscopeCtx.fillStyle = '#1a0a0a';
+    oscopeCtx.fillRect(x, margin.top, colW, plotH);
+    oscopeCtx.strokeStyle = '#ff4444';
+    oscopeCtx.lineWidth = 2 * dpr;
+    oscopeCtx.beginPath();
+    oscopeCtx.moveTo(x + colW / 2, margin.top);
+    oscopeCtx.lineTo(x + colW / 2, margin.top + plotH);
+    oscopeCtx.stroke();
+    oscopeCtx.lineWidth = 1;
+}
+
+function oscopeDrawStats() {
+    const dpr = window.devicePixelRatio;
+    const margin = oscopeMargin();
+    const plotW = oscopeCanvas.width - margin.left - margin.right;
+    const statsX = margin.left + plotW + 8 * dpr;
+
+    // Clear stats area
+    oscopeCtx.fillStyle = BG_COLOR;
+    oscopeCtx.fillRect(statsX - 4 * dpr, margin.top, margin.right, 80 * dpr);
+
+    const allPts = [];
+    for (const slot of oscopeSlots) {
+        if (slot && slot.points) for (const p of slot.points) allPts.push(p);
+    }
+    if (allPts.length === 0) return;
+
+    const current = allPts[allPts.length - 1];
+    const avg = Math.round(allPts.reduce((a, b) => a + b, 0) / allPts.length);
+    const lastSlot = oscopeSlots[(oscopeWritePos - 1 + OSCOPE_MAX_SEC) % OSCOPE_MAX_SEC];
+    const hz = lastSlot ? lastSlot.points.length : 0;
+
+    oscopeCtx.font = (10 * dpr) + 'px monospace';
+    oscopeCtx.fillStyle = '#00ff88';
+    oscopeCtx.fillText('Now: ' + current, statsX, margin.top + 12 * dpr);
+    oscopeCtx.fillStyle = '#00d4ff';
+    oscopeCtx.fillText('Avg: ' + avg, statsX, margin.top + 24 * dpr);
+    oscopeCtx.fillStyle = '#888';
+    oscopeCtx.fillText('Min: ' + Math.min(...allPts), statsX, margin.top + 36 * dpr);
+    oscopeCtx.fillText('Max: ' + Math.max(...allPts), statsX, margin.top + 48 * dpr);
+    oscopeCtx.fillStyle = '#ffaa00';
+    oscopeCtx.fillText(hz + ' scans', statsX, margin.top + 62 * dpr);
+}
+
+function drawOscope() {
+    if (!oscopeInitialized) oscopeDrawBackground();
 }
 
 function drawBackground(w, h, cx, cy, scale) {
@@ -245,6 +461,8 @@ function connectLidarWS() {
             }
             scanPoints = data.points;
             depthLine = (data.depth_line || []).map(p => ({angle: p[0], dist: p[1]}));
+
+            // (scan counts now come from status WebSocket, not here)
             isSimulated = data.simulated;
             isConnected = data.connected;
             needsRedraw = true;
@@ -399,6 +617,11 @@ function connectStatusWS() {
                 document.getElementById('imu-yaw').textContent = data.imu.angles.yaw.toFixed(1) + '\u00B0';
                 document.getElementById('imu-az').textContent = data.imu.accel.z.toFixed(2) + ' m/s\u00B2';
             }
+
+            // Scan counts: array of raw point counts from all scans in the last second
+            if (data.scan_counts && data.scan_counts.length > 0) {
+                oscopeAddData(data.scan_counts);
+            }
         }
     };
 
@@ -406,16 +629,55 @@ function connectStatusWS() {
     wsStatus.onerror = () => { wsStatus.close(); };
 }
 
+// --- Debug/Timing WebSocket ---
+let wsDebug = null;
+
+function connectDebugWS() {
+    const host = window.location.host;
+    wsDebug = new WebSocket(`ws://${host}/ws/timing`);
+
+    wsDebug.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.sensor === 'timing') {
+            const ageColor = (ms) => ms < 0 ? '#888' : ms < 150 ? '#0f8' : ms < 500 ? '#ff0' : '#f44';
+            const levelColor = (l) => l === 'STOP' ? '#f44' : l === 'SLOW' ? '#f80' : l === 'CAUTION' ? '#ff0' : '#0f8';
+
+            const la = document.getElementById('tb-lidar-age');
+            la.textContent = msg.lidar_age_ms >= 0 ? msg.lidar_age_ms.toFixed(0) : 'N/A';
+            la.style.color = ageColor(msg.lidar_age_ms);
+
+            const da = document.getElementById('tb-depth-age');
+            da.textContent = msg.depth_age_ms >= 0 ? msg.depth_age_ms.toFixed(0) : 'N/A';
+            da.style.color = ageColor(msg.depth_age_ms);
+
+            document.getElementById('tb-collision-us').textContent = msg.collision_us;
+
+            const lv = document.getElementById('tb-level');
+            lv.textContent = msg.collision_level;
+            lv.style.color = levelColor(msg.collision_level);
+
+            document.getElementById('tb-sectors').textContent =
+                msg.collision_sectors.map(d => d >= 9999 ? '-' : Math.round(d)).join(' | ');
+        }
+    };
+
+    wsDebug.onclose = () => { setTimeout(connectDebugWS, 3000); };
+    wsDebug.onerror = () => { wsDebug.close(); };
+}
+
 // --- Init ---
 
-window.addEventListener('resize', resizeCanvas);
+window.addEventListener('resize', () => { resizeCanvas(); resizeOscopeCanvas(); });
 resizeCanvas();
+resizeOscopeCanvas();
+setInterval(drawOscope, 1000);  // 1 Hz oscilloscope update
 connectLidarWS();
 connectDepthWS();
 connectCamWS('/ws/cam/primary', 'cam-primary-image', 'cam-primary-placeholder', 'dot-cam1');
 connectCollisionWS();
 connectSlamWS();
 connectStatusWS();
+connectDebugWS();
 requestAnimationFrame(render);
 
 // --- SLAM + Explorer ---

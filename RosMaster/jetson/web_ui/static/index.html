@@ -12,6 +12,8 @@
             font-family: 'Segoe UI', Consolas, monospace;
             overflow: hidden;
             height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
 
         #header {
@@ -34,21 +36,36 @@
         #main {
             display: grid;
             grid-template-columns: 1fr 350px;
-            height: calc(100vh - 42px);
+            flex: 1;
+            min-height: 0; /* allow flex shrink */
+            overflow: hidden;
         }
 
-        /* Left: LiDAR + SLAM stacked */
+        /* Left: Oscope + LiDAR + SLAM stacked */
         #left-column {
             display: flex;
             flex-direction: column;
             border-right: 1px solid #0f3460;
+            min-height: 0;
+            overflow: hidden;
         }
+        #oscope-panel {
+            position: relative;
+            background: #0a0a1a;
+            flex: 1;
+            min-height: 120px;
+            border-bottom: 1px solid #0f3460;
+            overflow: hidden;
+        }
+        #oscope-canvas { width: 100%; height: 100%; display: block; }
         #lidar-panel {
             position: relative;
             background: #0a0a1a;
             flex: 1;
+            min-height: 0;
+            overflow: hidden;
         }
-        #lidar-canvas { width: 100%; height: 100%; }
+        #lidar-canvas { width: 100%; height: 100%; display: block; }
         #lidar-info {
             position: absolute;
             top: 8px; left: 8px;
@@ -155,8 +172,19 @@
         <div id="controls-status" style="font-size:11px;color:#888;margin-left:auto;"></div>
     </div>
 
+    <div id="timing-bar" style="background:#0a0e1a;padding:3px 16px;display:flex;gap:18px;font-size:11px;color:#888;border-bottom:1px solid #0f3460;">
+        <span>LiDAR: <b id="tb-lidar-age" style="color:#0f8">-</b>ms</span>
+        <span>Depth: <b id="tb-depth-age" style="color:#0f8">-</b>ms</span>
+        <span>Collision: <b id="tb-collision-us" style="color:#0f8">-</b>us</span>
+        <span>Level: <b id="tb-level" style="color:#0f8">-</b></span>
+        <span>Sectors: <b id="tb-sectors" style="color:#0df">-</b></span>
+    </div>
+
     <div id="main">
         <div id="left-column">
+            <div id="oscope-panel">
+                <canvas id="oscope-canvas"></canvas>
+            </div>
             <div id="lidar-panel">
                 <canvas id="lidar-canvas"></canvas>
                 <div id="lidar-info">
@@ -279,6 +307,6 @@
         </div>
     </div>
 
-    <script src="/static/lidar.js?v=3"></script>
+    <script src="/static/lidar.js?v=10"></script>
 </body>
 </html>

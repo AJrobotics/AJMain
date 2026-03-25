@@ -41,6 +41,8 @@ lidar_clients = set()
 depth_clients = set()
 cam_primary_clients = set()
 collision_clients = set()
+debug_clients = set()
+timing_clients = set()
 collision = CollisionAvoidance()
 calibration = CalibrationRunner()
 slam = SLAMEngine(ignore_angle=140)
@@ -116,7 +118,7 @@ class DepthOffsetHandler(tornado.web.RequestHandler):
 
 
 # Current SLAM method: 'custom', 'slam_toolbox', 'cartographer'
-current_slam_method = 'custom'
+current_slam_method = 'custom'  # Custom Python SLAM enabled by default
 ros2_slam_process = None
 
 
@@ -335,14 +337,89 @@ class StatusWSHandler(tornado.websocket.WebSocketHandler):
         status_clients.discard(self)
 
 
+class DebugWSHandler(tornado.websocket.WebSocketHandler):
+    """Full debug client — receives raw revolution data + timing metrics.
+    Enables raw debug buffering in LiDAR process (extra CPU overhead)."""
+    def check_origin(self, origin):
+        return True
+
+    def open(self):
+        debug_clients.add(self)
+        lidar.enable_raw_debug(True)
+        print(f"Debug client connected ({len(debug_clients)} total)")
+
+    def on_close(self):
+        debug_clients.discard(self)
+        if not debug_clients:
+            lidar.enable_raw_debug(False)
+        print(f"Debug client disconnected ({len(debug_clients)} remaining)")
+
+
+class TimingWSHandler(tornado.websocket.WebSocketHandler):
+    """Lightweight client — receives only timing metrics (no raw data).
+    No extra overhead on sensor processes."""
+    def check_origin(self, origin):
+        return True
+
+    def open(self):
+        timing_clients.add(self)
+
+    def on_close(self):
+        timing_clients.discard(self)
+
+
+_last_timing_broadcast = 0.0
+
+def broadcast_debug():
+    global _last_timing_broadcast
+    now = time.monotonic()
+    all_clients = debug_clients | timing_clients
+
+    # LiDAR revolution summaries — only to debug clients (raw data)
+    if debug_clients:
+        revs = lidar.flush_raw_revs()
+        if revs:
+            msg = json.dumps({"sensor": "lidar", "type": "rev_batch", "revs": revs})
+            for client in debug_clients.copy():
+                try:
+                    client.write_message(msg)
+                except Exception:
+                    debug_clients.discard(client)
+
+    # Timing metrics — sent to ALL clients (debug + timing) at ~2 Hz
+    if all_clients and now - _last_timing_broadcast > 0.5:
+        _last_timing_broadcast = now
+        lidar_ts = lidar.get_shm_timestamp()
+        depth_ts = depth.get_shm_timestamp()
+        timing = {
+            "sensor": "timing",
+            "type": "metrics",
+            "lidar_age_ms": round((now - lidar_ts) * 1000, 1) if lidar_ts > 0 else -1,
+            "depth_age_ms": round((now - depth_ts) * 1000, 1) if depth_ts > 0 else -1,
+            "lidar_connected": lidar.connected,
+            "depth_connected": depth.connected,
+            "lidar_simulated": lidar.simulated,
+            "ts": round(now, 3),
+        }
+        t0 = time.monotonic()
+        collision.update_sectors()
+        t1 = time.monotonic()
+        timing["collision_us"] = round((t1 - t0) * 1e6)
+        timing["collision_sectors"] = collision.get_sector_distances()
+        timing["collision_level"] = collision.get_status()["level"]
+
+        msg = json.dumps(timing)
+        for client in (debug_clients | timing_clients).copy():
+            try:
+                client.write_message(msg)
+            except Exception:
+                debug_clients.discard(client)
+                timing_clients.discard(client)
+
+
 def broadcast_lidar():
     if not lidar_clients:
         return
-    # Only broadcast when there's a new complete revolution
-    with lidar.lock:
-        if not lidar.has_new_scan:
-            return
-        lidar.has_new_scan = False
     scan = lidar.get_scan()
     if not scan:
         return
@@ -587,6 +664,7 @@ def broadcast_status():
         },
         "lidar_connected": lidar.connected,
         "depth_connected": depth.connected,
+        "scan_counts": lidar.flush_scan_counts(),
         "ts": time.time(),
     })
     dead = set()
@@ -613,6 +691,8 @@ def make_app():
         (r"/api/explorer", ExplorerHandler),
         (r"/ws/slam", SlamWSHandler),
         (r"/ws/status", StatusWSHandler),
+        (r"/ws/debug", DebugWSHandler),
+        (r"/ws/timing", TimingWSHandler),
         (r"/static/(.*)", tornado.web.StaticFileHandler, {"path": STATIC_DIR}),
     ], debug=False)
 
@@ -661,20 +741,22 @@ def main():
     loop = tornado.ioloop.IOLoop.current()
 
     # LiDAR at ~10 Hz
-    tornado.ioloop.PeriodicCallback(broadcast_lidar, 200).start()
+    tornado.ioloop.PeriodicCallback(broadcast_lidar, 1000).start()  # 1 Hz
     # Depth at ~5 Hz
-    tornado.ioloop.PeriodicCallback(broadcast_depth, 200).start()
+    tornado.ioloop.PeriodicCallback(broadcast_depth, 1000).start()  # 1 Hz
     # Camera at ~5 Hz
-    tornado.ioloop.PeriodicCallback(broadcast_cam_primary, 200).start()
+    tornado.ioloop.PeriodicCallback(broadcast_cam_primary, 1000).start()  # 1 Hz
     # Collision at ~5 Hz
-    tornado.ioloop.PeriodicCallback(broadcast_collision, 200).start()
+    tornado.ioloop.PeriodicCallback(broadcast_collision, 1000).start()  # 1 Hz
     # SLAM update in background thread (not in Tornado loop)
     import threading as _th
     _th.Thread(target=slam_update_thread, daemon=True).start()
     # SLAM map broadcast at ~2 Hz
-    tornado.ioloop.PeriodicCallback(broadcast_slam, 500).start()
+    tornado.ioloop.PeriodicCallback(broadcast_slam, 2000).start()  # 0.5 Hz (disabled by default)
     # Status at ~1 Hz
     tornado.ioloop.PeriodicCallback(broadcast_status, 1000).start()
+    # Debug sensor data at 10 Hz (only sends when debug clients connected)
+    tornado.ioloop.PeriodicCallback(broadcast_debug, 100).start()
 
     _start_time = time.time()
 

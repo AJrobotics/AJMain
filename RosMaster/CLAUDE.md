@@ -47,18 +47,64 @@ Stable udev rules at `/etc/udev/rules.d/99-rosmaster.rules` based on physical US
 | `rosmaster-notify` | Boot SMS notification | - |
 | `x11vnc` | VNC server | 5900 |
 
+## Multiprocessing Architecture
+Three OS processes eliminate Python GIL contention between sensors:
+
+```
+┌─────────────────────────────────┐
+│  Main Process (Tornado)         │
+│  ├─ Web server (port 8080)      │
+│  ├─ Collision avoidance         │◄── reads shared memory (38us)
+│  ├─ SLAM engine (bg thread)     │
+│  ├─ Explorer (bg thread)        │
+│  ├─ Camera RGB (thread)         │
+│  └─ STM32 motor control         │
+└──────────┬──────────┬───────────┘
+           │          │
+    shared memory    shared memory
+    lidar_shm[730]   depth_shm[326]
+           │          │
+┌──────────┴───┐ ┌────┴──────────┐
+│ LiDAR Process│ │ Depth Process │
+│ pyrplidar    │ │ OpenNI2       │
+│ 10Hz, 100ms  │ │ 10 FPS        │
+│ ±0.7ms jitter│ │               │
+└──────────────┘ └───────────────┘
+```
+
+**Shared Memory Layout:**
+- `lidar_shm` (`mp.Array('f', 730)`): [0]=count, [1]=timestamp, [2:722]=360 scan points (angle,dist), [722:730]=8 sector distances
+- `depth_shm` (`mp.Array('f', 326)`): [0]=count, [1]=timestamp, [2:322]=160 depth line points (angle,dist), [322:325]=3 front sector distances (right-front,front,left-front), [325]=connected flag
+
+**Queues (variable-size data):**
+- `scan_queue` — LiDAR scan dicts for web UI broadcast
+- `counts_queue` — raw point counts per revolution for oscilloscope
+- `debug_queue` — revolution summaries for sensor debug tool
+- `frame_queue` — depth heatmap JPEG for web UI broadcast
+
+**Why multiprocessing:** Python GIL only allows one thread to run at a time. With threading, LiDAR dt_ms varied 80-750ms. With separate processes, dt_ms is stable at 100ms ±0.7ms regardless of CPU load from other sensors/SLAM/Tornado.
+
+**Collision reads shared memory, not raw data:** LiDAR process pre-computes 8 sector min distances. Depth process pre-computes 3 front sector distances. Collision just reads floats and fuses — takes ~38 microseconds.
+
+## Network Access
+- **WiFi:** `192.168.1.99` (NETGEAR15, static IP) — primary access during robot operation
+- **Direct Ethernet:** `10.0.0.1` ↔ `10.0.0.2` (Dreamer) — for development/debugging, <1ms latency
+- Both interfaces active simultaneously; Ethernet optional
+
 ## Web UI (http://192.168.1.99:8080)
 Accessible from any device on the network.
 
 **WebSocket endpoints:**
 | Endpoint | Rate | Content |
 |----------|------|---------|
-| `/ws/lidar` | ~5 Hz | LiDAR scan points + depth camera line overlay |
-| `/ws/depth` | ~5 Hz | Depth heatmap + floor detection |
-| `/ws/cam/primary` | ~5 Hz | Astra RGB camera |
-| `/ws/collision` | ~5 Hz | 8-sector collision distances |
-| `/ws/slam` | ~2 Hz | SLAM map + pose |
-| `/ws/status` | ~1 Hz | Battery, IMU, IP |
+| `/ws/lidar` | ~1 Hz | LiDAR scan points + depth camera line overlay |
+| `/ws/depth` | ~1 Hz | Depth heatmap JPEG |
+| `/ws/cam/primary` | ~1 Hz | Astra RGB camera |
+| `/ws/collision` | ~1 Hz | 8-sector collision distances |
+| `/ws/slam` | ~0.5 Hz | SLAM map + pose |
+| `/ws/status` | ~1 Hz | Battery, IMU, IP, scan counts |
+| `/ws/debug` | ~10 Hz | Raw revolution summaries (enables LiDAR debug buffering — extra overhead) |
+| `/ws/timing` | ~2 Hz | Timing metrics only (no overhead on sensor processes) |
 
 **API endpoints:**
 | Endpoint | Method | Description |
@@ -67,6 +113,22 @@ Accessible from any device on the network.
 | `/api/calibration` | POST/GET | Motor calibration tests |
 | `/api/explorer` | POST/GET | Exploration control |
 | `/api/depth_offset` | POST | Set depth camera angle offset |
+| `/api/slam_method` | POST/GET | Switch mapping method |
+| `/api/lidar_mode` | POST/GET | Switch scan mode (standard/express) |
+
+**Timing bar** (on main dashboard + sensor debug):
+- LiDAR age: ms since LiDAR process wrote to shared memory (should be <100ms)
+- Depth age: ms since depth process wrote to shared memory (should be <150ms)
+- Collision: microseconds to read shared memory and fuse sectors (should be <100us)
+- Level: STOP/SLOW/CAUTION/CLEAR
+- Sectors: 8 distances in mm
+
+## Sensor Debug Tool (http://192.168.1.99:8080/static/sensor_debug.html)
+Separate debug page for raw sensor analysis. Only adds overhead when open (enables raw debug buffering via `/ws/debug`).
+- **LiDAR tab**: Revolution timeline (3 traces), angle coverage polar chart, LiDAR scan plot, revolution log table
+- **Filter controls**: dt> and Valid> inputs to exclude bad revolutions from plots
+- **Clickable rows**: pause + click a row to inspect that specific revolution
+- **Future tabs**: Depth, IMU, XBee, GPS (placeholders)
 
 ## Project Structure
 ```
@@ -78,20 +140,21 @@ remote.py                    # SSH helper utilities
 jetson/
   robot_agent.py             # Rosmaster_Lib wrapper
   tcp_server.py              # TCP command server (port 5555)
-  collision_avoidance.py     # 8-sector collision filter
+  collision_avoidance.py     # 8-sector collision filter (reads shared memory)
   calibration.py             # Motor calibration runner
   slam_engine.py             # 2D SLAM (occupancy grid + ICP)
   explorer.py                # Autonomous frontier exploration
   status_display.py          # OLED status display
   boot_notify.py             # SMS notification on boot
   web_ui/
-    server.py                # Tornado web server
-    lidar_reader.py          # RPLidar S2 reader (pyrplidar)
-    depth_reader.py          # Orbbec Astra depth + floor detection + depth line
-    camera_reader.py         # RGB camera reader
+    server.py                # Tornado web server (main process)
+    lidar_reader.py          # RPLidar S2 reader (separate process, shared memory)
+    depth_reader.py          # Orbbec Astra depth (separate process, shared memory)
+    camera_reader.py         # RGB camera reader (thread in main process)
     static/
       index.html             # Dashboard UI
       lidar.js               # All frontend JS
+      sensor_debug.html      # Sensor debug tool
 ```
 
 ## Key Libraries on Jetson
@@ -114,28 +177,40 @@ jetson/
 - STOP < 200mm, SLOW < 500mm, CAUTION < 800mm
 - **HARD SAFETY**: if ANY non-ignored sector < 200mm, ALL translational motion is blocked regardless of direction. Only rotation allowed.
 - Rotation always allowed (even during emergency stop)
-- Rear ignore zone excludes LiDAR points behind robot
+- Rear 140° ignore zone excludes LiDAR points behind robot (applied in LiDAR process)
+- **Reads pre-computed sector distances from shared memory** — does NOT process raw sensor data
+  - LiDAR process writes 8 sector distances to `lidar_shm[722:730]`
+  - Depth process writes 3 front sector distances to `depth_shm[322:325]`
+  - Collision fuses: `sector[i] = min(lidar_sector[i], depth_sector[i])` for front 3 sectors
+  - Total collision update time: ~38 microseconds
 - All motor commands (explorer, calibration, TCP) must go through `filter_motion()`
 - Never add code that calls `set_car_motion()` directly without collision filtering
 
 ## LiDAR Configuration
 - **RPLidar S2** (Model 113, FW 1.2, HW 18)
-- Best motor PWM: **600** (spread=273, most stable)
-- Scan rate: ~4.5 Hz at PWM 600
-- Points per revolution: 1155-1428 (avg ~1256)
-- Revolution detection: angle wraps backward by >300°
+- Best motor PWM: **800** (stable at full battery 12.3V)
+- Scan rate: ~10 Hz at PWM 800
+- Points per revolution: ~1600 total, ~1240 valid (dist>0, quality>0)
+- **Revolution detection: hardware `start_flag`** (encoder sync pulse, fires once per revolution at ~357°). Do NOT use angle-wrap detection — it's unreliable under CPU load.
+- **Runs in a separate process** (`multiprocessing.Process`) to avoid GIL contention. Without this, Python GIL from other threads (depth camera, Tornado) causes dt_ms to vary 80-750ms. With separate process, dt_ms is stable at 100ms ±0.7ms.
+- Data transfer: shared memory (`lidar_shm`) for scan + sectors, queues for variable-size data (counts, debug summaries)
+- Pre-computes 8 sector min distances in LiDAR process (collision reads floats, not raw scan)
+- Full reset sequence on startup: stop → motor off → disconnect → wait → reconnect (prevents sync byte errors)
 - Depth camera overlay: horizontal line from middle row of depth frame (±30° FOV)
 - Depth image is mirrored relative to LiDAR (angle negated in extraction)
 
 ## Depth Camera
 - **Orbbec Astra** (original model with RGB + IR + depth)
+- **Runs in a separate process** (`multiprocessing.Process`) — same pattern as LiDAR
 - OpenNI2 path: `/home/jetson/yahboomcar_ros2_ws/software/library_ws/install/astra_camera/include/openni2/openni2_redist/arm64`
 - Depth resolution: 640x480, range 400-5000mm
 - Horizontal FOV: ~60° (±30° from center)
-- RGB via OpenCV VideoCapture (video0), not OpenNI2
-- Depth line overlay: rows 20%-30% from top (wall-level, avoids floor), sampled every 4th pixel, median averaged → ~130 points
+- RGB via OpenCV VideoCapture (video0), not OpenNI2 (stays in main process)
+- Depth line: rows 20%-30% from top (wall-level), sampled every 4th pixel, median averaged → ~160 points → written to `depth_shm`
+- Pre-computes 3 front sector distances (10th percentile, wall-level band rows 15-35%) → written to `depth_shm`
+- Heatmap JPEG sent via queue (variable size, for web UI broadcast)
+- `angle_offset` as `mp.Value('f')` — main process writes via API, depth process reads
 - Depth image is mirrored relative to LiDAR (angle negated in extraction)
-- Angle offset calibration available via `/api/depth_offset`
 
 ## SLAM
 - Custom Python: occupancy grid (600x600, 50mm/cell) + ICP scan matching
@@ -163,6 +238,7 @@ jetson/
 - **Expansion board beeps on power-up**: Press Key1 on the board to stop. The beep is STM32 firmware, not software-controlled unless USB serial works.
 - **Yahboom autostart app**: removed from GNOME autostart (`~/.config/autostart/start_app.sh.desktop` deleted)
 - **USB path-based udev rules**: work when devices are on stable hub ports, but expansion board's internal hub can reassign ports between boots. If battery reads 0V, the STM32 may be on a different ttyUSB — restart the web UI service after verifying which port has the STM32.
+- **LiDAR sync byte errors on restart**: When `systemctl restart` kills the LiDAR process mid-scan, stale serial data causes `sync bytes are mismatched` on next connect. Fixed by full reset sequence in `_lidar_process()`: stop → motor off → disconnect → wait → reconnect. Service `Restart=always` retries if reset fails.
 - **Server SIGTERM handling**: Ignores SIGTERM during first 10 seconds after startup (stale signal from systemctl restart). Uses `loop.add_callback_from_signal()` after grace period. Service uses `Restart=always` with `-u` (unbuffered) Python.
 - **Astra RGB not via OpenNI2**: Color stream fails via OpenNI2; use OpenCV `VideoCapture(0)` for the Astra RGB camera instead.
 - **GStreamer warnings**: Astra RGB camera shows GStreamer pipeline errors on first open but works with V4L2 backend fallback.

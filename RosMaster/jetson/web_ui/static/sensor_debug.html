@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RosMaster Sensor Debug</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', monospace; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+#header {
+    background: #12122a; border-bottom: 1px solid #333; padding: 8px 16px;
+    display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+}
+#header h1 { color: #00d4ff; font-size: 16px; white-space: nowrap; }
+.tab-bar { display: flex; gap: 2px; }
+.tab-btn {
+    background: #1a1a3a; color: #888; border: 1px solid #333; border-bottom: none;
+    padding: 6px 16px; cursor: pointer; font-family: inherit; font-size: 13px;
+    border-radius: 4px 4px 0 0; transition: background 0.15s;
+}
+.tab-btn:hover { background: #252550; color: #aaa; }
+.tab-btn.active { background: #0a0a1a; color: #00d4ff; border-color: #00d4ff; }
+#conn-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #888; margin-left: auto; }
+#conn-dot { width: 8px; height: 8px; border-radius: 50%; background: #f44; }
+#conn-dot.on { background: #0f0; }
+.header-btn {
+    background: #1a1a3a; color: #aaa; border: 1px solid #444; padding: 4px 12px;
+    cursor: pointer; font-family: inherit; font-size: 12px; border-radius: 3px;
+}
+.header-btn:hover { background: #252550; color: #fff; }
+
+#tab-content { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.tab-panel { display: none; flex: 1; flex-direction: column; min-height: 0; }
+.tab-panel.active { display: flex; }
+
+/* LiDAR tab layout */
+#lidar-tab { display: none; flex-direction: column; }
+#lidar-tab.active { display: flex; }
+#lidar-viz { display: flex; flex: 1; min-height: 0; gap: 4px; padding: 4px; }
+#lidar-timeline-wrap { flex: 2; display: flex; flex-direction: column; min-height: 0; }
+#lidar-polar-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#lidar-timeline-wrap canvas, #lidar-polar-wrap canvas {
+    width: 100%; flex: 1; min-height: 0; background: #0a0a1a;
+}
+#lidar-stats {
+    flex-shrink: 0; max-height: 220px; overflow-y: auto; padding: 4px 8px;
+    border-top: 1px solid #333; background: #0d0d20;
+}
+#lidar-stats table { width: 100%; border-collapse: collapse; font-size: 11px; }
+#lidar-stats th { color: #00d4ff; text-align: left; padding: 2px 6px; border-bottom: 1px solid #333; position: sticky; top: 0; background: #0d0d20; }
+#lidar-stats td { padding: 2px 6px; border-bottom: 1px solid #1a1a2a; }
+.stat-row-bad { background: #3a1010 !important; }
+#rev-log-body tr { cursor: pointer; }
+#rev-log-body tr:hover { background: #1a1a3a; }
+.stat-row-selected { outline: 2px solid #00d4ff; background: #0a1a2a !important; }
+#lidar-summary { display: flex; gap: 24px; padding: 4px 8px; font-size: 12px; color: #0f8; border-top: 1px solid #222; }
+#lidar-summary span { color: #ccc; }
+
+/* Timing panel */
+#timing-panel {
+    background: #0d0d20; border-bottom: 1px solid #222; padding: 4px 16px;
+    display: flex; gap: 20px; font-size: 11px; color: #888; flex-shrink: 0;
+}
+#timing-panel b { color: #0f8; }
+#timing-panel .warn { color: #ff0; }
+#timing-panel .bad { color: #f44; }
+
+/* Placeholder tabs */
+.placeholder {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    color: #444; font-size: 18px;
+}
+</style>
+</head>
+<body>
+
+<div id="header">
+    <h1>SENSOR DEBUG</h1>
+    <div class="tab-bar">
+        <button class="tab-btn active" data-tab="lidar">LiDAR</button>
+        <button class="tab-btn" data-tab="depth">Depth</button>
+        <button class="tab-btn" data-tab="imu">IMU</button>
+        <button class="tab-btn" data-tab="xbee">XBee</button>
+        <button class="tab-btn" data-tab="gps">GPS</button>
+    </div>
+    <div id="conn-status">
+        <div id="conn-dot"></div>
+        <span id="conn-text">Disconnected</span>
+    </div>
+    <label style="color:#888;font-size:12px;">Avg N: <input id="polar-n" type="number" min="1" max="100" value="5" style="width:48px;background:#1a1a3a;color:#0f8;border:1px solid #444;padding:2px 4px;font-family:inherit;font-size:12px;border-radius:3px;text-align:center;"></label>
+    <label style="color:#888;font-size:12px;">dt&gt;: <input id="filter-dt" type="number" min="0" max="1000" value="100" style="width:52px;background:#1a1a3a;color:#ff0;border:1px solid #444;padding:2px 4px;font-family:inherit;font-size:12px;border-radius:3px;text-align:center;">ms</label>
+    <label style="color:#888;font-size:12px;">Valid&gt;: <input id="filter-valid" type="number" min="0" max="5000" value="1000" style="width:52px;background:#1a1a3a;color:#ff0;border:1px solid #444;padding:2px 4px;font-family:inherit;font-size:12px;border-radius:3px;text-align:center;"></label>
+    <button class="header-btn" id="btn-pause">Pause</button>
+    <button class="header-btn" id="btn-clear">Clear</button>
+</div>
+
+<div id="timing-panel">
+    <span>LiDAR age: <b id="tm-lidar-age">-</b>ms</span>
+    <span>Depth age: <b id="tm-depth-age">-</b>ms</span>
+    <span>Collision: <b id="tm-collision-us">-</b>us</span>
+    <span>Level: <b id="tm-collision-level">-</b></span>
+    <span>Sectors: <b id="tm-sectors">-</b></span>
+</div>
+
+<div id="tab-content">
+    <!-- LiDAR Tab -->
+    <div id="lidar-tab" class="tab-panel active">
+        <div id="lidar-viz">
+            <div id="lidar-timeline-wrap">
+                <canvas id="timeline-canvas"></canvas>
+                <div id="lidar-summary"></div>
+                <div id="lidar-stats">
+                    <table>
+                        <thead><tr><th>Time(PT)</th><th>Rev</th><th>dt(ms)</th><th>Total</th><th>Valid</th><th>Dedup</th><th>Ang Start</th><th>Ang End</th></tr></thead>
+                        <tbody id="rev-log-body"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div id="lidar-polar-wrap">
+                <canvas id="polar-canvas"></canvas>
+                <canvas id="scan-canvas"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Depth Tab -->
+    <div id="depth-tab" class="tab-panel"><div class="placeholder">Depth Camera — not implemented yet</div></div>
+
+    <!-- IMU Tab -->
+    <div id="imu-tab" class="tab-panel"><div class="placeholder">IMU — not implemented yet</div></div>
+
+    <!-- XBee Tab -->
+    <div id="xbee-tab" class="tab-panel"><div class="placeholder">XBee — not implemented yet</div></div>
+
+    <!-- GPS Tab -->
+    <div id="gps-tab" class="tab-panel"><div class="placeholder">GPS — not implemented yet</div></div>
+</div>
+
+<script>
+// ============================================================
+// Connection
+// ============================================================
+const WS_URL = 'ws://' + (location.hostname || '10.0.0.1') + ':' + (location.port || '8080') + '/ws/debug';
+let ws = null;
+let paused = false;
+
+function connect() {
+    ws = new WebSocket(WS_URL);
+    ws.onopen = () => {
+        document.getElementById('conn-dot').classList.add('on');
+        document.getElementById('conn-text').textContent = 'Connected';
+    };
+    ws.onclose = () => {
+        document.getElementById('conn-dot').classList.remove('on');
+        document.getElementById('conn-text').textContent = 'Disconnected';
+        setTimeout(connect, 2000);
+    };
+    ws.onerror = () => ws.close();
+    ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        // Timing metrics always update (even when paused)
+        if (msg.sensor === 'timing') updateTimingPanel(msg);
+        if (paused) return;
+        if (msg.sensor === 'lidar') lidarOnData(msg);
+    };
+}
+
+// ============================================================
+// Tab switching
+// ============================================================
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab + '-tab').classList.add('active');
+        resizeCanvases();
+    });
+});
+
+document.getElementById('btn-pause').addEventListener('click', function() {
+    paused = !paused;
+    this.textContent = paused ? 'Resume' : 'Pause';
+});
+document.getElementById('btn-clear').addEventListener('click', () => {
+    lidarClear();
+});
+document.getElementById('polar-n').addEventListener('input', () => {
+    polNeedsRedraw = true;
+    scanNeedsRedraw = true;
+});
+document.getElementById('filter-dt').addEventListener('input', () => {
+    polNeedsRedraw = true;
+    scanNeedsRedraw = true;
+});
+document.getElementById('filter-valid').addEventListener('input', () => {
+    polNeedsRedraw = true;
+    scanNeedsRedraw = true;
+});
+
+// ============================================================
+// Canvas helpers
+// ============================================================
+const tlCanvas = document.getElementById('timeline-canvas');
+const tlCtx = tlCanvas.getContext('2d');
+const polCanvas = document.getElementById('polar-canvas');
+const polCtx = polCanvas.getContext('2d');
+const scanCanvas = document.getElementById('scan-canvas');
+const scanCtx = scanCanvas.getContext('2d');
+let dpr = window.devicePixelRatio || 1;
+
+function resizeCanvases() {
+    dpr = window.devicePixelRatio || 1;
+    [tlCanvas, polCanvas, scanCanvas].forEach(c => {
+        const r = c.parentElement.getBoundingClientRect();
+        const w = r.width;
+        const h = c.className === 'timeline-cv' ? r.height : r.height; // all same
+        c.width = w * dpr;
+        c.height = c.getBoundingClientRect().height * dpr;
+        c.style.width = w + 'px';
+    });
+    tlNeedsFullRedraw = true;
+    polNeedsRedraw = true;
+    scanNeedsRedraw = true;
+}
+window.addEventListener('resize', resizeCanvases);
+
+// ============================================================
+// LiDAR Debug — Revolution Timeline
+// ============================================================
+const TL_MAX_REVS = 300; // ~60 seconds at 4.5 Hz
+let tlRevs = [];          // ring buffer of revolution summaries
+let tlNeedsFullRedraw = true;
+let polNeedsRedraw = true;
+let scanNeedsRedraw = true;
+
+// Stats
+let statTotal = 0, statSum = 0, statMin = Infinity, statMax = 0;
+let selectedRevId = null; // clicked row's rev_id, null = show latest
+
+function lidarOnData(msg) {
+    if (msg.type === 'rev_batch' && msg.revs) {
+        for (const rev of msg.revs) {
+            tlRevs.push(rev);
+            if (tlRevs.length > TL_MAX_REVS) tlRevs.shift();
+            // Update stats
+            statTotal++;
+            statSum += rev.valid_count;
+            if (rev.valid_count < statMin) statMin = rev.valid_count;
+            if (rev.valid_count > statMax) statMax = rev.valid_count;
+            // Update log table
+            addRevLogRow(rev);
+        }
+        tlNeedsFullRedraw = true;
+        polNeedsRedraw = true;
+        scanNeedsRedraw = true;
+    }
+}
+
+function getFilteredRevs() {
+    const minDt = parseFloat(document.getElementById('filter-dt').value) || 0;
+    const minValid = parseInt(document.getElementById('filter-valid').value) || 0;
+    return tlRevs.filter(r => r.dt_ms > minDt && r.valid_count > minValid);
+}
+
+function getSelectedRev() {
+    if (selectedRevId !== null) {
+        return tlRevs.find(r => r.rev_id === selectedRevId) || null;
+    }
+    // Real-time: return most recent revolution that passes filter
+    const filtered = getFilteredRevs();
+    return filtered.length > 0 ? filtered[filtered.length - 1] : null;
+}
+
+function selectRev(revId) {
+    if (selectedRevId === revId) {
+        selectedRevId = null; // toggle off
+    } else {
+        selectedRevId = revId;
+    }
+    // Highlight selected row
+    document.querySelectorAll('#rev-log-body tr').forEach(tr => {
+        tr.classList.toggle('stat-row-selected', tr.dataset.revId == selectedRevId);
+    });
+    polNeedsRedraw = true;
+    scanNeedsRedraw = true;
+}
+
+function lidarClear() {
+    tlRevs = [];
+    statTotal = 0; statSum = 0; statMin = Infinity; statMax = 0;
+    selectedRevId = null;
+    document.getElementById('rev-log-body').innerHTML = '';
+    tlNeedsFullRedraw = true;
+    polNeedsRedraw = true;
+    scanNeedsRedraw = true;
+}
+
+// ============================================================
+// Timeline drawing
+// ============================================================
+function drawTimeline() {
+    if (!tlNeedsFullRedraw) return;
+    tlNeedsFullRedraw = false;
+
+    const w = tlCanvas.width, h = tlCanvas.height;
+    const ctx = tlCtx;
+    ctx.clearRect(0, 0, w, h);
+
+    // Margins
+    const ml = 60 * dpr, mr = 20 * dpr, mt = 20 * dpr, mb = 30 * dpr;
+    const pw = w - ml - mr, ph = h - mt - mb;
+    if (pw < 10 || ph < 10) return;
+
+    // Y range
+    const yMax = 2000;
+    const toY = v => mt + ph - (v / yMax) * ph;
+    const toX = i => ml + (i / Math.max(tlRevs.length - 1, 1)) * pw;
+
+    // Grid
+    ctx.strokeStyle = '#1a2a1a';
+    ctx.lineWidth = 1;
+    for (let v = 0; v <= yMax; v += 500) {
+        const y = toY(v);
+        ctx.beginPath(); ctx.moveTo(ml, y); ctx.lineTo(w - mr, y); ctx.stroke();
+        ctx.fillStyle = '#888'; ctx.font = (11 * dpr) + 'px monospace'; ctx.textAlign = 'right';
+        ctx.fillText(v.toString(), ml - 6 * dpr, y + 4 * dpr);
+    }
+
+    // Y-axis label
+    ctx.save();
+    ctx.fillStyle = '#888'; ctx.font = (11 * dpr) + 'px monospace';
+    ctx.translate(14 * dpr, mt + ph / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.fillText('Points/rev', 0, 0);
+    ctx.restore();
+
+    if (tlRevs.length < 2) {
+        ctx.fillStyle = '#444'; ctx.font = (14 * dpr) + 'px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('Waiting for data...', w / 2, h / 2);
+        return;
+    }
+
+    // dt_ms background columns (color = revolution timing health)
+    for (let i = 0; i < tlRevs.length; i++) {
+        const dt = tlRevs[i].dt_ms;
+        let color;
+        if (dt >= 150 && dt <= 300) color = 'rgba(0,80,0,0.15)';      // normal
+        else if (dt < 100 || dt > 500) color = 'rgba(180,0,0,0.2)';   // bad
+        else color = 'rgba(180,180,0,0.12)';                           // warning
+        const x1 = i > 0 ? toX(i - 0.5) : toX(0);
+        const x2 = i < tlRevs.length - 1 ? toX(i + 0.5) : toX(tlRevs.length - 1);
+        ctx.fillStyle = color;
+        ctx.fillRect(x1, mt, x2 - x1, ph);
+    }
+
+    // Draw three traces
+    const traces = [
+        { key: 'rev_count', color: '#666', label: 'total' },
+        { key: 'valid_count', color: '#0f8', label: 'valid' },
+        { key: 'dedup_count', color: '#0df', label: 'dedup' },
+    ];
+    for (const trace of traces) {
+        ctx.strokeStyle = trace.color;
+        ctx.lineWidth = 1.5 * dpr;
+        ctx.beginPath();
+        for (let i = 0; i < tlRevs.length; i++) {
+            const x = toX(i), y = toY(Math.min(tlRevs[i][trace.key], yMax));
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Dots
+        ctx.fillStyle = trace.color;
+        const dotR = 2 * dpr;
+        for (let i = 0; i < tlRevs.length; i++) {
+            const x = toX(i), y = toY(Math.min(tlRevs[i][trace.key], yMax));
+            ctx.beginPath(); ctx.arc(x, y, dotR, 0, Math.PI * 2); ctx.fill();
+        }
+    }
+
+    // Legend
+    let lx = ml + 10 * dpr, ly = mt + 14 * dpr;
+    ctx.font = (11 * dpr) + 'px monospace';
+    for (const trace of traces) {
+        ctx.fillStyle = trace.color;
+        ctx.fillRect(lx, ly - 8 * dpr, 12 * dpr, 3 * dpr);
+        ctx.fillText(trace.label, lx + 16 * dpr, ly);
+        lx += (trace.label.length * 8 + 30) * dpr;
+    }
+
+    // Summary stats
+    updateSummary();
+}
+
+// ============================================================
+// Polar angle coverage
+// ============================================================
+function drawPolar() {
+    if (!polNeedsRedraw) return;
+    polNeedsRedraw = false;
+
+    const w = polCanvas.width, h = polCanvas.height;
+    const ctx = polCtx;
+    ctx.clearRect(0, 0, w, h);
+
+    const cx = w / 2, cy = h / 2;
+    const radius = Math.min(cx, cy) - 20 * dpr;
+    if (radius < 20) return;
+
+    // When a row is selected, show that single revolution; otherwise average last N
+    const polarN = Math.max(1, parseInt(document.getElementById('polar-n').value) || 5);
+    const cov = new Array(36).fill(0);
+    let covLabel = '';
+    if (selectedRevId !== null) {
+        const sel = getSelectedRev();
+        if (sel) {
+            for (let j = 0; j < 36; j++) cov[j] = sel.angle_cov[j];
+            covLabel = 'rev ' + sel.rev_id;
+        }
+    } else {
+        const filtered = getFilteredRevs();
+        const recentRevs = filtered.slice(-polarN);
+        if (recentRevs.length > 0) {
+            for (const rev of recentRevs) {
+                for (let j = 0; j < 36; j++) cov[j] += rev.angle_cov[j];
+            }
+            for (let j = 0; j < 36; j++) cov[j] = Math.round(cov[j] / recentRevs.length);
+        }
+        covLabel = 'avg ' + recentRevs.length + '/' + filtered.length + ' filtered';
+    }
+    const maxCov = Math.max(...cov, 1);
+
+    // Draw 36 wedges
+    for (let i = 0; i < 36; i++) {
+        const a1 = ((i * 10 - 90) * Math.PI / 180);
+        const a2 = (((i + 1) * 10 - 90) * Math.PI / 180);
+        const frac = cov[i] / maxCov;
+        const r = radius * 0.2 + radius * 0.8 * frac;
+
+        // Color: green if good, yellow if medium, red if low
+        let color;
+        if (frac > 0.6) color = `rgba(0,${Math.round(100 + 155 * frac)},0,0.7)`;
+        else if (frac > 0.3) color = `rgba(${Math.round(200 * (1 - frac))},${Math.round(180 * frac)},0,0.7)`;
+        else color = `rgba(180,${Math.round(80 * frac)},0,0.7)`;
+
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, r, a1, a2);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = '#1a1a3a';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+
+    // Ring guides
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    for (const frac of [0.25, 0.5, 0.75, 1.0]) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius * frac, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
+    // Angle labels
+    ctx.fillStyle = '#888'; ctx.font = (10 * dpr) + 'px monospace'; ctx.textAlign = 'center';
+    const labels = [{a: 0, t: '0'}, {a: 90, t: '90'}, {a: 180, t: '180'}, {a: 270, t: '270'}];
+    for (const l of labels) {
+        const a = (l.a - 90) * Math.PI / 180;
+        ctx.fillText(l.t + '\u00B0', cx + Math.cos(a) * (radius + 14 * dpr), cy + Math.sin(a) * (radius + 14 * dpr) + 4 * dpr);
+    }
+
+    // Title
+    ctx.fillStyle = '#00d4ff'; ctx.font = (12 * dpr) + 'px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('Angle Coverage (' + covLabel + ')', cx, 14 * dpr);
+
+    // Count labels on wedges
+    ctx.font = (8 * dpr) + 'px monospace'; ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+    for (let i = 0; i < 36; i++) {
+        if (cov[i] === 0) continue;
+        const midA = ((i * 10 + 5 - 90) * Math.PI / 180);
+        const frac = cov[i] / maxCov;
+        const r = (radius * 0.2 + radius * 0.8 * frac) * 0.65;
+        const tx = cx + Math.cos(midA) * r;
+        const ty = cy + Math.sin(midA) * r + 3 * dpr;
+        ctx.fillText(cov[i].toString(), tx, ty);
+    }
+}
+
+// ============================================================
+// LiDAR Scan Plot (polar, colored by angle coverage)
+// ============================================================
+function getCovColor(frac) {
+    if (frac > 0.6) return `rgb(0,${Math.round(100 + 155 * frac)},0)`;
+    if (frac > 0.3) return `rgb(${Math.round(200 * (1 - frac))},${Math.round(180 * frac)},0)`;
+    return `rgb(180,${Math.round(80 * frac)},0)`;
+}
+
+function drawScanPlot() {
+    if (!scanNeedsRedraw) return;
+    scanNeedsRedraw = false;
+
+    const w = scanCanvas.width, h = scanCanvas.height;
+    const ctx = scanCtx;
+    ctx.clearRect(0, 0, w, h);
+
+    const cx = w / 2, cy = h / 2;
+    const radius = Math.min(cx, cy) - 20 * dpr;
+    if (radius < 20) return;
+
+    // Get selected or latest revolution's samples
+    const latest = getSelectedRev();
+    if (!latest || !latest.samples || latest.samples.length === 0) {
+        ctx.fillStyle = '#444'; ctx.font = (14 * dpr) + 'px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('Waiting for data...', cx, cy);
+        return;
+    }
+
+    // Compute averaged angle coverage for coloring (filtered, same N as polar chart)
+    const polarN = Math.max(1, parseInt(document.getElementById('polar-n').value) || 5);
+    const filtered = getFilteredRevs();
+    const recentRevs = filtered.slice(-polarN);
+    const cov = new Array(36).fill(0);
+    if (recentRevs.length > 0) {
+        for (const rev of recentRevs) {
+            for (let j = 0; j < 36; j++) cov[j] += rev.angle_cov[j];
+        }
+        for (let j = 0; j < 36; j++) cov[j] = Math.round(cov[j] / recentRevs.length);
+    }
+    const maxCov = Math.max(...cov, 1);
+
+    // Auto-scale: find max distance in samples
+    let maxDist = 0;
+    for (const s of latest.samples) {
+        if (s[1] > maxDist) maxDist = s[1];
+    }
+    maxDist = Math.max(maxDist, 500); // at least 500mm
+    const scale = radius / maxDist;
+
+    // Range rings
+    const ringStep = maxDist > 4000 ? 2000 : maxDist > 2000 ? 1000 : 500;
+    ctx.strokeStyle = '#1a2a2a';
+    ctx.lineWidth = 1;
+    ctx.font = (9 * dpr) + 'px monospace';
+    ctx.fillStyle = '#555';
+    ctx.textAlign = 'center';
+    for (let d = ringStep; d <= maxDist; d += ringStep) {
+        const r = d * scale;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillText((d / 1000).toFixed(1) + 'm', cx, cy - r - 3 * dpr);
+    }
+
+    // Cross lines
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius);
+    ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy);
+    ctx.strokeStyle = '#1a2a2a'; ctx.stroke();
+
+    // Draw scan points colored by angle coverage
+    const dotR = 2.5 * dpr;
+    for (const s of latest.samples) {
+        const angle = s[0], dist = s[1];
+        if (dist < 25) continue;
+        const binIdx = Math.floor(angle / 10) % 36;
+        const frac = cov[binIdx] / maxCov;
+        const angleRad = (angle - 90) * Math.PI / 180;
+        const px = cx + Math.cos(angleRad) * dist * scale;
+        const py = cy + Math.sin(angleRad) * dist * scale;
+
+        ctx.fillStyle = getCovColor(frac);
+        ctx.beginPath();
+        ctx.arc(px, py, dotR, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Title
+    ctx.fillStyle = '#00d4ff'; ctx.font = (12 * dpr) + 'px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('LiDAR Scan (rev ' + latest.rev_id + ')', cx, 14 * dpr);
+
+    // Angle labels
+    ctx.fillStyle = '#666'; ctx.font = (10 * dpr) + 'px monospace';
+    const aLabels = [{a: 0, t: '0\u00B0'}, {a: 90, t: '90\u00B0'}, {a: 180, t: '180\u00B0'}, {a: 270, t: '270\u00B0'}];
+    for (const l of aLabels) {
+        const a = (l.a - 90) * Math.PI / 180;
+        ctx.fillText(l.t, cx + Math.cos(a) * (radius + 14 * dpr), cy + Math.sin(a) * (radius + 14 * dpr) + 4 * dpr);
+    }
+}
+
+// ============================================================
+// Revolution log table
+// ============================================================
+const MAX_LOG_ROWS = 50;
+
+function addRevLogRow(rev) {
+    const tbody = document.getElementById('rev-log-body');
+    const tr = document.createElement('tr');
+    tr.dataset.revId = rev.rev_id;
+    if (rev.valid_count < 500) tr.classList.add('stat-row-bad');
+    tr.addEventListener('click', () => selectRev(rev.rev_id));
+
+    // Compute angle range from samples
+    let angStart = '-', angEnd = '-';
+    if (rev.samples && rev.samples.length > 0) {
+        angStart = rev.samples[0][0].toFixed(0);
+        angEnd = rev.samples[rev.samples.length - 1][0].toFixed(0);
+    }
+
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-US', {hour12: false, timeZone: 'America/Los_Angeles'})
+        + '.' + String(now.getMilliseconds()).padStart(3, '0');
+
+    tr.innerHTML = '<td style="color:#888">' + timeStr + '</td>'
+        + '<td>' + rev.rev_id + '</td>'
+        + '<td>' + rev.dt_ms.toFixed(0) + '</td>'
+        + '<td>' + rev.rev_count + '</td>'
+        + '<td style="color:' + (rev.valid_count < 500 ? '#f44' : '#0f8') + '">' + rev.valid_count + '</td>'
+        + '<td>' + rev.dedup_count + '</td>'
+        + '<td>' + angStart + '</td>'
+        + '<td>' + angEnd + '</td>';
+
+    // Insert at top
+    tbody.insertBefore(tr, tbody.firstChild);
+    // Trim
+    while (tbody.children.length > MAX_LOG_ROWS) tbody.removeChild(tbody.lastChild);
+}
+
+// ============================================================
+// Summary stats
+// ============================================================
+function updateSummary() {
+    const el = document.getElementById('lidar-summary');
+    if (statTotal === 0) { el.innerHTML = 'No data'; return; }
+    const avg = (statSum / statTotal).toFixed(0);
+    // Compute Hz from last 20 revolutions
+    let hz = '-';
+    if (tlRevs.length >= 2) {
+        const recent = tlRevs.slice(-20);
+        const dtSum = recent.reduce((s, r) => s + r.dt_ms, 0);
+        hz = (1000 / (dtSum / recent.length)).toFixed(1);
+    }
+    // Std dev of valid_count
+    let stddev = '-';
+    if (tlRevs.length >= 5) {
+        const vals = tlRevs.slice(-60).map(r => r.valid_count);
+        const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+        const variance = vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length;
+        stddev = Math.sqrt(variance).toFixed(0);
+    }
+    el.innerHTML = '<span>Hz: <b style="color:#0f8">' + hz + '</b></span>'
+        + '<span>Avg: <b style="color:#0f8">' + avg + '</b></span>'
+        + '<span>StdDev: <b style="color:#ff0">' + stddev + '</b></span>'
+        + '<span>Min: <b style="color:#f44">' + (statMin === Infinity ? '-' : statMin) + '</b></span>'
+        + '<span>Max: <b style="color:#0df">' + statMax + '</b></span>'
+        + '<span>Revs: <b>' + statTotal + '</b></span>';
+}
+
+// ============================================================
+// Timing panel
+// ============================================================
+function ageClass(ms) {
+    if (ms < 0) return '';
+    if (ms < 150) return '';       // green (default)
+    if (ms < 500) return 'warn';   // yellow
+    return 'bad';                   // red
+}
+
+function levelColor(level) {
+    if (level === 'STOP') return '#f44';
+    if (level === 'SLOW') return '#f80';
+    if (level === 'CAUTION') return '#ff0';
+    return '#0f8';
+}
+
+function updateTimingPanel(msg) {
+    const la = document.getElementById('tm-lidar-age');
+    la.textContent = msg.lidar_age_ms >= 0 ? msg.lidar_age_ms.toFixed(0) : 'N/A';
+    la.className = ageClass(msg.lidar_age_ms);
+
+    const da = document.getElementById('tm-depth-age');
+    da.textContent = msg.depth_age_ms >= 0 ? msg.depth_age_ms.toFixed(0) : 'N/A';
+    da.className = ageClass(msg.depth_age_ms);
+
+    const cu = document.getElementById('tm-collision-us');
+    cu.textContent = msg.collision_us;
+
+    const cl = document.getElementById('tm-collision-level');
+    cl.textContent = msg.collision_level;
+    cl.style.color = levelColor(msg.collision_level);
+
+    const sec = document.getElementById('tm-sectors');
+    sec.textContent = msg.collision_sectors.map(d => d >= 9999 ? '-' : Math.round(d)).join(' | ');
+}
+
+// ============================================================
+// Render loop
+// ============================================================
+function render() {
+    drawTimeline();
+    drawPolar();
+    drawScanPlot();
+    requestAnimationFrame(render);
+}
+
+// ============================================================
+// Init
+// ============================================================
+setTimeout(() => { resizeCanvases(); connect(); render(); }, 100);
+</script>
+</body>
+</html>

@@ -8,9 +8,18 @@ import math
 import time
 import threading
 import heapq
+import logging
 import numpy as np
 
 from slam_engine import GRID_SIZE, CELL_SIZE_MM
+
+# File logger for explorer — persists across restarts
+_log = logging.getLogger("explorer")
+_log.setLevel(logging.DEBUG)
+_fh = logging.FileHandler("/tmp/explorer.log")
+_fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
+_log.addHandler(_fh)
+_log.addHandler(logging.StreamHandler())  # also print to stdout/journald
 
 # Explorer parameters
 EXPLORE_SPEED = 0.08       # m/s forward speed (slow for safety)
@@ -44,7 +53,8 @@ class Explorer:
             orig_vx, orig_vy = vx, vy
             vx, vy, vz = self.collision.filter_motion(vx, vy, vz)
             if orig_vx != 0 and vx == 0:
-                print(f"Collision BLOCKED forward motion (min_dist={self.collision.min_dist}mm)")
+                sectors = self.collision.get_sector_distances()
+                _log.warning(f"Collision BLOCKED vx={orig_vx:.2f} min={self.collision.min_dist:.0f}mm sectors={[round(s) for s in sectors]}")
         if self.bot:
             self.bot.set_car_motion(vx, vy, vz)
         return vx, vy, vz
@@ -188,13 +198,16 @@ class Explorer:
                 # Rotate toward target
                 vz = ROTATION_SPEED if heading_error > 0 else -ROTATION_SPEED
                 self._move_filtered(0, 0, vz)
+                _log.debug(f"TURN err={math.degrees(heading_error):.1f}° dist={dist:.0f}mm")
             else:
                 # Move forward — check collision first
                 vx = min(EXPLORE_SPEED, dist / 1000.0)
                 actual_vx, _, _ = self._move_filtered(vx, 0, heading_error * 0.3)
+                sectors = self.collision.get_sector_distances() if self.collision else [9999]*8
+                _log.debug(f"FWD vx={vx:.3f}→{actual_vx:.3f} dist={dist:.0f}mm min_sec={min(sectors):.0f}mm")
                 if actual_vx == 0 and vx > 0:
                     # Blocked by collision — skip this target
-                    print(f"Collision blocked path to ({target_x:.0f}, {target_y:.0f}), skipping")
+                    _log.warning(f"Collision blocked path to ({target_x:.0f}, {target_y:.0f}), sectors={[round(s) for s in sectors]}")
                     return False
 
             time.sleep(1.0 / EXPLORE_UPDATE_HZ)
@@ -203,7 +216,7 @@ class Explorer:
 
     def _initial_scan(self):
         """Slow 360° scan at start to build initial map with both sensors."""
-        print("Initial scan: slow 360° rotation...")
+        _log.info("Initial scan: slow 360° rotation...")
         scan_time = 2 * math.pi / INITIAL_SCAN_SPEED  # time for full rotation
         start = time.time()
         while time.time() - start < scan_time and not self._abort:
@@ -211,7 +224,7 @@ class Explorer:
             time.sleep(1.0 / EXPLORE_UPDATE_HZ)
         self._stop_motors()
         time.sleep(0.5)
-        print("Initial scan complete")
+        _log.info("Initial scan complete")
 
     def _explore_loop(self):
         """Main exploration loop."""
@@ -227,13 +240,13 @@ class Explorer:
                     self.frontiers = raw_frontiers[:100]  # limit for UI
 
                 clusters = self._cluster_frontiers(raw_frontiers)
-                print(f"Frontiers: {len(raw_frontiers)} raw, {len(clusters)} clusters ({time.time()-t0:.2f}s)")
+                _log.info(f"Frontiers: {len(raw_frontiers)} raw, {len(clusters)} clusters ({time.time()-t0:.2f}s)")
 
                 if not clusters:
                     # No more frontiers — exploration complete
                     self._stop_motors()
                     self.state = "arrived"
-                    print("Exploration complete — no more frontiers")
+                    _log.info("Exploration complete — no more frontiers")
                     return
 
                 # Navigate to nearest frontier cluster center
@@ -241,7 +254,8 @@ class Explorer:
                 with self.lock:
                     self.target = (target_x, target_y)
 
-                print(f"Navigating to frontier at ({target_x:.0f}, {target_y:.0f}), cluster size={size}")
+                pose = self._get_pose()
+                _log.info(f"Navigate to ({target_x:.0f},{target_y:.0f}) size={size} from pose=({pose[0]:.0f},{pose[1]:.0f},{math.degrees(pose[2]):.0f}°)")
                 reached = self._navigate_to(target_x, target_y)
 
                 if not reached:
@@ -252,7 +266,7 @@ class Explorer:
                 time.sleep(0.3)
 
         except Exception as e:
-            print(f"Explorer error: {e}")
+            _log.error(f"Explorer error: {e}", exc_info=True)
         finally:
             self._stop_motors()
             if self.state == "exploring":
