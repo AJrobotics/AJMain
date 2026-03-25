@@ -117,15 +117,27 @@ def check_all_machines():
             }
 
     for name, info in hosts.get("robots", {}).items():
-        results[name] = {
-            "name": name,
-            "host": info.get("host", "TBD"),
-            "role": "Robot",
-            "type": "robot",
-            "online": False,
-            "latency_ms": None,
-            "status": info.get("status", "unknown"),
-        }
+        host = info.get("host", "")
+        if host:
+            status = ping_host(host)
+            results[name] = {
+                "name": name,
+                "host": host,
+                "role": "Robot",
+                "type": "robot",
+                "online": status["online"],
+                "latency_ms": status["latency_ms"],
+            }
+        else:
+            results[name] = {
+                "name": name,
+                "host": "TBD",
+                "role": "Robot",
+                "type": "robot",
+                "online": False,
+                "latency_ms": None,
+                "status": info.get("status", "unknown"),
+            }
 
     with _status_lock:
         _machine_status.update(results)

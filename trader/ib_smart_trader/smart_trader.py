@@ -1,19 +1,19 @@
 """
 ═══════════════════════════════════════════════════════════════════
-  IB Smart Trader v2.0 - Interactive Brokers 자동 매매 시스템
-  
-  전략 (5개 앙상블):
-    1. 이동평균 크로스오버 (MA Crossover) - 단기/장기 MA 교차
-    2. % 변동 기반 매매 - 설정된 % 하락/상승 시 매수/매도
-    3. ATR 동적 손절/익절 - 변동성 기반 리스크 관리 [NEW]
-    4. 적응형 RSI - 트렌드 맥락 기반 매매 신호 [NEW]
-    5. 멀티 전략 앙상블 - 복수 전략 합의 시만 매매 [NEW]
-  
-  모드:
-    - AUTO:  자동 매매 실행
-    - ALERT: 신호만 알림 (콘솔 + 로그)
-  
-  연결: TWS (Trader Workstation) via ib_insync
+  IB Smart Trader v2.0 - Interactive Brokers Auto Trading System
+
+  Strategies (5-Strategy Ensemble):
+    1. Moving Average Crossover (MA Crossover) - Short/Long MA Cross
+    2. % Change Based Trading - Buy/Sell on configured % Drop/Rise
+    3. ATR Dynamic Stop Loss/Take Profit - Volatility-based risk management [NEW]
+    4. Adaptive RSI - Trend-context based trade signals [NEW]
+    5. Multi-Strategy Ensemble - Trade only on multi-strategy consensus [NEW]
+
+  Modes:
+    - AUTO:  Auto trade execution
+    - ALERT: Signal alerts only (console + log)
+
+  Connection: TWS (Trader Workstation) via ib_insync
 ═══════════════════════════════════════════════════════════════════
 """
 
@@ -28,7 +28,7 @@ from enum import Enum
 from typing import Optional
 from collections import deque
 
-# ── 서드파티 임포트 ──────────────────────────────────────────────
+# ── Third-party imports ──────────────────────────────────────────────
 try:
     from ib_insync import *
     import pandas as pd
@@ -36,8 +36,8 @@ try:
 except ImportError as e:
     print(f"""
     ╔══════════════════════════════════════════════════════════╗
-    ║  필수 패키지가 설치되지 않았습니다.                     ║
-    ║  아래 명령어로 설치해주세요:                            ║
+    ║  Required packages are not installed.                    ║
+    ║  Please install them with the command below:             ║
     ║                                                          ║
     ║  pip install ib_insync pandas numpy                      ║
     ╚══════════════════════════════════════════════════════════╝
@@ -47,64 +47,64 @@ except ImportError as e:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  설정 (Config)
+#  Config
 # ═══════════════════════════════════════════════════════════════
 
 class TradeMode(Enum):
-    AUTO = "auto"       # 자동 매매
-    ALERT = "alert"     # 신호만 알림
+    AUTO = "auto"       # Auto trading
+    ALERT = "alert"     # Signal alerts only
 
 
 @dataclass
 class TradingConfig:
-    """전체 트레이딩 설정"""
-    
-    # ── IB 연결 설정 ──
+    """Full trading configuration"""
+
+    # ── IB Connection Settings ──
     ib_host: str = "127.0.0.1"
     ib_port: int = 7497          # TWS Paper: 7497, TWS Live: 7496
     client_id: int = 1
-    
-    # ── 트레이딩 모드 ──
-    trade_mode: TradeMode = TradeMode.ALERT  # 기본: 알림만
-    
-    # ── MA Crossover 전략 설정 ──
-    ma_short_period: int = 10    # 단기 이동평균 (일)
-    ma_long_period: int = 30     # 장기 이동평균 (일)
-    
-    # ── % 변동 전략 설정 ──
-    buy_drop_pct: float = -5.0   # 이 % 이상 하락시 매수 신호
-    sell_rise_pct: float = 5.0   # 이 % 이상 상승시 매도 신호
-    pct_lookback_days: int = 5   # 며칠 전 대비 비교할지
-    
-    # ── 주문 설정 ──
-    default_quantity: int = 10   # 기본 주문 수량
-    max_position_size: int = 100 # 종목당 최대 보유 수량
-    
-    # ── 앙상블 모드 (v2.0 신규) ──
-    use_ensemble: bool = True     # True: 5전략 앙상블, False: 기존 개별 전략
-    
-    # ── 모니터링 설정 ──
-    check_interval_sec: int = 30       # 장중 신호 체크 주기 (초)
-    check_interval_off_sec: int = 900  # 장외 신호 체크 주기 (초, 15분)
+
+    # ── Trading Mode ──
+    trade_mode: TradeMode = TradeMode.ALERT  # Default: alerts only
+
+    # ── MA Crossover Strategy Settings ──
+    ma_short_period: int = 10    # Short-term moving average (days)
+    ma_long_period: int = 30     # Long-term moving average (days)
+
+    # ── % Change Strategy Settings ──
+    buy_drop_pct: float = -5.0   # Buy signal when dropped by this % or more
+    sell_rise_pct: float = 5.0   # Sell signal when risen by this % or more
+    pct_lookback_days: int = 5   # Number of days to look back for comparison
+
+    # ── Order Settings ──
+    default_quantity: int = 10   # Default order quantity
+    max_position_size: int = 100 # Max holding quantity per symbol
+
+    # ── Ensemble Mode (v2.0 new) ──
+    use_ensemble: bool = True     # True: 5-strategy ensemble, False: legacy individual strategies
+
+    # ── Monitoring Settings ──
+    check_interval_sec: int = 30       # Signal check interval during market hours (seconds)
+    check_interval_off_sec: int = 900  # Signal check interval off-hours (seconds, 15 min)
     history_bar_size: str = "1 day"
     history_duration: str = "60 D"
-    
-    # ── 로깅 ──
+
+    # ── Logging ──
     log_file: str = "smart_trader.log"
-    
+
     def save(self, filepath: str = "config.json"):
-        """설정을 JSON으로 저장"""
+        """Save config to JSON"""
         data = asdict(self)
         data["trade_mode"] = self.trade_mode.value
         with open(filepath, "w") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-        print(f"  ✅ 설정 저장됨: {filepath}")
-    
+        print(f"  ✅ Config saved: {filepath}")
+
     @classmethod
     def load(cls, filepath: str = "config.json") -> "TradingConfig":
-        """JSON에서 설정 로드"""
+        """Load config from JSON"""
         if not os.path.exists(filepath):
-            print(f"  ⚠️  설정 파일 없음. 기본 설정 사용.")
+            print(f"  ⚠️  Config file not found. Using default settings.")
             return cls()
         with open(filepath, "r") as f:
             data = json.load(f)
@@ -113,7 +113,7 @@ class TradingConfig:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  신호 & 로그 데이터 구조
+#  Signal & Log Data Structures
 # ═══════════════════════════════════════════════════════════════
 
 class SignalType(Enum):
@@ -124,7 +124,7 @@ class SignalType(Enum):
 
 @dataclass
 class TradeSignal:
-    """매매 신호"""
+    """Trade signal"""
     symbol: str
     signal: SignalType
     strategy: str           # "MA_CROSSOVER" or "PCT_CHANGE"
@@ -132,119 +132,119 @@ class TradeSignal:
     reason: str
     timestamp: datetime = field(default_factory=datetime.now)
     executed: bool = False
-    
+
     def __str__(self):
-        status = "✅ 실행됨" if self.executed else "⏳ 대기"
+        status = "✅ Executed" if self.executed else "⏳ Pending"
         return (
             f"[{self.timestamp:%Y-%m-%d %H:%M:%S}] "
             f"{self.signal.value} {self.symbol} @ ${self.price:.2f} "
-            f"| 전략: {self.strategy} | {self.reason} | {status}"
+            f"| Strategy: {self.strategy} | {self.reason} | {status}"
         )
 
 
 # ═══════════════════════════════════════════════════════════════
-#  기술적 분석 엔진
+#  Technical Analysis Engine
 # ═══════════════════════════════════════════════════════════════
 
 class TechnicalAnalyzer:
-    """기술적 지표 계산"""
-    
+    """Technical indicator calculations"""
+
     @staticmethod
     def moving_average(prices: pd.Series, period: int) -> pd.Series:
-        """단순 이동평균 (SMA) 계산"""
+        """Calculate Simple Moving Average (SMA)"""
         return prices.rolling(window=period).mean()
-    
+
     @staticmethod
     def check_ma_crossover(
-        prices: pd.Series, 
-        short_period: int, 
+        prices: pd.Series,
+        short_period: int,
         long_period: int
     ) -> Optional[SignalType]:
         """
-        MA 크로스오버 확인
-        - 골든 크로스 (단기 > 장기): BUY
-        - 데드 크로스 (단기 < 장기): SELL
+        Check MA Crossover
+        - Golden Cross (short > long): BUY
+        - Dead Cross (short < long): SELL
         """
         if len(prices) < long_period + 2:
             return None
-        
+
         ma_short = TechnicalAnalyzer.moving_average(prices, short_period)
         ma_long = TechnicalAnalyzer.moving_average(prices, long_period)
-        
-        # 현재와 이전 값 비교
+
+        # Compare current and previous values
         curr_short = ma_short.iloc[-1]
         prev_short = ma_short.iloc[-2]
         curr_long = ma_long.iloc[-1]
         prev_long = ma_long.iloc[-2]
-        
-        # NaN 체크
+
+        # NaN check
         if any(pd.isna([curr_short, prev_short, curr_long, prev_long])):
             return None
-        
-        # 골든 크로스: 단기가 장기를 아래에서 위로 돌파
+
+        # Golden Cross: short crosses above long from below
         if prev_short <= prev_long and curr_short > curr_long:
             return SignalType.BUY
-        
-        # 데드 크로스: 단기가 장기를 위에서 아래로 돌파
+
+        # Dead Cross: short crosses below long from above
         if prev_short >= prev_long and curr_short < curr_long:
             return SignalType.SELL
-        
+
         return SignalType.HOLD
-    
+
     @staticmethod
     def check_pct_change(
-        prices: pd.Series, 
-        buy_threshold: float, 
+        prices: pd.Series,
+        buy_threshold: float,
         sell_threshold: float,
         lookback: int
     ) -> tuple[Optional[SignalType], float]:
         """
-        % 변동 확인
-        - lookback일 전 대비 buy_threshold% 이상 하락: BUY
-        - lookback일 전 대비 sell_threshold% 이상 상승: SELL
+        Check % change
+        - Dropped by buy_threshold% or more vs lookback days ago: BUY
+        - Risen by sell_threshold% or more vs lookback days ago: SELL
         """
         if len(prices) < lookback + 1:
             return None, 0.0
-        
+
         current_price = prices.iloc[-1]
         past_price = prices.iloc[-(lookback + 1)]
-        
+
         if past_price == 0:
             return None, 0.0
-        
+
         pct_change = ((current_price - past_price) / past_price) * 100
-        
+
         if pct_change <= buy_threshold:
             return SignalType.BUY, pct_change
         elif pct_change >= sell_threshold:
             return SignalType.SELL, pct_change
-        
+
         return SignalType.HOLD, pct_change
-    
+
     @staticmethod
     def get_ma_values(
         prices: pd.Series,
         short_period: int,
         long_period: int
     ) -> dict:
-        """현재 MA 값 반환 (대시보드용)"""
+        """Return current MA values (for dashboard)"""
         ma_short = TechnicalAnalyzer.moving_average(prices, short_period)
         ma_long = TechnicalAnalyzer.moving_average(prices, long_period)
         return {
             "ma_short": round(ma_short.iloc[-1], 2) if not pd.isna(ma_short.iloc[-1]) else None,
             "ma_long": round(ma_long.iloc[-1], 2) if not pd.isna(ma_long.iloc[-1]) else None,
-            "spread": round(ma_short.iloc[-1] - ma_long.iloc[-1], 2) 
+            "spread": round(ma_short.iloc[-1] - ma_long.iloc[-1], 2)
                       if not any(pd.isna([ma_short.iloc[-1], ma_long.iloc[-1]])) else None,
         }
 
 
 # ═══════════════════════════════════════════════════════════════
-#  메인 트레이딩 봇
+#  Main Trading Bot
 # ═══════════════════════════════════════════════════════════════
 
 class SmartTrader:
-    """IB Smart Trader 메인 클래스"""
-    
+    """IB Smart Trader main class"""
+
     def __init__(self, config: TradingConfig = None):
         self.config = config or TradingConfig()
         self.ib = IB()
@@ -253,8 +253,8 @@ class SmartTrader:
         self.positions: dict = {}
         self.watchlist: list[Stock] = []
         self.running = False
-        
-        # v2.0: 앙상블 엔진 초기화
+
+        # v2.0: Initialize ensemble engine
         self.ensemble = None
         if self.config.use_ensemble:
             try:
@@ -265,73 +265,73 @@ class SmartTrader:
                 self.ensemble = StrategyEnsemble(AdvancedConfig())
                 self._adv_signal_type = AdvSignalType
             except ImportError:
-                print("  ⚠️  advanced_strategies.py 미발견. 기존 전략만 사용합니다.")
+                print("  ⚠️  advanced_strategies.py not found. Using legacy strategies only.")
                 self.ensemble = None
-        
-        # 활성 손절/익절 추적 (종목별)
+
+        # Active stop loss/take profit tracking (per symbol)
         self.active_stops: dict = {}  # {symbol: {"sl": price, "tp": price, "trail_high": price}}
-        
-        # v2.1: 리스크 방어 시스템 초기화
+
+        # v2.1: Initialize risk shield system
         self.risk_shield = None
         try:
             from risk_shield import RiskShield, RiskShieldConfig, RiskAction
             self.risk_shield = RiskShield(RiskShieldConfig())
             self._risk_action = RiskAction
         except ImportError:
-            print("  ⚠️  risk_shield.py 미발견. 리스크 방어 없이 실행합니다.")
-        
-        # v2.2: 세금 최적화 시스템 초기화
+            print("  ⚠️  risk_shield.py not found. Running without risk shield.")
+
+        # v2.2: Initialize tax optimization system
         self.tax_optimizer = None
         try:
             from tax_optimizer import TaxOptimizer, TaxConfig
             self.tax_optimizer = TaxOptimizer(TaxConfig())
         except ImportError:
-            print("  ⚠️  tax_optimizer.py 미발견. 세금 최적화 없이 실행합니다.")
-        
-        # v2.3: 시그널 모니터 브리지 초기화
+            print("  ⚠️  tax_optimizer.py not found. Running without tax optimization.")
+
+        # v2.3: Initialize signal monitor bridge
         self.signal_bridge = None
         try:
             from signal_bridge import SignalBridge, SignalBridgeConfig
             self.signal_bridge = SignalBridge(SignalBridgeConfig())
         except ImportError:
-            print("  ⚠️  signal_bridge.py 미발견. 시그널 모니터 없이 실행합니다.")
-        
-        # 로깅 설정
+            print("  ⚠️  signal_bridge.py not found. Running without signal monitor.")
+
+        # Logging setup
         self._setup_logging()
-    
-    # ── 로깅 ──────────────────────────────────────────────────
-    
+
+    # ── Logging ──────────────────────────────────────────────────
+
     def _setup_logging(self):
-        """로깅 설정"""
+        """Set up logging"""
         self.logger = logging.getLogger("SmartTrader")
         self.logger.setLevel(logging.INFO)
-        
-        # 파일 핸들러
+
+        # File handler
         fh = logging.FileHandler(
             self.config.log_file, encoding="utf-8"
         )
         fh.setFormatter(logging.Formatter(
             "%(asctime)s [%(levelname)s] %(message)s"
         ))
-        
-        # 콘솔 핸들러
+
+        # Console handler
         ch = logging.StreamHandler()
         ch.setFormatter(logging.Formatter(
             "%(asctime)s %(message)s", datefmt="%H:%M:%S"
         ))
-        
+
         self.logger.addHandler(fh)
         self.logger.addHandler(ch)
-    
-    # ── IB 연결 ───────────────────────────────────────────────
-    
+
+    # ── IB Connection ───────────────────────────────────────────────
+
     def connect(self) -> bool:
-        """IB TWS에 연결"""
+        """Connect to IB TWS"""
         self.logger.info("=" * 60)
-        self.logger.info("  IB Smart Trader 시작")
-        self.logger.info(f"  모드: {self.config.trade_mode.value.upper()}")
+        self.logger.info("  IB Smart Trader Starting")
+        self.logger.info(f"  Mode: {self.config.trade_mode.value.upper()}")
         self.logger.info("=" * 60)
-        
+
         try:
             self.ib.connect(
                 self.config.ib_host,
@@ -339,38 +339,38 @@ class SmartTrader:
                 clientId=self.config.client_id
             )
             self.logger.info(
-                f"✅ TWS 연결 성공 "
+                f"✅ TWS connection successful "
                 f"({self.config.ib_host}:{self.config.ib_port})"
             )
-            
-            # 계좌 정보 출력
+
+            # Print account info
             accounts = self.ib.managedAccounts()
-            self.logger.info(f"📋 계좌: {accounts}")
+            self.logger.info(f"📋 Account: {accounts}")
             return True
-            
+
         except Exception as e:
-            self.logger.error(f"❌ TWS 연결 실패: {e}")
+            self.logger.error(f"❌ TWS connection failed: {e}")
             self.logger.error(
-                "   → TWS가 실행 중인지 확인하세요.\n"
-                "   → TWS > Edit > Global Config > API > Settings 에서\n"
-                "     'Enable ActiveX and Socket Clients' 체크\n"
+                "   → Make sure TWS is running.\n"
+                "   → In TWS > Edit > Global Config > API > Settings,\n"
+                "     check 'Enable ActiveX and Socket Clients'\n"
                 f"   → Socket port: {self.config.ib_port}"
             )
             return False
-    
+
     def disconnect(self):
-        """IB 연결 해제"""
+        """Disconnect from IB"""
         if self.ib.isConnected():
             self.ib.disconnect()
-            self.logger.info("🔌 TWS 연결 해제됨")
-    
-    # ── 포트폴리오 & 워치리스트 ────────────────────────────────
-    
+            self.logger.info("🔌 TWS disconnected")
+
+    # ── Portfolio & Watchlist ────────────────────────────────
+
     def load_portfolio(self) -> dict:
-        """현재 보유 포지션 로드"""
-        self.logger.info("📊 포트폴리오 로딩...")
+        """Load current held positions"""
+        self.logger.info("📊 Loading portfolio...")
         portfolio = self.ib.portfolio()
-        
+
         self.positions = {}
         for item in portfolio:
             symbol = item.contract.symbol
@@ -383,37 +383,37 @@ class SmartTrader:
                 "realized_pnl": item.realizedPNL,
             }
             self.logger.info(
-                f"  📌 {symbol}: {item.position}주 "
-                f"| 평균가: ${item.averageCost:.2f} "
-                f"| 미실현 P&L: ${item.unrealizedPNL:+,.2f}"
+                f"  📌 {symbol}: {item.position} shares "
+                f"| Avg cost: ${item.averageCost:.2f} "
+                f"| Unrealized P&L: ${item.unrealizedPNL:+,.2f}"
             )
-        
+
         if not self.positions:
-            self.logger.info("  (보유 종목 없음)")
-        
+            self.logger.info("  (No holdings)")
+
         return self.positions
-    
+
     def set_watchlist(self, symbols: list[str], exchange: str = "SMART", currency: str = "USD"):
         """
-        모니터링할 종목 설정
-        
-        예시: trader.set_watchlist(["AAPL", "MSFT", "GOOGL", "TSLA", "AMZN"])
+        Set symbols to monitor
+
+        Example: trader.set_watchlist(["AAPL", "MSFT", "GOOGL", "TSLA", "AMZN"])
         """
         self.watchlist = []
-        self.logger.info(f"👀 워치리스트 설정: {symbols}")
-        
+        self.logger.info(f"👀 Setting watchlist: {symbols}")
+
         for sym in symbols:
             contract = Stock(sym, exchange, currency)
             self.ib.qualifyContracts(contract)
             self.watchlist.append(contract)
-            self.logger.info(f"  ✅ {sym} 추가됨")
-        
+            self.logger.info(f"  ✅ {sym} added")
+
         return self.watchlist
-    
-    # ── 시세 데이터 ───────────────────────────────────────────
-    
+
+    # ── Market Data ───────────────────────────────────────────
+
     def get_historical_prices(self, contract: Contract) -> Optional[pd.DataFrame]:
-        """과거 가격 데이터 가져오기"""
+        """Fetch historical price data"""
         try:
             bars = self.ib.reqHistoricalData(
                 contract,
@@ -421,152 +421,152 @@ class SmartTrader:
                 durationStr=self.config.history_duration,
                 barSizeSetting=self.config.history_bar_size,
                 whatToShow="ADJUSTED_LAST",
-                useRTH=True,        # 정규 시간만
+                useRTH=True,        # Regular trading hours only
                 formatDate=1,
             )
-            
+
             if not bars:
                 self.logger.warning(
-                    f"⚠️  {contract.symbol}: 히스토리 데이터 없음"
+                    f"⚠️  {contract.symbol}: No historical data available"
                 )
                 return None
-            
+
             df = util.df(bars)
             df.set_index("date", inplace=True)
             return df
-            
+
         except Exception as e:
             self.logger.error(
-                f"❌ {contract.symbol} 히스토리 요청 실패: {e}"
+                f"❌ {contract.symbol} historical data request failed: {e}"
             )
             return None
-    
+
     def get_current_price(self, contract: Contract) -> Optional[float]:
-        """현재 가격 가져오기"""
+        """Fetch current price"""
         try:
             ticker = self.ib.reqMktData(contract, "", False, False)
-            self.ib.sleep(2)  # 데이터 수신 대기
-            
+            self.ib.sleep(2)  # Wait for data reception
+
             price = ticker.marketPrice()
             if price and not pd.isna(price):
                 return float(price)
-            
-            # 마지막 거래가 사용
+
+            # Use last trade price
             price = ticker.last
             if price and not pd.isna(price):
                 return float(price)
-            
+
             return None
         except Exception as e:
-            self.logger.error(f"❌ {contract.symbol} 시세 요청 실패: {e}")
+            self.logger.error(f"❌ {contract.symbol} price request failed: {e}")
             return None
-    
-    # ── 신호 분석 ─────────────────────────────────────────────
-    
+
+    # ── Signal Analysis ─────────────────────────────────────────────
+
     def analyze_stock(self, contract: Contract) -> list[TradeSignal]:
-        """단일 종목 분석 → 매매 신호 리스트 반환 (v2.0 앙상블 통합)"""
+        """Analyze a single symbol -> return trade signal list (v2.0 ensemble integrated)"""
         symbol = contract.symbol
         signals = []
-        
-        # 히스토리 데이터
+
+        # Historical data
         df = self.get_historical_prices(contract)
         if df is None or len(df) < self.config.ma_long_period + 2:
             return signals
-        
+
         close_prices = df["close"]
         current_price = close_prices.iloc[-1]
-        
-        # ── 기존 전략 1: MA Crossover ──
+
+        # ── Legacy Strategy 1: MA Crossover ──
         ma_signal = self.analyzer.check_ma_crossover(
             close_prices,
             self.config.ma_short_period,
             self.config.ma_long_period
         )
-        
-        # ── 기존 전략 2: % 변동 ──
+
+        # ── Legacy Strategy 2: % Change ──
         pct_signal, pct_change = self.analyzer.check_pct_change(
             close_prices,
             self.config.buy_drop_pct,
             self.config.sell_rise_pct,
             self.config.pct_lookback_days,
         )
-        
-        # ═══ v2.0: 앙상블 모드 ═══
+
+        # ═══ v2.0: Ensemble Mode ═══
         if self.ensemble is not None and self.config.use_ensemble:
             return self._analyze_ensemble(
                 symbol, df, close_prices, current_price,
                 ma_signal, pct_signal, pct_change,
             )
-        
-        # ═══ 레거시 모드: 기존 개별 전략 ═══
+
+        # ═══ Legacy Mode: Individual Strategies ═══
         if ma_signal and ma_signal != SignalType.HOLD:
             ma_info = self.analyzer.get_ma_values(
                 close_prices,
                 self.config.ma_short_period,
                 self.config.ma_long_period
             )
-            cross_type = "골든 크로스 ↑" if ma_signal == SignalType.BUY else "데드 크로스 ↓"
+            cross_type = "Golden Cross ↑" if ma_signal == SignalType.BUY else "Dead Cross ↓"
             reason = (
                 f"{cross_type} | "
                 f"MA{self.config.ma_short_period}={ma_info['ma_short']} "
                 f"MA{self.config.ma_long_period}={ma_info['ma_long']} "
-                f"(차이: {ma_info['spread']:+.2f})"
+                f"(Spread: {ma_info['spread']:+.2f})"
             )
             signals.append(TradeSignal(
                 symbol=symbol, signal=ma_signal,
                 strategy="MA_CROSSOVER", price=current_price, reason=reason,
             ))
-        
+
         if pct_signal and pct_signal != SignalType.HOLD:
-            direction = "하락 📉" if pct_change < 0 else "상승 📈"
+            direction = "Down 📉" if pct_change < 0 else "Up 📈"
             reason = (
-                f"{self.config.pct_lookback_days}일간 {pct_change:+.2f}% {direction} | "
-                f"현재가: ${current_price:.2f}"
+                f"{self.config.pct_lookback_days}-day {pct_change:+.2f}% {direction} | "
+                f"Current: ${current_price:.2f}"
             )
             signals.append(TradeSignal(
                 symbol=symbol, signal=pct_signal,
                 strategy="PCT_CHANGE", price=current_price, reason=reason,
             ))
-        
+
         if not signals:
             self._log_hold(symbol, close_prices, current_price, pct_change)
-        
+
         return signals
-    
+
     def _analyze_ensemble(
         self, symbol, df, close_prices, current_price,
         ma_signal, pct_signal, pct_change,
     ) -> list[TradeSignal]:
-        """v2.0 앙상블 분석 — 5개 전략 합의 기반"""
+        """v2.0 Ensemble analysis - 5-strategy consensus based"""
         signals = []
-        
-        # 앙상블에 필요한 OHLCV
+
+        # OHLCV needed for ensemble
         high = df["high"] if "high" in df.columns else close_prices
         low = df["low"] if "low" in df.columns else close_prices
         volume = df["volume"] if "volume" in df.columns else pd.Series(
             [1000000] * len(close_prices), index=close_prices.index
         )
-        
-        # MA/PCT 신호를 앙상블 SignalType으로 변환
+
+        # Convert MA/PCT signals to ensemble SignalType
         adv_ma = None
         adv_pct = None
         AST = self._adv_signal_type
-        
+
         if ma_signal == SignalType.BUY:
             adv_ma = AST.BUY
         elif ma_signal == SignalType.SELL:
             adv_ma = AST.SELL
         elif ma_signal == SignalType.HOLD:
             adv_ma = AST.HOLD
-        
+
         if pct_signal == SignalType.BUY:
             adv_pct = AST.BUY
         elif pct_signal == SignalType.SELL:
             adv_pct = AST.SELL
         elif pct_signal == SignalType.HOLD:
             adv_pct = AST.HOLD
-        
-        # 앙상블 실행!
+
+        # Run ensemble!
         decision = self.ensemble.analyze(
             symbol=symbol,
             close=close_prices,
@@ -577,46 +577,46 @@ class SmartTrader:
             pct_signal=adv_pct,
             pct_change=pct_change,
         )
-        
-        # 앙상블 결과 로깅
+
+        # Log ensemble results
         buy_count = sum(1 for s in decision.individual_signals if s.signal == AST.BUY)
         sell_count = sum(1 for s in decision.individual_signals if s.signal == AST.SELL)
         hold_count = sum(1 for s in decision.individual_signals if s.signal == AST.HOLD)
-        
-        # ── v2.3: Signal Bridge — 6번째 전략 + 부스트 ──
+
+        # ── v2.3: Signal Bridge - 6th strategy + boost ──
         bridge_signal_str = ""
         if self.signal_bridge is not None:
-            # 6번째 전략 신호
+            # 6th strategy signal
             bridge_sig = self.signal_bridge.get_ensemble_strategy_signal()
             bridge_signal_str = bridge_sig["signal"]
-            
-            # 앙상블 부스트 적용
+
+            # Apply ensemble boost
             boost = self.signal_bridge.get_ensemble_boost()
             if boost != 0:
                 decision.consensus_score += boost
                 self.logger.info(
                     f"  📡 Signal Monitor: {bridge_sig['signal']} "
-                    f"(신뢰도: {bridge_sig['confidence']:.0%}) | "
-                    f"부스트: {boost:+.2f} → 합의: {decision.consensus_score:+.3f}"
+                    f"(Confidence: {bridge_sig['confidence']:.0%}) | "
+                    f"Boost: {boost:+.2f} → Consensus: {decision.consensus_score:+.3f}"
                 )
             else:
                 self.logger.info(
                     f"  📡 Signal Monitor: {bridge_sig['signal']} (NEUTRAL)"
                 )
-            
+
             if bridge_sig["signal"] == "BUY":
                 buy_count += 1
             elif bridge_sig["signal"] == "SELL":
                 sell_count += 1
             else:
                 hold_count += 1
-        
+
         self.logger.info(
-            f"  🎯 {symbol} 앙상블 | "
-            f"합의: {decision.consensus_score:+.3f} | "
+            f"  🎯 {symbol} Ensemble | "
+            f"Consensus: {decision.consensus_score:+.3f} | "
             f"BUY:{buy_count} SELL:{sell_count} HOLD:{hold_count}"
         )
-        
+
         for sig in decision.individual_signals:
             self.logger.info(
                 f"      {sig.strategy_name:18s} → {sig.signal.name:4s} "
@@ -624,56 +624,56 @@ class SmartTrader:
             )
         if bridge_signal_str:
             self.logger.info(
-                f"      {'SIGNAL_MONITOR':18s} → {bridge_signal_str:4s} (6번째 전략)"
+                f"      {'SIGNAL_MONITOR':18s} → {bridge_signal_str:4s} (6th strategy)"
             )
-        
-        # 앙상블 결정 → TradeSignal 변환
+
+        # Convert ensemble decision to TradeSignal
         if decision.final_signal == AST.BUY:
             final_sig = SignalType.BUY
         elif decision.final_signal == AST.SELL:
             final_sig = SignalType.SELL
         else:
             final_sig = SignalType.HOLD
-        
+
         if final_sig != SignalType.HOLD:
-            # ── v2.1: Risk Shield 체크 (BUY 전에만) ──
+            # ── v2.1: Risk Shield check (before BUY only) ──
             if final_sig == SignalType.BUY and self.risk_shield is not None:
                 current_holdings = list(self.positions.keys())
                 risk_result = self.risk_shield.full_check(symbol, current_holdings)
-                
+
                 if risk_result.action == self._risk_action.BLOCK:
                     self.logger.info(
-                        f"  🛡️ RISK SHIELD 차단! {symbol} 매수 거부"
+                        f"  🛡️ RISK SHIELD BLOCKED! {symbol} buy rejected"
                     )
                     for reason in risk_result.reasons:
                         self.logger.info(f"      → {reason}")
-                    
-                    # BUY를 HOLD로 전환
+
+                    # Convert BUY to HOLD
                     final_sig = SignalType.HOLD
                     self.logger.info(
-                        f"  ⚪ {symbol} HOLD (리스크 방어) | "
+                        f"  ⚪ {symbol} HOLD (risk shield) | "
                         f"Beta: {risk_result.beta:.2f} | "
-                        f"미스: {risk_result.earnings_miss_count}/4"
+                        f"Misses: {risk_result.earnings_miss_count}/4"
                     )
                     self._check_stop_levels(symbol, current_price, signals)
                     return signals
-                
+
                 elif risk_result.action == self._risk_action.REDUCE:
                     self.logger.info(
-                        f"  ⚠️ RISK SHIELD 경고: {symbol} 포지션 축소 권고"
+                        f"  ⚠️ RISK SHIELD WARNING: {symbol} position reduction recommended"
                     )
                     for reason in risk_result.reasons:
                         self.logger.info(f"      → {reason}")
-                
-                # Beta 조정 투자금 로깅
+
+                # Log beta-adjusted investment
                 if risk_result.beta != 1.0:
                     self.logger.info(
-                        f"  📏 Beta 조정: {symbol} Beta={risk_result.beta:.2f} → "
-                        f"투자금 ${risk_result.adjusted_investment:,.0f} "
-                        f"(기본 대비 {risk_result.adjusted_investment/10000:.0%})"
+                        f"  📏 Beta adjustment: {symbol} Beta={risk_result.beta:.2f} → "
+                        f"Investment ${risk_result.adjusted_investment:,.0f} "
+                        f"(vs default {risk_result.adjusted_investment/10000:.0%})"
                     )
-            
-            # ── v2.3: Signal Bridge — BEAR 브레이크 (BUY 전) ──
+
+            # ── v2.3: Signal Bridge - BEAR brake (before BUY) ──
             if final_sig == SignalType.BUY and self.signal_bridge is not None:
                 blocked, brake_reason = self.signal_bridge.should_block_buy()
                 if blocked:
@@ -681,8 +681,8 @@ class SmartTrader:
                     final_sig = SignalType.HOLD
                     self._check_stop_levels(symbol, current_price, signals)
                     return signals
-            
-            # ── v2.3: Signal Bridge — Washout 방지 ──
+
+            # ── v2.3: Signal Bridge - Washout prevention ──
             if final_sig != SignalType.HOLD and self.signal_bridge is not None:
                 ma_vals = self.analyzer.get_ma_values(
                     close_prices,
@@ -691,26 +691,26 @@ class SmartTrader:
                 )
                 ma_short = ma_vals.get("ma_short", 0) if ma_vals else 0
                 ma_long = ma_vals.get("ma_long", 0) if ma_vals else 0
-                
+
                 washout = self.signal_bridge.check_washout(
                     symbol, ma_short, ma_long, current_price
                 )
                 if not washout["allowed"]:
                     self.logger.info(
-                        f"  🔄 Washout 차단! {symbol} | {washout['reason']}"
+                        f"  🔄 Washout blocked! {symbol} | {washout['reason']}"
                     )
                     final_sig = SignalType.HOLD
                     self._check_stop_levels(symbol, current_price, signals)
                     return signals
-            
-            # 손절/익절 저장
+
+            # Save stop loss/take profit
             self.active_stops[symbol] = {
                 "sl": decision.stop_loss_price,
                 "tp": decision.take_profit_price,
                 "trail_high": current_price,
                 "atr": decision.atr_value,
             }
-            
+
             signals.append(TradeSignal(
                 symbol=symbol,
                 signal=final_sig,
@@ -718,71 +718,71 @@ class SmartTrader:
                 price=current_price,
                 reason=decision.reason,
             ))
-            
+
             self.logger.info(
-                f"  🛡️ 리스크: SL=${decision.stop_loss_price:.2f} | "
+                f"  🛡️ Risk: SL=${decision.stop_loss_price:.2f} | "
                 f"TP=${decision.take_profit_price:.2f} | "
                 f"ATR=${decision.atr_value:.2f}"
             )
         else:
             self.logger.info(
-                f"  ⚪ {symbol} HOLD (앙상블 합의 미달) | "
+                f"  ⚪ {symbol} HOLD (ensemble consensus not met) | "
                 f"${current_price:.2f} | {decision.reason}"
             )
-        
-        # 기존 포지션 손절/익절 체크
+
+        # Check stop loss/take profit for existing positions
         self._check_stop_levels(symbol, current_price, signals)
-        
+
         return signals
-    
+
     def _check_stop_levels(self, symbol: str, current_price: float, signals: list):
-        """활성 포지션의 손절/익절 도달 여부 확인"""
+        """Check if active positions hit stop loss/take profit levels"""
         if symbol not in self.active_stops:
             return
-        
+
         stops = self.active_stops[symbol]
         sl = stops.get("sl", 0)
         tp = stops.get("tp", 0)
         trail_high = stops.get("trail_high", current_price)
-        
-        # 트레일링 스탑 업데이트
+
+        # Update trailing stop
         if current_price > trail_high:
             stops["trail_high"] = current_price
-            # 트레일링 SL도 따라 올림
+            # Trail the SL upward as well
             atr = stops.get("atr", 0)
             if atr > 0:
                 new_sl = current_price - atr * 1.5
                 if new_sl > sl:
                     stops["sl"] = new_sl
                     self.logger.info(
-                        f"  📈 {symbol} 트레일링 SL 업데이트: "
+                        f"  📈 {symbol} Trailing SL updated: "
                         f"${sl:.2f} → ${new_sl:.2f}"
                     )
-        
-        # 손절 도달
+
+        # Stop loss hit
         if sl > 0 and current_price <= sl:
             signals.append(TradeSignal(
                 symbol=symbol,
                 signal=SignalType.SELL,
                 strategy="ATR_STOP_LOSS",
                 price=current_price,
-                reason=f"🛑 손절 도달! ${current_price:.2f} ≤ SL ${sl:.2f}",
+                reason=f"🛑 Stop loss hit! ${current_price:.2f} ≤ SL ${sl:.2f}",
             ))
             del self.active_stops[symbol]
-        
-        # 익절 도달
+
+        # Take profit hit
         elif tp > 0 and current_price >= tp:
             signals.append(TradeSignal(
                 symbol=symbol,
                 signal=SignalType.SELL,
                 strategy="ATR_TAKE_PROFIT",
                 price=current_price,
-                reason=f"🎯 익절 도달! ${current_price:.2f} ≥ TP ${tp:.2f}",
+                reason=f"🎯 Take profit hit! ${current_price:.2f} ≥ TP ${tp:.2f}",
             ))
             del self.active_stops[symbol]
-    
+
     def _log_hold(self, symbol, close_prices, current_price, pct_change):
-        """HOLD 상태 로깅"""
+        """Log HOLD status"""
         ma_info = self.analyzer.get_ma_values(
             close_prices,
             self.config.ma_short_period,
@@ -791,85 +791,85 @@ class SmartTrader:
         self.logger.info(
             f"  ⚪ {symbol} HOLD | "
             f"${current_price:.2f} | "
-            f"MA스프레드: {ma_info.get('spread', 'N/A')} | "
-            f"{self.config.pct_lookback_days}일 변동: {pct_change:+.2f}%"
+            f"MA Spread: {ma_info.get('spread', 'N/A')} | "
+            f"{self.config.pct_lookback_days}-day change: {pct_change:+.2f}%"
         )
-    
-    # ── 주문 실행 ─────────────────────────────────────────────
-    
+
+    # ── Order Execution ─────────────────────────────────────────────
+
     def execute_signal(self, signal: TradeSignal) -> bool:
         """
-        신호에 따른 주문 실행
-        - AUTO 모드: 실제 주문 전송
-        - ALERT 모드: 로그만 기록
+        Execute order based on signal
+        - AUTO mode: Send actual order
+        - ALERT mode: Log only
         """
-        self.logger.info(f"  📡 신호 감지: {signal}")
+        self.logger.info(f"  📡 Signal detected: {signal}")
         self.signals_history.append(signal)
-        
-        # ALERT 모드 → 주문 실행 안함
+
+        # ALERT mode -> do not execute order
         if self.config.trade_mode == TradeMode.ALERT:
             self.logger.info(
-                f"  ℹ️  [ALERT 모드] 주문 실행 안 함. "
-                f"자동 매매를 원하시면 trade_mode='auto'로 변경하세요."
+                f"  ℹ️  [ALERT mode] Order not executed. "
+                f"To enable auto trading, set trade_mode='auto'."
             )
             return False
-        
-        # AUTO 모드 → 실제 주문
+
+        # AUTO mode -> execute actual order
         try:
             contract = Stock(signal.symbol, "SMART", "USD")
             self.ib.qualifyContracts(contract)
-            
-            # 포지션 크기 확인
+
+            # Check position size
             current_qty = self.positions.get(signal.symbol, {}).get("quantity", 0)
-            
+
             if signal.signal == SignalType.BUY:
-                # v2.2: Wash Sale 체크
+                # v2.2: Wash Sale check
                 if self.tax_optimizer is not None:
                     wash = self.tax_optimizer.check_buy_allowed(signal.symbol)
                     if wash.get("blocked"):
                         self.logger.warning(
-                            f"  🚫 Wash Sale 차단! {signal.symbol} 매수 불가 | "
+                            f"  🚫 Wash Sale blocked! {signal.symbol} buy not allowed | "
                             f"{wash.get('reason', '')}"
                         )
                         return False
                     if wash.get("warning"):
                         self.logger.info(f"  ⚠️ {wash.get('reason', '')}")
-                
-                # 최대 보유량 초과 체크
+
+                # Check max position size exceeded
                 if current_qty + self.config.default_quantity > self.config.max_position_size:
                     self.logger.warning(
-                        f"  ⚠️  {signal.symbol}: 최대 보유량 "
-                        f"({self.config.max_position_size}) 초과! 주문 스킵"
+                        f"  ⚠️  {signal.symbol}: Max position size "
+                        f"({self.config.max_position_size}) exceeded! Order skipped"
                     )
                     return False
-                
+
                 order = MarketOrder("BUY", self.config.default_quantity)
-                
+
             elif signal.signal == SignalType.SELL:
-                # 보유량이 없으면 스킵
+                # Skip if no holdings
                 if current_qty <= 0:
                     self.logger.warning(
-                        f"  ⚠️  {signal.symbol}: 보유 수량 없음! 매도 스킵"
+                        f"  ⚠️  {signal.symbol}: No holdings! Sell skipped"
                     )
                     return False
-                
+
                 sell_qty = min(self.config.default_quantity, int(current_qty))
                 order = MarketOrder("SELL", sell_qty)
             else:
                 return False
-            
-            # 주문 전송
+
+            # Submit order
             trade = self.ib.placeOrder(contract, order)
             self.ib.sleep(1)
-            
+
             self.logger.info(
-                f"  ✅ 주문 전송! {signal.signal.value} "
+                f"  ✅ Order submitted! {signal.signal.value} "
                 f"{signal.symbol} x{order.totalQuantity} "
-                f"| 주문 ID: {trade.order.orderId} "
-                f"| 상태: {trade.orderStatus.status}"
+                f"| Order ID: {trade.order.orderId} "
+                f"| Status: {trade.orderStatus.status}"
             )
-            
-            # v2.2: 세금 기록
+
+            # v2.2: Tax record
             if self.tax_optimizer is not None:
                 if signal.signal == SignalType.BUY:
                     self.tax_optimizer.on_buy(
@@ -881,78 +881,78 @@ class SmartTrader:
                     )
                     if tax_result.get("wash_sale_started"):
                         self.logger.info(
-                            f"  ⏰ {signal.symbol} Wash Sale 30일 카운트다운 시작"
+                            f"  ⏰ {signal.symbol} Wash Sale 30-day countdown started"
                         )
-            
-            # v2.3: Washout cooldown 기록
+
+            # v2.3: Washout cooldown record
             if self.signal_bridge is not None:
                 self.signal_bridge.record_trade(signal.symbol)
-            
+
             signal.executed = True
             return True
-            
+
         except Exception as e:
-            self.logger.error(f"  ❌ 주문 실행 실패: {e}")
+            self.logger.error(f"  ❌ Order execution failed: {e}")
             return False
-    
-    # ── 대시보드 ──────────────────────────────────────────────
-    
+
+    # ── Dashboard ──────────────────────────────────────────────
+
     def print_dashboard(self):
-        """현재 상태 대시보드 출력"""
+        """Print current status dashboard"""
         now = datetime.now()
-        
+
         print("\n")
         print("╔" + "═" * 68 + "╗")
         print(f"║  📊 IB Smart Trader Dashboard       {now:%Y-%m-%d %H:%M:%S}  ║")
-        print(f"║  모드: {'🤖 AUTO (자동매매)' if self.config.trade_mode == TradeMode.AUTO else '🔔 ALERT (알림만)':42s}  ║")
+        print(f"║  Mode: {'🤖 AUTO (auto trading)' if self.config.trade_mode == TradeMode.AUTO else '🔔 ALERT (alerts only)':42s}  ║")
         print("╠" + "═" * 68 + "╣")
-        
-        # 전략 설정
+
+        # Strategy settings
         print(f"║  📈 MA Crossover: MA{self.config.ma_short_period} / MA{self.config.ma_long_period}" + " " * 35 + "║")
-        print(f"║  📉 % 변동: 매수 ≤ {self.config.buy_drop_pct}% | 매도 ≥ +{self.config.sell_rise_pct}% ({self.config.pct_lookback_days}일)" + " " * 11 + "║")
+        print(f"║  📉 % Change: Buy ≤ {self.config.buy_drop_pct}% | Sell ≥ +{self.config.sell_rise_pct}% ({self.config.pct_lookback_days}d)" + " " * 11 + "║")
         print("╠" + "═" * 68 + "╣")
-        
-        # 보유 포지션
-        print("║  💼 보유 포지션:" + " " * 51 + "║")
+
+        # Held positions
+        print("║  💼 Holdings:" + " " * 54 + "║")
         if self.positions:
             for sym, pos in self.positions.items():
                 pnl = pos.get("unrealized_pnl", 0)
                 pnl_icon = "🟢" if pnl >= 0 else "🔴"
                 line = (
                     f"║    {pnl_icon} {sym:6s} | "
-                    f"{int(pos['quantity']):4d}주 | "
-                    f"평균: ${pos['avg_cost']:8.2f} | "
+                    f"{int(pos['quantity']):4d} shares | "
+                    f"Avg: ${pos['avg_cost']:8.2f} | "
                     f"P&L: ${pnl:+10,.2f}"
                 )
                 print(f"{line:<69s}║")
         else:
-            print("║    (없음)" + " " * 58 + "║")
-        
+            print("║    (None)" + " " * 58 + "║")
+
         print("╠" + "═" * 68 + "╣")
-        
-        # v2.3: Signal Monitor 상태
+
+        # v2.3: Signal Monitor status
         if self.signal_bridge is not None:
             sig = self.signal_bridge.get_composite_signal()
             icon = {"BULL": "🟢", "BEAR": "🔴", "NEUTRAL": "🟡"}
             brake_str = ""
             blocked, _ = self.signal_bridge.should_block_buy()
             if blocked:
-                brake_str = " | 🛑 매수중단"
+                brake_str = " | 🛑 Buy halted"
             line = (
                 f"║  📡 Signal Monitor: {icon.get(sig.composite, '⚪')} {sig.composite} "
                 f"({sig.confidence:.0%}) | P/C: {sig.pc_ratio:.2f}{brake_str}"
             )
             print(f"{line:<69s}║")
             line2 = (
-                f"║    COT: {sig.cot_signal} | 옵션: {sig.options_signal} | "
-                f"부스트: {self.signal_bridge.get_ensemble_boost():+.2f}"
+                f"║    COT: {sig.cot_signal} | Options: {sig.options_signal} | "
+                f"Boost: {self.signal_bridge.get_ensemble_boost():+.2f}"
             )
             print(f"{line2:<69s}║")
-        
+
         print("╠" + "═" * 68 + "╣")
-        
-        # 최근 신호
-        print("║  📡 최근 신호 (최대 10개):" + " " * 41 + "║")
+
+        # Recent signals
+        print("║  📡 Recent signals (max 10):" + " " * 39 + "║")
         recent = self.signals_history[-10:] if self.signals_history else []
         if recent:
             for sig in recent:
@@ -964,17 +964,17 @@ class SmartTrader:
                 )
                 print(f"{line:<69s}║")
         else:
-            print("║    (신호 없음)" + " " * 53 + "║")
-        
+            print("║    (No signals)" + " " * 52 + "║")
+
         print("╚" + "═" * 68 + "╝")
-    
-    # ── 메인 루프 ─────────────────────────────────────────────
-    
+
+    # ── Main Loop ─────────────────────────────────────────────
+
     def run(self, symbols: list[str] = None):
         """
-        메인 모니터링 루프 실행
-        
-        사용법:
+        Run main monitoring loop
+
+        Usage:
             trader = SmartTrader(config)
             trader.connect()
             trader.run(["AAPL", "MSFT", "GOOGL", "TSLA"])
@@ -982,81 +982,81 @@ class SmartTrader:
         if not self.ib.isConnected():
             if not self.connect():
                 return
-        
-        # 워치리스트 설정
+
+        # Set watchlist
         if symbols:
             self.set_watchlist(symbols)
-        
+
         if not self.watchlist:
-            self.logger.error("❌ 워치리스트가 비어있습니다!")
+            self.logger.error("❌ Watchlist is empty!")
             return
-        
-        # 포트폴리오 로드
+
+        # Load portfolio
         self.load_portfolio()
-        
+
         self.running = True
         self.logger.info(
-            f"\n🚀 모니터링 시작! "
-            f"({len(self.watchlist)}종목, "
-            f"{self.config.check_interval_sec}초 간격)\n"
-            f"   Ctrl+C로 중지\n"
+            f"\n🚀 Monitoring started! "
+            f"({len(self.watchlist)} symbols, "
+            f"{self.config.check_interval_sec}s interval)\n"
+            f"   Ctrl+C to stop\n"
         )
-        
+
         cycle = 0
         try:
             while self.running:
                 cycle += 1
                 self.logger.info(f"\n{'─' * 50}")
-                self.logger.info(f"🔄 사이클 #{cycle} 시작 [{datetime.now():%H:%M:%S}]")
+                self.logger.info(f"🔄 Cycle #{cycle} started [{datetime.now():%H:%M:%S}]")
                 self.logger.info(f"{'─' * 50}")
-                
-                # 포지션 갱신
+
+                # Refresh positions
                 self.load_portfolio()
-                
-                # 각 종목 분석
+
+                # Analyze each symbol
                 all_signals = []
                 for contract in self.watchlist:
-                    self.logger.info(f"\n  🔍 분석 중: {contract.symbol}")
+                    self.logger.info(f"\n  🔍 Analyzing: {contract.symbol}")
                     signals = self.analyze_stock(contract)
                     all_signals.extend(signals)
-                    
-                    # 신호 실행
+
+                    # Execute signals
                     for signal in signals:
                         self.execute_signal(signal)
-                    
-                    # API 속도 제한 방지
+
+                    # API rate limit prevention
                     self.ib.sleep(1)
-                
-                # 대시보드 출력
+
+                # Print dashboard
                 self.print_dashboard()
-                
-                # 다음 사이클까지 대기 (장중/장외 자동 조절)
+
+                # Wait until next cycle (auto-adjust for market/off-hours)
                 from signal_bridge import is_market_open
                 if is_market_open():
                     interval = self.config.check_interval_sec
-                    label = "장중"
+                    label = "Market hours"
                 else:
                     interval = self.config.check_interval_off_sec
-                    label = "장외"
+                    label = "Off-hours"
                 self.logger.info(
-                    f"\n⏰ 다음 체크: {interval}초 후 ({label})..."
+                    f"\n⏰ Next check: in {interval}s ({label})..."
                 )
                 self.ib.sleep(interval)
-                
+
         except KeyboardInterrupt:
-            self.logger.info("\n\n🛑 사용자에 의해 중지됨")
+            self.logger.info("\n\n🛑 Stopped by user")
         except Exception as e:
-            self.logger.error(f"\n❌ 에러 발생: {e}", exc_info=True)
+            self.logger.error(f"\n❌ Error occurred: {e}", exc_info=True)
         finally:
             self.stop()
-    
+
     def stop(self):
-        """봇 중지 & 정리"""
+        """Stop bot & cleanup"""
         self.running = False
         self.print_dashboard()
         self.disconnect()
-        
-        # 신호 히스토리 저장
+
+        # Save signal history
         if self.signals_history:
             history_file = f"signals_{datetime.now():%Y%m%d_%H%M%S}.json"
             history_data = [
@@ -1073,58 +1073,58 @@ class SmartTrader:
             ]
             with open(history_file, "w") as f:
                 json.dump(history_data, f, indent=2, ensure_ascii=False)
-            self.logger.info(f"📁 신호 히스토리 저장됨: {history_file}")
-        
-        self.logger.info("👋 Smart Trader 종료")
+            self.logger.info(f"📁 Signal history saved: {history_file}")
+
+        self.logger.info("👋 Smart Trader terminated")
 
 
 # ═══════════════════════════════════════════════════════════════
-#  실행
+#  Execution
 # ═══════════════════════════════════════════════════════════════
 
 def main():
-    """메인 실행 함수"""
-    
+    """Main execution function"""
+
     print("""
     ╔══════════════════════════════════════════════════════════╗
     ║           🤖 IB Smart Trader v1.0                       ║
     ║                                                          ║
-    ║  Interactive Brokers 자동 매매 시스템                    ║
-    ║  전략: MA Crossover + % 변동 기반                       ║
+    ║  Interactive Brokers Auto Trading System                 ║
+    ║  Strategy: MA Crossover + % Change Based                 ║
     ╚══════════════════════════════════════════════════════════╝
     """)
-    
-    # ── 설정 로드 또는 생성 ──
+
+    # ── Load or create config ──
     config = TradingConfig(
-        # IB 연결
+        # IB connection
         ib_host="127.0.0.1",
         ib_port=7497,            # Paper Trading (Live: 7496)
         client_id=1,
-        
-        # 모드 선택 ─ 처음에는 ALERT로 테스트 추천!
+
+        # Mode selection - recommend testing with ALERT first!
         trade_mode=TradeMode.ALERT,
-        
-        # MA Crossover 설정
-        ma_short_period=10,      # 10일 이동평균
-        ma_long_period=30,       # 30일 이동평균
-        
-        # % 변동 설정
-        buy_drop_pct=-5.0,       # 5% 하락시 매수
-        sell_rise_pct=5.0,       # 5% 상승시 매도
-        pct_lookback_days=5,     # 5일 전 대비
-        
-        # 주문 설정
-        default_quantity=10,     # 기본 10주
-        max_position_size=100,   # 최대 100주
-        
-        # 모니터링
-        check_interval_sec=60,   # 60초마다 체크
+
+        # MA Crossover settings
+        ma_short_period=10,      # 10-day moving average
+        ma_long_period=30,       # 30-day moving average
+
+        # % Change settings
+        buy_drop_pct=-5.0,       # Buy on 5% drop
+        sell_rise_pct=5.0,       # Sell on 5% rise
+        pct_lookback_days=5,     # Compare vs 5 days ago
+
+        # Order settings
+        default_quantity=10,     # Default 10 shares
+        max_position_size=100,   # Max 100 shares
+
+        # Monitoring
+        check_interval_sec=60,   # Check every 60 seconds
     )
-    
-    # 설정 저장
+
+    # Save config
     config.save("config.json")
-    
-    # ── 모니터링할 종목 ──
+
+    # ── Symbols to monitor ──
     watchlist = [
         "AAPL",    # Apple
         "MSFT",    # Microsoft
@@ -1134,14 +1134,14 @@ def main():
         "NVDA",    # NVIDIA
         "META",    # Meta
     ]
-    
-    # ── 트레이더 실행 ──
+
+    # ── Run trader ──
     trader = SmartTrader(config)
-    
+
     if trader.connect():
         trader.run(watchlist)
     else:
-        print("\n  TWS 연결에 실패했습니다. 위의 안내를 참고하세요.")
+        print("\n  TWS connection failed. Please refer to the instructions above.")
 
 
 if __name__ == "__main__":

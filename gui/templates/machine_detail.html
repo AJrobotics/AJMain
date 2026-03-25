@@ -1070,87 +1070,40 @@
                 </div>
             </div>
 
-            <!-- CashCow: Smart Trader + Trading Log (left) | Daily Picks (right) -->
+            <!-- CashCow: Smart Trader (left) | Day Trader (right) -->
             <div id="trader-section" style="display:none;">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
-                    <!-- Left: Smart Trader Status + Trading Log stacked -->
-                    <div style="display:flex;flex-direction:column;gap:16px;">
-                        <div class="card trader-card">
-                            <div class="trader-header">
-                                <h3>Smart Trader Status</h3>
-                                <span class="trader-badge stopped" id="trader-badge">Checking...</span>
-                            </div>
-
-                            <!-- IB Gateway Status -->
-                            <div class="info-row" style="border-bottom:1px solid #ffc10733;">
-                                <span class="label">IB Gateway</span>
-                                <span class="value" id="ib-gw-status" style="display:flex;align-items:center;gap:6px;">
-                                    <span id="ib-gw-dot" style="width:8px;height:8px;border-radius:50%;background:#555;display:inline-block;"></span>
-                                    <span id="ib-gw-text">Checking...</span>
-                                </span>
-                            </div>
-                            <div class="info-row"><span class="label">GW Port 7497</span><span class="value" id="ib-gw-port">--</span></div>
-                            <div class="info-row"><span class="label">GW Last Check</span><span class="value" id="ib-gw-time">--</span></div>
-                            <div class="info-row" id="ib-sms-row" style="display:none;">
-                                <span class="label">SMS Alert</span>
-                                <span class="value" id="ib-sms-info" style="color:#ffc107;">--</span>
-                            </div>
-
-                            <div style="border-top:1px solid #1a3a5c;margin:10px 0;padding-top:8px;">
-                                <div class="info-row"><span class="label">Process</span><span class="value" id="trader-process">--</span></div>
-                                <div class="info-row"><span class="label">Mode</span><span class="value" id="trader-mode">--</span></div>
-                                <div class="info-row"><span class="label">PID</span><span class="value" id="trader-pid">--</span></div>
-                                <div class="info-row"><span class="label">IB Port</span><span class="value" id="trader-port">--</span></div>
-                                <div class="info-row"><span class="label">Market</span><span class="value" id="trader-market-time">--</span></div>
-                            </div>
-
-                            <!-- Control Buttons -->
-                            <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:6px;">
-                                <button class="btn refresh" onclick="loadTraderStatus()">&#8635; Refresh</button>
-                                <button class="btn" onclick="deployTrader('run')" style="background:#00e67633;border-color:#00e676;color:#00e676;">&#9654; Deploy &amp; Run</button>
-                                <button class="btn" onclick="deployTrader('stop')" style="border-color:#e94560;color:#e94560;">&#9632; Stop</button>
-                            </div>
-
-                            <!-- Analysis Buttons -->
-                            <div style="border-top:1px solid #1a3a5c;margin-top:14px;padding-top:12px;">
-                                <h3 style="color:#ffc107;font-size:13px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #ffc10733;">On-Demand Analysis</h3>
-                                <div style="display:flex;flex-wrap:wrap;gap:6px;">
-                                    <button class="btn" onclick="runAnalysis('screener')" style="font-size:11px;border-color:#00e676;color:#00e676;">&#128200; Re-Screener</button>
-                                    <button class="btn" onclick="runAnalysis('news')" style="font-size:11px;border-color:#29b6f6;color:#29b6f6;">&#128240; News</button>
-                                    <button class="btn" onclick="runAnalysis('technical')" style="font-size:11px;border-color:#ff9800;color:#ff9800;">&#128202; Technical</button>
-                                    <button class="btn" onclick="runAnalysis('sentiment')" style="font-size:11px;border-color:#ab47bc;color:#ab47bc;">&#128161; Sentiment</button>
-                                    <button class="btn" onclick="runAnalysis('risk')" style="font-size:11px;border-color:#e94560;color:#e94560;">&#9888; Risk</button>
-                                    <button class="btn" onclick="runAnalysis('earnings')" style="font-size:11px;border-color:#ffc107;color:#ffc107;">&#128197; Earnings</button>
-                                </div>
-                                <div id="analysis-result" style="display:none;margin-top:10px;">
-                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-                                        <span id="analysis-title" style="color:#ffc107;font-size:12px;font-weight:700;"></span>
-                                        <button class="btn" onclick="document.getElementById('analysis-result').style.display='none'" style="font-size:10px;padding:2px 8px;">&#10005; Close</button>
-                                    </div>
-                                    <div class="log-box" id="analysis-output" style="max-height:250px;font-size:11px;">--</div>
-                                </div>
-                            </div>
-
-                            <!-- SMS Test -->
-                            <div style="border-top:1px solid #1a3a5c;margin-top:14px;padding-top:12px;">
-                                <h3 style="color:#ffc107;font-size:13px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #ffc10733;">SMS Alert Test (661-618-0571)</h3>
-                                <div style="display:flex;gap:6px;align-items:center;">
-                                    <input type="text" id="sms-test-input" placeholder="Enter test message..."
-                                           style="flex:1;background:#0a192f;border:1px solid #1a3a5c;border-radius:6px;padding:6px 10px;color:#e0e0e0;font-size:12px;font-family:'Consolas',monospace;outline:none;"
-                                           value="AJ Robotics: Test alert from CashCow dashboard">
-                                    <button class="btn" id="sms-test-btn" onclick="sendTestSMS()" style="font-size:11px;border-color:#ffc107;color:#ffc107;white-space:nowrap;">&#128241; Send Test</button>
-                                </div>
-                            </div>
+                    <!-- Left: Smart Trader -->
+                    <div class="card trader-card" style="align-self:start;">
+                        <h3>
+                            <span style="color:#00e676;">&#128202; Smart Trader</span>
+                            <span class="trader-badge stopped" id="trader-badge" style="margin-left:auto;font-size:10px;padding:3px 10px;border-radius:10px;background:#55555533;color:#888;">Checking...</span>
+                        </h3>
+                        <div class="info-row"><span class="label">Status</span><span class="value" id="trader-process">--</span></div>
+                        <div class="info-row"><span class="label">Mode</span><span class="value" id="trader-mode">--</span></div>
+                        <div class="info-row"><span class="label">PID</span><span class="value" id="trader-pid">--</span></div>
+                        <div class="info-row"><span class="label">Strategy</span><span class="value" style="font-size:10px;">MA + RSI + ATR + Vol + Signal</span></div>
+                        <div class="info-row"><span class="label">Market</span><span class="value" id="trader-market-time">--</span></div>
+                        <div class="info-row">
+                            <span class="label">IB Gateway</span>
+                            <span class="value" id="ib-gw-status" style="display:flex;align-items:center;gap:6px;">
+                                <span id="ib-gw-dot" style="width:8px;height:8px;border-radius:50%;background:#555;display:inline-block;"></span>
+                                <span id="ib-gw-text">Checking...</span>
+                            </span>
                         </div>
+                        <!-- Hidden fields to preserve existing JS references -->
+                        <span id="ib-gw-port" style="display:none;">--</span>
+                        <span id="ib-gw-time" style="display:none;">--</span>
+                        <span id="trader-port" style="display:none;">--</span>
+                        <div id="ib-sms-row" style="display:none;"><span id="ib-sms-info">--</span></div>
 
-                        <!-- Trading Log — right below Smart Trader Status -->
-                        <div class="card trader-card" id="trader-logs-section">
-                            <h3>Trading Log (Recent)</h3>
-                            <div class="log-box" id="trader-log-box" style="max-height:300px;">Loading trading logs...</div>
+                        <div style="margin-top:12px;">
+                            <h3 style="font-size:12px;color:#00e676;margin-bottom:6px;">Smart Trader Log (Recent)</h3>
+                            <div class="log-box" id="trader-log-box" style="max-height:250px;">Loading trading logs...</div>
                         </div>
                     </div>
 
-                    <!-- Right: Day Trader Status -->
+                    <!-- Right: Day Trader -->
                     <div class="card trader-card" style="align-self:start;">
                         <h3>
                             <span style="color:#ffab40;">&#9889; Day Trader</span>
@@ -1166,6 +1119,39 @@
                         <div style="margin-top:12px;">
                             <h3 style="font-size:12px;color:#ffab40;margin-bottom:6px;">Day Trader Log (Recent)</h3>
                             <div class="log-box" id="day-log-box" style="max-height:250px;">No day trader log</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- On-Demand Analysis + SMS (below trader panels) -->
+                <div class="card trader-card" style="margin-top:16px;">
+                    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:start;">
+                        <div style="flex:1;min-width:300px;">
+                            <h3 style="color:#ffc107;font-size:13px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #ffc10733;">On-Demand Analysis</h3>
+                            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                                <button class="btn" onclick="runAnalysis('screener')" style="font-size:11px;border-color:#00e676;color:#00e676;">&#128200; Re-Screener</button>
+                                <button class="btn" onclick="runAnalysis('news')" style="font-size:11px;border-color:#29b6f6;color:#29b6f6;">&#128240; News</button>
+                                <button class="btn" onclick="runAnalysis('technical')" style="font-size:11px;border-color:#ff9800;color:#ff9800;">&#128202; Technical</button>
+                                <button class="btn" onclick="runAnalysis('sentiment')" style="font-size:11px;border-color:#ab47bc;color:#ab47bc;">&#128161; Sentiment</button>
+                                <button class="btn" onclick="runAnalysis('risk')" style="font-size:11px;border-color:#e94560;color:#e94560;">&#9888; Risk</button>
+                                <button class="btn" onclick="runAnalysis('earnings')" style="font-size:11px;border-color:#ffc107;color:#ffc107;">&#128197; Earnings</button>
+                            </div>
+                            <div id="analysis-result" style="display:none;margin-top:10px;">
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                                    <span id="analysis-title" style="color:#ffc107;font-size:12px;font-weight:700;"></span>
+                                    <button class="btn" onclick="document.getElementById('analysis-result').style.display='none'" style="font-size:10px;padding:2px 8px;">&#10005; Close</button>
+                                </div>
+                                <div class="log-box" id="analysis-output" style="max-height:250px;font-size:11px;">--</div>
+                            </div>
+                        </div>
+                        <div style="min-width:250px;">
+                            <h3 style="color:#ffc107;font-size:13px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #ffc10733;">SMS Alert Test (661-618-0571)</h3>
+                            <div style="display:flex;gap:6px;align-items:center;">
+                                <input type="text" id="sms-test-input" placeholder="Enter test message..."
+                                       style="flex:1;background:#0a192f;border:1px solid #1a3a5c;border-radius:6px;padding:6px 10px;color:#e0e0e0;font-size:12px;font-family:'Consolas',monospace;outline:none;"
+                                       value="AJ Robotics: Test alert from CashCow dashboard">
+                                <button class="btn" id="sms-test-btn" onclick="sendTestSMS()" style="font-size:11px;border-color:#ffc107;color:#ffc107;white-space:nowrap;">&#128241; Send Test</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1694,7 +1680,6 @@
             if (MACHINE !== 'CashCow') return;
 
             document.getElementById('trader-section').style.display = '';
-            document.getElementById('trader-logs-section').style.display = '';
 
             fetch('/api/trader/status')
                 .then(r => r.json())
@@ -1743,21 +1728,22 @@
 
                     // Daily Picks — incremental table update
                     const picksBody = document.getElementById('picks-body');
-                    let picksArr = null;
-                    if (d.daily_picks) {
-                        if (Array.isArray(d.daily_picks)) {
-                            picksArr = d.daily_picks;
-                        } else if (typeof d.daily_picks === 'object') {
-                            // Handle nested format: {picks: [...], all_scores: [...]}
-                            picksArr = d.daily_picks.all_scores
-                                    || d.daily_picks.picks
-                                    || null;
+                    if (picksBody) {
+                        let picksArr = null;
+                        if (d.daily_picks) {
+                            if (Array.isArray(d.daily_picks)) {
+                                picksArr = d.daily_picks;
+                            } else if (typeof d.daily_picks === 'object') {
+                                picksArr = d.daily_picks.all_scores
+                                        || d.daily_picks.picks
+                                        || null;
+                            }
                         }
-                    }
-                    if (picksArr && Array.isArray(picksArr) && picksArr.length > 0) {
-                        updatePicksTable(picksBody, picksArr);
-                    } else {
-                        setPlaceholderRow(picksBody, 4, 'No picks available');
+                        if (picksArr && Array.isArray(picksArr) && picksArr.length > 0) {
+                            updatePicksTable(picksBody, picksArr);
+                        } else {
+                            setPlaceholderRow(picksBody, 4, 'No picks available');
+                        }
                     }
 
                     // Trading Logs — incremental update
@@ -1780,7 +1766,6 @@
                         }
 
                         // Append new lines
-                        const wasAtBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 30;
                         let added = 0;
                         for (const line of d.log_lines) {
                             if (!existingLines.has(line)) {
@@ -1792,7 +1777,7 @@
                             }
                         }
                         while (logBox.children.length > 60) logBox.removeChild(logBox.firstChild);
-                        if (wasAtBottom && added > 0) logBox.scrollTop = logBox.scrollHeight;
+                        logBox.scrollTop = logBox.scrollHeight;
                     } else if (!logBox.querySelector('.log-line')) {
                         logBox.textContent = 'No trading logs available';
                     }
@@ -2999,9 +2984,11 @@
             loadPortfolio();
             loadTraderStatus();
             loadIBGatewayStatus();
+            loadDayTraderPanel();
             setInterval(loadPortfolio, 30000);
             setInterval(loadTraderStatus, 30000);
             setInterval(loadIBGatewayStatus, 30000);
+            setInterval(loadDayTraderPanel, 15000);
         }
         if (MACHINE === 'Christy') {
             document.getElementById('christy-dashboard').style.display = '';

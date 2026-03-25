@@ -1,25 +1,25 @@
 """
 ═══════════════════════════════════════════════════════════════════
-  Tax Optimizer Module - 세금 최적화 시스템
-  
-  기능:
-    6. Tax-Loss Harvesting 자동화
-       - 미실현 손실 종목을 자동 감지하여 매도
-       - 실현 손실로 다른 수익을 상쇄하여 세금 절감
-       - 연간 $3,000 순손실 공제 한도 추적
-       
-    7. Wash Sale Rule 방지 필터  
-       - 손실 매도 후 30일 내 동일 종목 재매수 차단
-       - 실질적으로 동일한 종목(ETF ↔ 개별주) 경고
-       - 자동으로 대체 종목 제안
-  
-  California 특수 사항:
-    - CA 주세는 Long/Short term 구분 없이 동일 세율
-    - 연방 Short-term = 일반 소득세율 (22-37%)
-    - 연방 Long-term = 우대세율 (0-20%)
-    → 가능하면 1년 이상 보유가 연방세 절약에 유리
-  
-  Risk Shield와 통합하여 사용
+  Tax Optimizer Module - Tax Optimization System
+
+  Features:
+    6. Tax-Loss Harvesting Automation
+       - Automatically detects positions with unrealized losses and sells them
+       - Offsets other gains with realized losses to reduce taxes
+       - Tracks annual $3,000 net loss deduction limit
+
+    7. Wash Sale Rule Prevention Filter
+       - Blocks repurchase of the same stock within 30 days after a loss sale
+       - Warns about substantially identical securities (ETF <-> individual stocks)
+       - Automatically suggests substitute stocks
+
+  California Special Considerations:
+    - CA state tax applies the same rate regardless of Long/Short term
+    - Federal Short-term = ordinary income tax rate (22-37%)
+    - Federal Long-term = preferential rate (0-20%)
+    -> Holding for 1+ year is advantageous for federal tax savings when possible
+
+  Used in integration with Risk Shield
 ═══════════════════════════════════════════════════════════════════
 """
 
@@ -34,54 +34,54 @@ logger = logging.getLogger("TaxOptimizer")
 
 
 # ═══════════════════════════════════════════════════════════════
-#  설정
+#  Configuration
 # ═══════════════════════════════════════════════════════════════
 
 @dataclass
 class TaxConfig:
-    """세금 최적화 설정"""
-    
+    """Tax optimization configuration"""
+
     # ── Tax-Loss Harvesting ──
     tlh_enabled: bool = True
-    tlh_min_loss_pct: float = -5.0       # 최소 이 % 이상 손실이어야 수확
-    tlh_min_loss_dollar: float = -100.0  # 최소 이 금액 이상 손실
-    tlh_check_interval_days: int = 7     # N일마다 TLH 스캔
-    tlh_annual_loss_target: float = 3000.0  # 연간 손실 공제 목표 ($3,000 IRS 한도)
-    tlh_avoid_year_end_days: int = 5     # 12월 마지막 N일은 TLH 보수적으로
-    
+    tlh_min_loss_pct: float = -5.0       # Must have at least this % loss to harvest
+    tlh_min_loss_dollar: float = -100.0  # Must have at least this dollar amount in losses
+    tlh_check_interval_days: int = 7     # Scan for TLH every N days
+    tlh_annual_loss_target: float = 3000.0  # Annual loss deduction target ($3,000 IRS limit)
+    tlh_avoid_year_end_days: int = 5     # Be conservative with TLH in the last N days of December
+
     # ── Wash Sale Prevention ──
     wash_sale_enabled: bool = True
-    wash_sale_window_days: int = 30      # IRS 규정: 매도 전후 30일
-    wash_sale_block_identical: bool = True     # 동일 종목 차단
-    wash_sale_warn_similar: bool = True        # 유사 종목 경고
-    
-    # ── 보유 기간 추적 ──
+    wash_sale_window_days: int = 30      # IRS rule: 30 days before and after sale
+    wash_sale_block_identical: bool = True     # Block identical stocks
+    wash_sale_warn_similar: bool = True        # Warn about similar stocks
+
+    # ── Holding Period Tracking ──
     holding_period_tracking: bool = True
-    long_term_threshold_days: int = 366  # 1년 + 1일 이상 = Long-term
-    warn_near_long_term_days: int = 30   # Long-term 전환 N일 전 매도 경고
-    
-    # ── 기록 파일 ──
+    long_term_threshold_days: int = 366  # 1 year + 1 day or more = Long-term
+    warn_near_long_term_days: int = 30   # Warn about selling N days before Long-term conversion
+
+    # ── Record Files ──
     tax_log_file: str = "tax_records.json"
 
 
 # ═══════════════════════════════════════════════════════════════
-#  매매 세금 기록
+#  Trade Tax Records
 # ═══════════════════════════════════════════════════════════════
 
 @dataclass
 class TaxLot:
-    """개별 매매 세금 기록 (Tax Lot)"""
+    """Individual trade tax record (Tax Lot)"""
     symbol: str
     buy_date: str           # "2026-02-15"
     buy_price: float
     shares: int
-    sell_date: str = ""     # 매도 시 기입
+    sell_date: str = ""     # Filled in upon sale
     sell_price: float = 0.0
     realized_pnl: float = 0.0
     is_wash_sale: bool = False
     holding_days: int = 0
     is_long_term: bool = False
-    
+
     def to_dict(self):
         return {
             "symbol": self.symbol,
@@ -98,28 +98,28 @@ class TaxLot:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  6. Tax-Loss Harvesting 엔진
+#  6. Tax-Loss Harvesting Engine
 # ═══════════════════════════════════════════════════════════════
 
 class TaxLossHarvester:
     """
-    자동 Tax-Loss Harvesting (TLH)
-    
-    작동 방식:
-    1. 보유 종목 중 미실현 손실이 임계값 이상인 종목 스캔
-    2. 해당 종목 매도하여 손실 실현
-    3. 실현된 손실로 다른 수익 상쇄 → 세금 감소
-    4. 30일 후 원래 종목 재매수 가능 (Wash Sale 방지)
-    
-    예시:
-    - XOM을 $150에 매수 → 현재 $140 (미실현 손실 -$1,000)
-    - TLH가 자동 매도 → $1,000 손실 실현
-    - 이 $1,000으로 다른 종목의 $1,000 수익 상쇄
-    - 30일 후 XOM 재매수 가능 (또는 CVX를 대체 매수)
+    Automated Tax-Loss Harvesting (TLH)
+
+    How it works:
+    1. Scan held positions for unrealized losses exceeding the threshold
+    2. Sell those positions to realize the losses
+    3. Use realized losses to offset other gains -> reduce taxes
+    4. Can repurchase the original stock after 30 days (Wash Sale prevention)
+
+    Example:
+    - Bought XOM at $150 -> currently $140 (unrealized loss -$1,000)
+    - TLH auto-sells -> $1,000 loss realized
+    - This $1,000 offsets $1,000 in gains from other stocks
+    - Can repurchase XOM after 30 days (or buy CVX as a substitute)
     """
-    
-    # 유사 종목 매핑 (Wash Sale 우회용 대체 종목)
-    # 동일 섹터의 유사한 종목으로 교체하면 시장 노출은 유지하면서 Wash Sale 방지
+
+    # Similar stock mapping (substitute stocks for Wash Sale avoidance)
+    # Replacing with a similar stock in the same sector maintains market exposure while preventing Wash Sale
     SUBSTITUTE_MAP = {
         # Energy
         "XOM": ["CVX", "COP", "BP"],
@@ -154,18 +154,18 @@ class TaxLossHarvester:
         # Gold
         "GLD": ["NEM", "GOLD", "FNV"],
     }
-    
+
     def __init__(self, config: TaxConfig = None):
         self.config = config or TaxConfig()
-        self.ytd_realized_losses = 0.0   # 연초 대비 누적 실현 손실
-        self.ytd_realized_gains = 0.0    # 연초 대비 누적 실현 수익
+        self.ytd_realized_losses = 0.0   # Year-to-date cumulative realized losses
+        self.ytd_realized_gains = 0.0    # Year-to-date cumulative realized gains
         self.tax_lots: list[TaxLot] = []
         self.last_scan_date: Optional[datetime] = None
-        
+
         self._load_records()
-    
+
     def _load_records(self):
-        """기존 세금 기록 로드"""
+        """Load existing tax records"""
         if os.path.exists(self.config.tax_log_file):
             try:
                 with open(self.config.tax_log_file, "r") as f:
@@ -176,15 +176,15 @@ class TaxLossHarvester:
                     TaxLot(**lot) for lot in data.get("lots", [])
                 ]
                 logger.info(
-                    f"  📋 세금 기록 로드: {len(self.tax_lots)}건 | "
-                    f"YTD 손실: ${self.ytd_realized_losses:,.0f} | "
-                    f"YTD 수익: ${self.ytd_realized_gains:,.0f}"
+                    f"  📋 Tax records loaded: {len(self.tax_lots)} lots | "
+                    f"YTD losses: ${self.ytd_realized_losses:,.0f} | "
+                    f"YTD gains: ${self.ytd_realized_gains:,.0f}"
                 )
             except Exception as e:
-                logger.warning(f"  ⚠️ 세금 기록 로드 실패: {e}")
-    
+                logger.warning(f"  ⚠️ Failed to load tax records: {e}")
+
     def save_records(self):
-        """세금 기록 저장"""
+        """Save tax records"""
         data = {
             "ytd_losses": self.ytd_realized_losses,
             "ytd_gains": self.ytd_realized_gains,
@@ -193,9 +193,9 @@ class TaxLossHarvester:
         }
         with open(self.config.tax_log_file, "w") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-    
+
     def record_buy(self, symbol: str, price: float, shares: int):
-        """매수 기록 추가"""
+        """Record a buy"""
         lot = TaxLot(
             symbol=symbol,
             buy_date=datetime.now().strftime("%Y-%m-%d"),
@@ -204,99 +204,99 @@ class TaxLossHarvester:
         )
         self.tax_lots.append(lot)
         self.save_records()
-        logger.info(f"  📝 매수 기록: {symbol} {shares}주 @ ${price:.2f}")
-    
+        logger.info(f"  📝 Buy recorded: {symbol} {shares} shares @ ${price:.2f}")
+
     def record_sell(self, symbol: str, price: float, shares: int):
         """
-        매도 기록 + 손익 계산 (FIFO 방식)
-        FIFO = First In, First Out (먼저 산 주식부터 매도)
+        Record a sell + calculate P&L (FIFO method)
+        FIFO = First In, First Out (sells earliest purchased shares first)
         """
         remaining = shares
         total_pnl = 0.0
-        
+
         for lot in self.tax_lots:
             if lot.symbol != symbol or lot.sell_date != "" or remaining <= 0:
                 continue
-            
+
             sell_shares = min(lot.shares, remaining)
             lot.sell_date = datetime.now().strftime("%Y-%m-%d")
             lot.sell_price = price
             lot.realized_pnl = (price - lot.buy_price) * sell_shares
-            
-            # 보유 기간 계산
+
+            # Calculate holding period
             buy_dt = datetime.strptime(lot.buy_date, "%Y-%m-%d")
             lot.holding_days = (datetime.now() - buy_dt).days
             lot.is_long_term = lot.holding_days >= self.config.long_term_threshold_days
-            
+
             total_pnl += lot.realized_pnl
             remaining -= sell_shares
-        
-        # YTD 누적 업데이트
+
+        # Update YTD cumulative
         if total_pnl < 0:
-            self.ytd_realized_losses += total_pnl  # 음수값 누적
+            self.ytd_realized_losses += total_pnl  # Accumulate negative values
         else:
             self.ytd_realized_gains += total_pnl
-        
+
         self.save_records()
-        
+
         term = "Long-term" if any(
-            l.is_long_term for l in self.tax_lots 
+            l.is_long_term for l in self.tax_lots
             if l.symbol == symbol and l.sell_date != ""
         ) else "Short-term"
-        
+
         logger.info(
-            f"  📝 매도 기록: {symbol} {shares}주 @ ${price:.2f} | "
+            f"  📝 Sell recorded: {symbol} {shares} shares @ ${price:.2f} | "
             f"P&L: ${total_pnl:+,.0f} ({term}) | "
-            f"YTD 순손익: ${self.ytd_realized_gains + self.ytd_realized_losses:+,.0f}"
+            f"YTD net P&L: ${self.ytd_realized_gains + self.ytd_realized_losses:+,.0f}"
         )
-        
+
         return total_pnl
-    
+
     def scan_for_harvest(
-        self, 
+        self,
         positions: dict,
     ) -> list[dict]:
         """
-        TLH 기회 스캔 — 미실현 손실 종목 찾기
-        
+        Scan for TLH opportunities — find positions with unrealized losses
+
         Parameters:
             positions: {symbol: {"avg_cost": float, "quantity": int, "market_price": float}}
-        
+
         Returns:
-            수확 가능한 종목 리스트
+            List of harvestable stocks
         """
         if not self.config.tlh_enabled:
             return []
-        
-        # 연간 목표 체크
+
+        # Check annual target
         net_loss = self.ytd_realized_losses + self.ytd_realized_gains
-        remaining_target = self.config.tlh_annual_loss_target + net_loss  # 아직 수확 가능한 금액
-        
-        # 12월 말 보수적 모드
+        remaining_target = self.config.tlh_annual_loss_target + net_loss  # Amount still harvestable
+
+        # End-of-December conservative mode
         now = datetime.now()
         if now.month == 12 and now.day > (31 - self.config.tlh_avoid_year_end_days):
-            logger.info("  📅 12월 말 — TLH 보수적 모드")
-        
+            logger.info("  📅 End of December — TLH conservative mode")
+
         harvest_candidates = []
-        
+
         for symbol, pos in positions.items():
             avg_cost = pos.get("avg_cost", 0)
             quantity = pos.get("quantity", 0)
             market_price = pos.get("market_price", avg_cost)
-            
+
             if quantity <= 0 or avg_cost <= 0:
                 continue
-            
+
             unrealized_pnl = (market_price - avg_cost) * quantity
             unrealized_pct = ((market_price - avg_cost) / avg_cost) * 100
-            
-            # 손실이 임계값 이상인 종목만
+
+            # Only stocks with losses exceeding the threshold
             if (unrealized_pct <= self.config.tlh_min_loss_pct and
                 unrealized_pnl <= self.config.tlh_min_loss_dollar):
-                
-                # 대체 종목 찾기
+
+                # Find substitute stocks
                 substitutes = self.SUBSTITUTE_MAP.get(symbol, [])
-                
+
                 harvest_candidates.append({
                     "symbol": symbol,
                     "shares": quantity,
@@ -305,41 +305,41 @@ class TaxLossHarvester:
                     "unrealized_pnl": round(unrealized_pnl, 2),
                     "unrealized_pct": round(unrealized_pct, 2),
                     "substitutes": substitutes,
-                    "tax_savings_est": round(abs(unrealized_pnl) * 0.35, 2),  # ~35% 세율 가정
+                    "tax_savings_est": round(abs(unrealized_pnl) * 0.35, 2),  # ~35% tax rate assumption
                 })
-        
-        # 손실 크기 순으로 정렬
+
+        # Sort by loss size
         harvest_candidates.sort(key=lambda x: x["unrealized_pnl"])
-        
+
         if harvest_candidates:
-            logger.info(f"\n  🌾 Tax-Loss Harvesting 기회 {len(harvest_candidates)}건:")
+            logger.info(f"\n  🌾 Tax-Loss Harvesting opportunities: {len(harvest_candidates)} found:")
             for h in harvest_candidates:
                 logger.info(
-                    f"    {h['symbol']:6s} | 미실현 P&L: ${h['unrealized_pnl']:+,.0f} "
+                    f"    {h['symbol']:6s} | Unrealized P&L: ${h['unrealized_pnl']:+,.0f} "
                     f"({h['unrealized_pct']:+.1f}%) | "
-                    f"절세 예상: ${h['tax_savings_est']:,.0f} | "
-                    f"대체: {', '.join(h['substitutes'][:2])}"
+                    f"Est. tax savings: ${h['tax_savings_est']:,.0f} | "
+                    f"Substitutes: {', '.join(h['substitutes'][:2])}"
                 )
-        
+
         return harvest_candidates
-    
+
     def get_ytd_summary(self) -> dict:
-        """연간 세금 요약"""
+        """Annual tax summary"""
         closed_lots = [l for l in self.tax_lots if l.sell_date]
         short_term_pnl = sum(l.realized_pnl for l in closed_lots if not l.is_long_term)
         long_term_pnl = sum(l.realized_pnl for l in closed_lots if l.is_long_term)
         wash_sale_count = sum(1 for l in closed_lots if l.is_wash_sale)
         net = short_term_pnl + long_term_pnl
-        
-        # 추정 세금 (California 주민)
-        federal_st = short_term_pnl * 0.24 if short_term_pnl > 0 else 0  # ~24% 연방
-        federal_lt = long_term_pnl * 0.15 if long_term_pnl > 0 else 0    # ~15% 연방
+
+        # Estimated tax (California resident)
+        federal_st = short_term_pnl * 0.24 if short_term_pnl > 0 else 0  # ~24% federal
+        federal_lt = long_term_pnl * 0.15 if long_term_pnl > 0 else 0    # ~15% federal
         ca_state = max(0, net) * 0.093  # CA ~9.3%
-        
-        # 손실 공제
+
+        # Loss deduction
         deductible_loss = min(abs(min(0, net)), 3000)
         loss_carryover = max(0, abs(min(0, net)) - 3000)
-        
+
         return {
             "total_trades": len(closed_lots),
             "short_term_pnl": round(short_term_pnl, 2),
@@ -355,46 +355,46 @@ class TaxLossHarvester:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  7. Wash Sale Prevention 필터
+#  7. Wash Sale Prevention Filter
 # ═══════════════════════════════════════════════════════════════
 
 class WashSaleFilter:
     """
-    Wash Sale Rule 방지 — IRS 규정 자동 준수
-    
-    규칙: 손실 매도 후 전후 30일 이내에 '실질적으로 동일한' 증권을
-    재매수하면 그 손실 공제가 불허됨.
-    
-    작동 방식:
-    1. 손실 매도 기록을 추적
-    2. 매수 시도 시 30일 블랙리스트 확인
-    3. 동일 종목 → 매수 차단
-    4. 유사 종목 → 경고 (사용자 판단)
-    5. 대체 종목 자동 추천
+    Wash Sale Rule Prevention — Automatic IRS Compliance
+
+    Rule: If you repurchase a 'substantially identical' security within
+    30 days before or after a loss sale, the loss deduction is disallowed.
+
+    How it works:
+    1. Track loss sale records
+    2. Check 30-day blacklist on buy attempts
+    3. Identical stock -> block purchase
+    4. Similar stock -> warn (user judgment)
+    5. Automatically recommend substitute stocks
     """
-    
-    # 실질적으로 동일한 종목 그룹 (ETF ↔ 개별주 관계)
+
+    # Substantially identical stock groups (ETF <-> individual stock relationships)
     SUBSTANTIALLY_IDENTICAL = {
-        # S&P 500 ETF들은 서로 동일 취급
+        # S&P 500 ETFs are treated as identical to each other
         "SPY": ["IVV", "VOO"],
         "IVV": ["SPY", "VOO"],
         "VOO": ["SPY", "IVV"],
-        # Nasdaq ETF들
+        # Nasdaq ETFs
         "QQQ": ["QQQM"],
         "QQQM": ["QQQ"],
-        # 에너지 ETF
+        # Energy ETFs
         "XLE": ["VDE", "IYE"],
         "VDE": ["XLE", "IYE"],
     }
-    
+
     def __init__(self, config: TaxConfig = None):
         self.config = config or TaxConfig()
-        # 손실 매도 기록: {symbol: sell_date}
+        # Loss sale records: {symbol: sell_date}
         self._loss_sales: dict[str, datetime] = {}
         self._load_wash_sale_log()
-    
+
     def _load_wash_sale_log(self):
-        """Wash Sale 로그 파일 로드"""
+        """Load Wash Sale log file"""
         path = "wash_sale_log.json"
         if os.path.exists(path):
             try:
@@ -402,7 +402,7 @@ class WashSaleFilter:
                     data = json.load(f)
                 for sym, date_str in data.items():
                     self._loss_sales[sym] = datetime.strptime(date_str, "%Y-%m-%d")
-                # 만료된 항목 제거 (30일 지난 것)
+                # Remove expired entries (past 30 days)
                 now = datetime.now()
                 self._loss_sales = {
                     s: d for s, d in self._loss_sales.items()
@@ -410,39 +410,39 @@ class WashSaleFilter:
                 }
             except Exception:
                 pass
-    
+
     def _save_wash_sale_log(self):
-        """Wash Sale 로그 저장"""
+        """Save Wash Sale log"""
         data = {
-            sym: dt.strftime("%Y-%m-%d") 
+            sym: dt.strftime("%Y-%m-%d")
             for sym, dt in self._loss_sales.items()
         }
         with open("wash_sale_log.json", "w") as f:
             json.dump(data, f, indent=2)
-    
+
     def record_loss_sale(self, symbol: str, loss_amount: float):
         """
-        손실 매도 기록 — 30일 카운트다운 시작
-        
-        loss_amount가 음수(손실)인 경우만 기록
+        Record a loss sale — start 30-day countdown
+
+        Only records if loss_amount is negative (a loss)
         """
         if loss_amount >= 0:
-            return  # 수익 매도는 Wash Sale 대상 아님
-        
+            return  # Profitable sales are not subject to Wash Sale
+
         self._loss_sales[symbol] = datetime.now()
         self._save_wash_sale_log()
-        
+
         expiry = datetime.now() + timedelta(days=self.config.wash_sale_window_days)
         logger.info(
-            f"  ⏰ Wash Sale 시작: {symbol} | "
-            f"손실: ${loss_amount:,.0f} | "
-            f"재매수 차단: ~{expiry:%Y-%m-%d} (30일)"
+            f"  ⏰ Wash Sale started: {symbol} | "
+            f"Loss: ${loss_amount:,.0f} | "
+            f"Repurchase blocked until: ~{expiry:%Y-%m-%d} (30 days)"
         )
-    
+
     def check_buy(self, symbol: str) -> dict:
         """
-        매수 전 Wash Sale 체크
-        
+        Pre-buy Wash Sale check
+
         Returns:
             {
                 "blocked": bool,
@@ -455,7 +455,7 @@ class WashSaleFilter:
         """
         if not self.config.wash_sale_enabled:
             return {"blocked": False, "warning": False}
-        
+
         now = datetime.now()
         result = {
             "blocked": False,
@@ -465,71 +465,71 @@ class WashSaleFilter:
             "expiry_date": "",
             "substitutes": [],
         }
-        
-        # 1. 동일 종목 체크
+
+        # 1. Check identical stock
         if symbol in self._loss_sales:
             sale_date = self._loss_sales[symbol]
             days_elapsed = (now - sale_date).days
             days_remaining = self.config.wash_sale_window_days - days_elapsed
-            
+
             if days_remaining > 0:
                 expiry = sale_date + timedelta(days=self.config.wash_sale_window_days)
                 result["blocked"] = True
                 result["days_remaining"] = days_remaining
                 result["expiry_date"] = expiry.strftime("%Y-%m-%d")
                 result["reason"] = (
-                    f"🚫 Wash Sale! {symbol} 손실 매도 후 {days_elapsed}일 경과 "
-                    f"(잔여 {days_remaining}일, {expiry:%m/%d} 이후 매수 가능)"
+                    f"🚫 Wash Sale! {days_elapsed} days since {symbol} loss sale "
+                    f"({days_remaining} days remaining, buy allowed after {expiry:%m/%d})"
                 )
-                # 대체 종목 추천
+                # Recommend substitute stocks
                 result["substitutes"] = TaxLossHarvester.SUBSTITUTE_MAP.get(symbol, [])
                 if result["substitutes"]:
-                    result["reason"] += f" → 대체: {', '.join(result['substitutes'][:3])}"
+                    result["reason"] += f" -> Substitutes: {', '.join(result['substitutes'][:3])}"
                 return result
-        
-        # 2. 실질적 동일 종목 체크
+
+        # 2. Check substantially identical stocks
         identical = self.SUBSTANTIALLY_IDENTICAL.get(symbol, [])
         for ident_sym in identical:
             if ident_sym in self._loss_sales:
                 sale_date = self._loss_sales[ident_sym]
                 days_elapsed = (now - sale_date).days
                 days_remaining = self.config.wash_sale_window_days - days_elapsed
-                
+
                 if days_remaining > 0:
                     result["warning"] = True
                     result["days_remaining"] = days_remaining
                     result["reason"] = (
-                        f"⚠️ Wash Sale 경고: {ident_sym}(실질적 동일)이 "
-                        f"{days_elapsed}일 전 손실 매도됨 (잔여 {days_remaining}일)"
+                        f"⚠️ Wash Sale warning: {ident_sym} (substantially identical) "
+                        f"was sold at a loss {days_elapsed} days ago ({days_remaining} days remaining)"
                     )
                     return result
-        
-        # 3. 유사 종목 체크 (같은 섹터 손실 매도 후 유사 종목 매수)
+
+        # 3. Check similar stocks (buying a similar stock after a loss sale in the same sector)
         for loss_sym, sale_date in self._loss_sales.items():
             days_elapsed = (now - sale_date).days
             if days_elapsed > self.config.wash_sale_window_days:
                 continue
-            
+
             subs = TaxLossHarvester.SUBSTITUTE_MAP.get(loss_sym, [])
             if symbol in subs and self.config.wash_sale_warn_similar:
                 result["warning"] = True
                 result["reason"] = (
-                    f"⚠️ 유사 종목 경고: {loss_sym} 손실 매도 {days_elapsed}일 전 | "
-                    f"{symbol}은 대체 종목으로 간주될 수 있음 (IRS 판단에 따라 다름)"
+                    f"⚠️ Similar stock warning: {loss_sym} loss sale {days_elapsed} days ago | "
+                    f"{symbol} may be considered a substitute (subject to IRS determination)"
                 )
                 return result
-        
+
         return result
-    
+
     def get_blacklist(self) -> list[dict]:
-        """현재 Wash Sale 블랙리스트"""
+        """Current Wash Sale blacklist"""
         now = datetime.now()
         blacklist = []
-        
+
         for sym, sale_date in self._loss_sales.items():
             days_elapsed = (now - sale_date).days
             days_remaining = self.config.wash_sale_window_days - days_elapsed
-            
+
             if days_remaining > 0:
                 expiry = sale_date + timedelta(days=self.config.wash_sale_window_days)
                 blacklist.append({
@@ -539,185 +539,185 @@ class WashSaleFilter:
                     "expiry_date": expiry.strftime("%Y-%m-%d"),
                     "substitutes": TaxLossHarvester.SUBSTITUTE_MAP.get(sym, []),
                 })
-        
+
         return blacklist
 
 
 # ═══════════════════════════════════════════════════════════════
-#  통합 세금 최적화 엔진
+#  Integrated Tax Optimization Engine
 # ═══════════════════════════════════════════════════════════════
 
 class TaxOptimizer:
     """
-    통합 세금 최적화
-    - TLH + Wash Sale 통합 관리
-    - Smart Trader에서 매수/매도 시 자동 호출
+    Integrated Tax Optimization
+    - Combined TLH + Wash Sale management
+    - Automatically called on buy/sell from Smart Trader
     """
-    
+
     def __init__(self, config: TaxConfig = None):
         self.config = config or TaxConfig()
         self.harvester = TaxLossHarvester(self.config)
         self.wash_filter = WashSaleFilter(self.config)
-    
+
     def on_buy(self, symbol: str, price: float, shares: int) -> dict:
         """
-        매수 시 호출 — Wash Sale 체크 + 매수 기록
-        
+        Called on buy — Wash Sale check + record buy
+
         Returns:
             {"allowed": bool, "wash_sale": dict}
         """
-        # Wash Sale 체크
+        # Wash Sale check
         wash = self.wash_filter.check_buy(symbol)
-        
+
         if wash["blocked"]:
-            logger.info(f"  🚫 매수 차단 (Wash Sale): {wash['reason']}")
+            logger.info(f"  🚫 Buy blocked (Wash Sale): {wash['reason']}")
             return {"allowed": False, "wash_sale": wash}
-        
+
         if wash["warning"]:
             logger.info(f"  ⚠️ {wash['reason']}")
-        
-        # 매수 기록
+
+        # Record buy
         self.harvester.record_buy(symbol, price, shares)
         return {"allowed": True, "wash_sale": wash}
-    
+
     def on_sell(self, symbol: str, price: float, shares: int) -> dict:
         """
-        매도 시 호출 — 손익 기록 + Wash Sale 트리거
-        
+        Called on sell — record P&L + trigger Wash Sale if applicable
+
         Returns:
             {"pnl": float, "is_loss": bool, "wash_sale_started": bool}
         """
         pnl = self.harvester.record_sell(symbol, price, shares)
-        
+
         result = {
             "pnl": pnl,
             "is_loss": pnl < 0,
             "wash_sale_started": False,
         }
-        
-        # 손실 매도인 경우 Wash Sale 카운트다운 시작
+
+        # If this was a loss sale, start Wash Sale countdown
         if pnl < 0:
             self.wash_filter.record_loss_sale(symbol, pnl)
             result["wash_sale_started"] = True
-        
+
         return result
-    
+
     def check_buy_allowed(self, symbol: str) -> dict:
-        """매수 전 Wash Sale만 빠르게 체크"""
+        """Quick Wash Sale check before buying"""
         return self.wash_filter.check_buy(symbol)
-    
+
     def scan_harvest_opportunities(self, positions: dict) -> list[dict]:
-        """TLH 기회 스캔"""
+        """Scan for TLH opportunities"""
         return self.harvester.scan_for_harvest(positions)
-    
+
     def get_wash_sale_blacklist(self) -> list[dict]:
-        """현재 재매수 차단 종목"""
+        """Current repurchase-blocked stocks"""
         return self.wash_filter.get_blacklist()
-    
+
     def print_tax_report(self):
-        """연간 세금 리포트"""
+        """Annual tax report"""
         summary = self.harvester.get_ytd_summary()
         blacklist = self.wash_filter.get_blacklist()
-        
+
         print("\n" + "═" * 70)
         print("  💰 Tax Optimization Report")
         print("═" * 70)
-        
-        print(f"\n  📊 연간 실현 손익 (YTD):")
+
+        print(f"\n  📊 Year-to-Date Realized P&L (YTD):")
         print(f"    Short-term P&L:  ${summary['short_term_pnl']:>+10,.2f}")
         print(f"    Long-term P&L:   ${summary['long_term_pnl']:>+10,.2f}")
-        print(f"    순 합계:          ${summary['net_pnl']:>+10,.2f}")
-        print(f"    총 거래:          {summary['total_trades']}건")
-        
-        print(f"\n  🏛️ 추정 세금 (California):")
-        print(f"    연방세:           ${summary['est_federal_tax']:>10,.2f}")
-        print(f"    CA 주세:          ${summary['est_ca_tax']:>10,.2f}")
-        print(f"    합계:             ${summary['est_total_tax']:>10,.2f}")
-        
+        print(f"    Net total:       ${summary['net_pnl']:>+10,.2f}")
+        print(f"    Total trades:    {summary['total_trades']}")
+
+        print(f"\n  🏛️ Estimated Tax (California):")
+        print(f"    Federal tax:     ${summary['est_federal_tax']:>10,.2f}")
+        print(f"    CA state tax:    ${summary['est_ca_tax']:>10,.2f}")
+        print(f"    Total:           ${summary['est_total_tax']:>10,.2f}")
+
         if summary['net_pnl'] < 0:
-            print(f"\n  🌾 손실 공제:")
-            print(f"    올해 공제 가능:   ${summary['deductible_loss']:>10,.2f} (최대 $3,000)")
+            print(f"\n  🌾 Loss Deduction:")
+            print(f"    Deductible:      ${summary['deductible_loss']:>10,.2f} (max $3,000)")
             if summary['loss_carryover'] > 0:
-                print(f"    이월 손실:        ${summary['loss_carryover']:>10,.2f} (내년으로)")
-        
+                print(f"    Carryover loss:  ${summary['loss_carryover']:>10,.2f} (to next year)")
+
         if summary['wash_sale_count'] > 0:
-            print(f"\n  ⚠️ Wash Sale 발생: {summary['wash_sale_count']}건")
-        
+            print(f"\n  ⚠️ Wash Sales triggered: {summary['wash_sale_count']}")
+
         if blacklist:
-            print(f"\n  🚫 Wash Sale 블랙리스트 ({len(blacklist)}종목):")
+            print(f"\n  🚫 Wash Sale Blacklist ({len(blacklist)} stocks):")
             for b in blacklist:
                 print(
                     f"    {b['symbol']:6s} | "
-                    f"매도일: {b['sale_date']} | "
-                    f"잔여: {b['days_remaining']}일 | "
-                    f"해제: {b['expiry_date']} | "
-                    f"대체: {', '.join(b['substitutes'][:2])}"
+                    f"Sale date: {b['sale_date']} | "
+                    f"Remaining: {b['days_remaining']} days | "
+                    f"Expires: {b['expiry_date']} | "
+                    f"Substitutes: {', '.join(b['substitutes'][:2])}"
                 )
-        
+
         print("═" * 70)
 
 
 # ═══════════════════════════════════════════════════════════════
-#  데모
+#  Demo
 # ═══════════════════════════════════════════════════════════════
 
 def demo():
-    """Tax Optimizer 데모"""
+    """Tax Optimizer demo"""
     print("""
     ╔══════════════════════════════════════════════════════════╗
-    ║  💰 Tax Optimizer 데모 — TLH + Wash Sale 방지           ║
+    ║  💰 Tax Optimizer Demo — TLH + Wash Sale Prevention      ║
     ╚══════════════════════════════════════════════════════════╝
     """)
-    
+
     tax = TaxOptimizer()
-    
-    # 1) 매수 기록
-    print("  📈 매수 기록:")
+
+    # 1) Record buys
+    print("  📈 Buy records:")
     tax.on_buy("XOM", 150.00, 50)
     tax.on_buy("NVDA", 200.00, 30)
     tax.on_buy("CRM", 320.00, 20)
-    
-    # 2) 일부 매도 (손실 발생)
-    print("\n  📉 매도 기록:")
-    tax.on_sell("CRM", 280.00, 20)    # 손실: -$800
-    tax.on_sell("NVDA", 185.00, 30)   # 손실: -$450
-    tax.on_sell("XOM", 160.00, 50)    # 수익: +$500
-    
-    # 3) Wash Sale 체크 — CRM 재매수 시도
-    print("\n  🔍 Wash Sale 체크:")
-    
+
+    # 2) Sell some positions (losses incurred)
+    print("\n  📉 Sell records:")
+    tax.on_sell("CRM", 280.00, 20)    # Loss: -$800
+    tax.on_sell("NVDA", 185.00, 30)   # Loss: -$450
+    tax.on_sell("XOM", 160.00, 50)    # Gain: +$500
+
+    # 3) Wash Sale check — attempt to repurchase CRM
+    print("\n  🔍 Wash Sale check:")
+
     crm_check = tax.check_buy_allowed("CRM")
-    print(f"  CRM 매수: {'차단' if crm_check['blocked'] else '허용'}")
+    print(f"  CRM buy: {'Blocked' if crm_check['blocked'] else 'Allowed'}")
     if crm_check.get("reason"):
-        print(f"    → {crm_check['reason']}")
-    
-    # ORCL은 CRM 대체 종목 → 경고만
+        print(f"    -> {crm_check['reason']}")
+
+    # ORCL is a CRM substitute -> warning only
     orcl_check = tax.check_buy_allowed("ORCL")
-    print(f"  ORCL 매수: {'경고' if orcl_check['warning'] else '허용'}")
+    print(f"  ORCL buy: {'Warning' if orcl_check['warning'] else 'Allowed'}")
     if orcl_check.get("reason"):
-        print(f"    → {orcl_check['reason']}")
-    
-    # XOM은 수익 매도라 Wash Sale 없음
+        print(f"    -> {orcl_check['reason']}")
+
+    # XOM was a profitable sale so no Wash Sale
     xom_check = tax.check_buy_allowed("XOM")
-    print(f"  XOM 매수: {'차단' if xom_check['blocked'] else '허용'}")
-    
-    # 4) TLH 기회 스캔
-    print("\n  🌾 Tax-Loss Harvesting 스캔:")
+    print(f"  XOM buy: {'Blocked' if xom_check['blocked'] else 'Allowed'}")
+
+    # 4) TLH opportunity scan
+    print("\n  🌾 Tax-Loss Harvesting scan:")
     positions = {
         "LMT": {"avg_cost": 600.00, "quantity": 10, "market_price": 580.00},
         "HOOD": {"avg_cost": 40.00, "quantity": 200, "market_price": 32.00},
     }
     harvest = tax.scan_harvest_opportunities(positions)
-    
-    # 5) Blacklist 확인
-    print("\n  🚫 현재 블랙리스트:")
+
+    # 5) Check blacklist
+    print("\n  🚫 Current blacklist:")
     for b in tax.get_wash_sale_blacklist():
-        print(f"    {b['symbol']} — {b['days_remaining']}일 남음 → 대체: {', '.join(b['substitutes'][:2])}")
-    
-    # 6) 세금 리포트
+        print(f"    {b['symbol']} — {b['days_remaining']} days remaining -> Substitutes: {', '.join(b['substitutes'][:2])}")
+
+    # 6) Tax report
     tax.print_tax_report()
-    
-    # 정리
+
+    # Cleanup
     for f in ["tax_records.json", "wash_sale_log.json"]:
         if os.path.exists(f):
             os.remove(f)

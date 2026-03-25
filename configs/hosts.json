@@ -56,11 +56,13 @@
     "robots": {
         "ROSMASTER": {
             "type": "robot",
-            "model": "TBD",
-            "name": "TBD",
-            "status": "arriving",
+            "model": "ROSMASTER X3",
+            "host": "192.168.1.99",
+            "username": "yahboom",
+            "agent_port": 8080,
             "dev_controller": "Dreamer",
             "prod_controller": "Christy",
+            "connection": ["ssh"],
             "description": "Dev/control from Dreamer, once stable Christy handles monitoring and critical decisions"
         }
     },

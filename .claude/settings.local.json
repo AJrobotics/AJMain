@@ -12,7 +12,26 @@
       "Bash(git -C \"G:/My Drive/AJ_Robotics/AJMain\" remote -v)",
       "Bash(winget install:*)",
       "Bash(export PATH=\"$PATH:/c/Program Files/GitHub CLI:/c/Program Files \\(x86\\)/GitHub CLI\")",
-      "Bash(gh auth:*)"
+      "Bash(gh auth:*)",
+      "Bash(curl -s --connect-timeout 3 http://192.168.1.44:5000/api/health)",
+      "Bash(python day_strategies.py)",
+      "Bash(PYTHONIOENCODING=utf-8 python day_strategies.py)",
+      "Bash(PYTHONIOENCODING=utf-8 python day_risk.py)",
+      "Bash(find /c/Users/Dream/AJMain -type f \\\\\\(-name *.json -o -name *.yaml -o -name *.yml -o -name *.toml -o -name *.md -o -name *.env -o -name *.txt -o -name *.py -o -name *.sh \\\\\\))",
+      "Bash(python -m deploy.deploy --to CashCow --restart)",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 dongchul@192.168.1.91 \"grep -n ''politician'' ~/AJMain/app.py\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(python -c \"import sys; sys.argv=[''app'']; exec\\(open\\(''app.py''\\).read\\(\\).split\\(''if __name__''\\)[0]\\); rules=[r.rule for r in app.url_map.iter_rules\\(\\) if ''yolo'' in r.rule]; print\\(''YOLO routes:'', rules\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5000/yolo)",
+      "Bash(taskkill //F //IM python.exe)",
+      "Bash(taskkill //F //IM python3.exe)",
+      "Bash(ssh dongchul@192.168.1.91 'ls /home/dongchul/AJMain/app.py && head -100 /home/dongchul/AJMain/app.py')",
+      "Bash(ssh dongchul@192.168.1.91 'grep -n \"\"yolo\\\\|YOLO\\\\|Startup\"\" /home/dongchul/AJMain/app.py')",
+      "Bash(ssh dongchul@192.168.1.91 \"pkill -f ''python.*app.py'' || true\")",
+      "Bash(ssh dongchul@192.168.1.91 \"pkill -f ''python3.*app.py'' 2>/dev/null; true\")",
+      "Bash(ssh dongchul@192.168.1.91 \"ps aux | grep app.py | grep -v grep\")"
     ]
   }
 }

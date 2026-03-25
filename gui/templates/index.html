@@ -365,8 +365,12 @@
             </div>
         </div>
         <div class="machine-tile" id="tile-ROSMASTER" onclick="location.href='/machine/ROSMASTER'" style="cursor:pointer;">
-            <div class="tile-header"><span class="dot pending"></span><span class="name">ROSMASTER</span></div>
-            <div class="meta">TBD<br>Robot (Arriving)</div>
+            <div class="tile-header"><span class="dot offline" id="dot-ROSMASTER"></span><span class="name">ROSMASTER</span></div>
+            <div class="meta">192.168.1.99<br>Robot</div>
+            <div style="margin-top:6px;">
+                <a class="btn-link" href="http://192.168.1.99:8080/" target="_blank" onclick="event.stopPropagation()">Agent</a>
+                <button class="btn-restart" id="restart-ROSMASTER" onclick="event.stopPropagation(); restartAgent('ROSMASTER')">Restart</button>
+            </div>
         </div>
     </div>
 
@@ -378,7 +382,7 @@
             <div class="card" style="margin-bottom: 16px;">
                 <h2>Robotics Control</h2>
                 <div class="status-line">
-                    <span class="dot pending"></span> ROSMASTER: Arriving
+                    <span class="dot offline" id="dot-rosmaster-card"></span> ROSMASTER: <span id="rosmaster-status">Checking...</span>
                 </div>
                 <div class="info">
                     Dev Controller: Dreamer<br>
@@ -524,6 +528,12 @@
                             const ts = document.getElementById('trader-status');
                             if (td) td.className = info.online ? 'dot online' : 'dot offline';
                             if (ts) ts.textContent = 'CashCow: ' + (info.online ? 'Online (' + info.latency_ms + 'ms)' : 'Offline');
+                        }
+                        if (name === 'ROSMASTER') {
+                            const rd = document.getElementById('dot-rosmaster-card');
+                            const rs = document.getElementById('rosmaster-status');
+                            if (rd) rd.className = info.online ? 'dot online' : 'dot offline';
+                            if (rs) rs.textContent = info.online ? 'Online (' + info.latency_ms + 'ms)' : 'Offline';
                         }
                     }
                     document.getElementById('summary').textContent = online + '/' + total + ' Online';

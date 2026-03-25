@@ -138,14 +138,16 @@ class TraderModule:
     def _get_market_status(self) -> dict:
         """Return current US market status based on Eastern Time."""
         try:
-            import pytz
-            et = pytz.timezone("US/Eastern")
-            now_et = _dt.now(et)
+            from zoneinfo import ZoneInfo
+            now_et = _dt.now(ZoneInfo("America/New_York"))
         except ImportError:
-            # Fallback: assume UTC-5 (EST) if pytz not available
-            from datetime import timezone, timedelta
-            et_offset = timezone(timedelta(hours=-5))
-            now_et = _dt.now(et_offset)
+            try:
+                import pytz
+                now_et = _dt.now(pytz.timezone("US/Eastern"))
+            except ImportError:
+                from datetime import timezone, timedelta
+                et_offset = timezone(timedelta(hours=-5))
+                now_et = _dt.now(et_offset)
 
         is_weekday = now_et.weekday() < 5
         market_hour = now_et.hour + now_et.minute / 60.0

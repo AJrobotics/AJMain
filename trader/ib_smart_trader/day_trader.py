@@ -1,19 +1,19 @@
 """
 ═══════════════════════════════════════════════════════════════════
-  Day Trader v1.0 - IB 데이 트레이딩 자동매매 엔진
+  Day Trader v1.0 - IB Day Trading Automated Engine
 
-  스캘핑(1-5분) + 인트라데이(15분-1시간) 혼합 전략
-  유동성 높은 대형주 + 프리마켓 핫 종목 대상
+  Scalping (1-5 min) + Intraday (15 min - 1 hour) Hybrid Strategy
+  Targets high-liquidity large caps + pre-market hot stocks
 
-  모듈 통합:
-    - day_strategies.py — VWAP, EMA, Volume, RSI+MACD 앙상블
-    - day_risk.py      — 일일 리스크 관리, EOD 청산
-    - signal_bridge.py — 시장 센티먼트 (선택)
+  Module Integration:
+    - day_strategies.py — VWAP, EMA, Volume, RSI+MACD ensemble
+    - day_risk.py      — Daily risk management, EOD liquidation
+    - signal_bridge.py — Market sentiment (optional)
 
-  실행:
-    python run.py --day                # ALERT 모드
-    python run.py --day --auto         # AUTO 모드 (자동매매)
-    python run.py --day --daemon       # 매일 자동 시작
+  Execution:
+    python run.py --day                # ALERT mode
+    python run.py --day --auto         # AUTO mode (automated trading)
+    python run.py --day --daemon       # Auto-start daily
 ═══════════════════════════════════════════════════════════════════
 """
 
@@ -33,13 +33,13 @@ try:
     import numpy as np
     HAS_IB = True
 except ImportError as e:
-    print(f"  필수 패키지 설치 필요: pip install ib_insync pandas numpy")
+    print(f"  Required packages need to be installed: pip install ib_insync pandas numpy")
     print(f"  Missing: {e}")
     HAS_IB = False
 
 
 # ═══════════════════════════════════════════════════════════════
-#  설정
+#  Configuration
 # ═══════════════════════════════════════════════════════════════
 
 class TradeMode(Enum):
@@ -49,51 +49,51 @@ class TradeMode(Enum):
 
 @dataclass
 class DayTraderConfig:
-    """데이 트레이더 전체 설정"""
+    """Day Trader full configuration"""
 
-    # ── IB 연결 ──
+    # ── IB Connection ──
     ib_host: str = "127.0.0.1"
     ib_port: int = 7497          # Paper: 7497, Live: 7496
-    client_id: int = 3           # 기존 SmartTrader(1), Screener(2)와 분리
+    client_id: int = 3           # Separate from existing SmartTrader(1), Screener(2)
 
-    # ── 모드 ──
+    # ── Mode ──
     trade_mode: TradeMode = TradeMode.ALERT
 
-    # ── 자본 ──
+    # ── Capital ──
     capital: float = 75_000.0
 
-    # ── 프리마켓 스캐너 ──
+    # ── Pre-market Scanner ──
     core_watchlist: list = field(default_factory=lambda: [
         "NVDA", "AAPL", "TSLA", "AMD", "META",
         "AMZN", "GOOGL", "MSFT", "QQQ", "SPY",
     ])
-    scanner_gap_threshold_pct: float = 2.0    # 프리마켓 갭 최소 ±2%
-    scanner_max_hot_stocks: int = 5           # 프리마켓 핫 종목 최대 추가 수
+    scanner_gap_threshold_pct: float = 2.0    # Pre-market gap minimum ±2%
+    scanner_max_hot_stocks: int = 5           # Max hot stocks to add from pre-market
 
-    # ── 분봉 설정 ──
-    primary_bar_size: str = "5 mins"          # 주 분석 타임프레임
-    scalp_bar_size: str = "1 min"             # 스캘핑 타임프레임
-    history_duration: str = "1 D"             # 당일 데이터
-    analysis_interval_sec: int = 30           # 분석 주기 (초)
+    # ── Bar Settings ──
+    primary_bar_size: str = "5 mins"          # Primary analysis timeframe
+    scalp_bar_size: str = "1 min"             # Scalping timeframe
+    history_duration: str = "1 D"             # Current day data
+    analysis_interval_sec: int = 30           # Analysis interval (seconds)
 
-    # ── 주문 설정 ──
-    use_limit_orders: bool = False            # True: 지정가, False: 시장가
-    limit_offset_pct: float = 0.05            # 지정가 오프셋 (%)
+    # ── Order Settings ──
+    use_limit_orders: bool = False            # True: limit order, False: market order
+    limit_offset_pct: float = 0.05            # Limit order offset (%)
 
-    # ── 로깅 ──
+    # ── Logging ──
     log_file: str = "day_trader.log"
 
 
 # ═══════════════════════════════════════════════════════════════
-#  프리마켓 스캐너
+#  Pre-market Scanner
 # ═══════════════════════════════════════════════════════════════
 
 class PremarketScanner:
     """
-    프리마켓 유동성 종목 탐색
+    Pre-market liquidity stock scanner
 
-    1. 고정 핵심 리스트 (항상 포함)
-    2. IB Scanner로 프리마켓 갭 + 거래량 급증 종목 추가
+    1. Fixed core list (always included)
+    2. Add pre-market gap + volume spike stocks via IB Scanner
     """
 
     def __init__(self, ib: 'IB', config: DayTraderConfig):
@@ -102,32 +102,32 @@ class PremarketScanner:
         self.logger = logging.getLogger("PremarketScanner")
 
     def scan(self) -> list[str]:
-        """프리마켓 스캔 → 최종 워치리스트 반환"""
+        """Pre-market scan -> return final watchlist"""
         watchlist = list(self.config.core_watchlist)
-        self.logger.info(f"📋 핵심 워치리스트: {watchlist}")
+        self.logger.info(f"📋 Core watchlist: {watchlist}")
 
-        # IB Scanner로 핫 종목 추가
+        # Add hot stocks via IB Scanner
         hot_stocks = self._scan_premarket_movers()
         for sym in hot_stocks:
             if sym not in watchlist:
                 watchlist.append(sym)
-                self.logger.info(f"  🔥 핫 종목 추가: {sym}")
+                self.logger.info(f"  🔥 Hot stock added: {sym}")
 
-        self.logger.info(f"📋 최종 워치리스트 ({len(watchlist)}개): {watchlist}")
+        self.logger.info(f"📋 Final watchlist ({len(watchlist)} stocks): {watchlist}")
         return watchlist
 
     def _scan_premarket_movers(self) -> list[str]:
-        """IB Scanner API로 프리마켓 갭 종목 탐색"""
+        """Scan pre-market gap stocks via IB Scanner API"""
         hot = []
         try:
-            # IB Scanner: 프리마켓 갭 상위 종목
+            # IB Scanner: top pre-market gap stocks
             scan_params = ScannerSubscription(
                 instrument="STK",
                 locationCode="STK.US.MAJOR",
                 scanCode="TOP_PERC_GAIN",
                 numberOfRows=20,
-                abovePrice=10.0,          # $10 이상
-                aboveVolume=100000,        # 거래량 10만+
+                abovePrice=10.0,          # $10 and above
+                aboveVolume=100000,        # Volume 100K+
             )
             scan_data = self.ib.reqScannerData(scan_params)
 
@@ -136,31 +136,31 @@ class PremarketScanner:
                 hot.append(sym)
 
             self.ib.cancelScannerSubscription(scan_data)
-            self.logger.info(f"  🔍 IB Scanner: {len(hot)}개 핫 종목 발견")
+            self.logger.info(f"  🔍 IB Scanner: {len(hot)} hot stocks found")
 
         except Exception as e:
-            self.logger.warning(f"  ⚠️ 프리마켓 스캔 실패 (핵심 리스트만 사용): {e}")
+            self.logger.warning(f"  ⚠️ Pre-market scan failed (using core list only): {e}")
 
         return hot
 
 
 # ═══════════════════════════════════════════════════════════════
-#  메인 데이 트레이더
+#  Main Day Trader
 # ═══════════════════════════════════════════════════════════════
 
 class DayTrader:
-    """IB 데이 트레이딩 자동매매 엔진"""
+    """IB Day Trading Automated Engine"""
 
     def __init__(self, config: DayTraderConfig = None):
         self.config = config or DayTraderConfig()
         self.ib = IB() if HAS_IB else None
         self.running = False
-        self.watchlist: list = []       # IB Contract 리스트
+        self.watchlist: list = []       # IB Contract list
         self.watchlist_symbols: list[str] = []
-        self.positions: dict = {}       # Day Trader 자체 포지션만 추적 (IB 전체 X)
+        self.positions: dict = {}       # Track only Day Trader's own positions (not all IB positions)
         self.signals_history: list = []
 
-        # 전략 엔진
+        # Strategy engine
         self.ensemble = None
         self.strategy_config = None
         try:
@@ -168,9 +168,9 @@ class DayTrader:
             self.strategy_config = DayStrategyConfig()
             self.ensemble = DayStrategyEnsemble(self.strategy_config)
         except ImportError:
-            print("  ⚠️ day_strategies.py 미발견")
+            print("  ⚠️ day_strategies.py not found")
 
-        # 리스크 매니저
+        # Risk manager
         self.risk_manager = None
         try:
             from day_risk import DayRiskManager, DayRiskConfig
@@ -178,15 +178,15 @@ class DayTrader:
                 DayRiskConfig(capital=self.config.capital)
             )
         except ImportError:
-            print("  ⚠️ day_risk.py 미발견")
+            print("  ⚠️ day_risk.py not found")
 
-        # Signal Bridge (선택)
+        # Signal Bridge (optional)
         self.signal_bridge = None
         try:
             from signal_bridge import SignalBridge, SignalBridgeConfig
             self.signal_bridge = SignalBridge(SignalBridgeConfig())
         except ImportError:
-            pass  # 선택 모듈
+            pass  # Optional module
 
         self._setup_logging()
 
@@ -207,18 +207,18 @@ class DayTrader:
             self.logger.addHandler(fh)
             self.logger.addHandler(ch)
 
-    # ── IB 연결 ───────────────────────────────────────────────
+    # ── IB Connection ───────────────────────────────────────────
 
     def connect(self) -> bool:
-        """IB Gateway/TWS 연결"""
+        """Connect to IB Gateway/TWS"""
         if not HAS_IB:
-            self.logger.error("❌ ib_insync 미설치")
+            self.logger.error("❌ ib_insync not installed")
             return False
 
         self.logger.info("=" * 60)
-        self.logger.info("  🏎️ Day Trader v1.0 시작")
-        self.logger.info(f"  모드: {self.config.trade_mode.value.upper()}")
-        self.logger.info(f"  자본: ${self.config.capital:,.0f}")
+        self.logger.info("  🏎️ Day Trader v1.0 Starting")
+        self.logger.info(f"  Mode: {self.config.trade_mode.value.upper()}")
+        self.logger.info(f"  Capital: ${self.config.capital:,.0f}")
         self.logger.info("=" * 60)
 
         try:
@@ -228,23 +228,23 @@ class DayTrader:
                 clientId=self.config.client_id,
             )
             accounts = self.ib.managedAccounts()
-            self.logger.info(f"✅ IB 연결 성공 | 계좌: {accounts}")
+            self.logger.info(f"✅ IB connection successful | Account: {accounts}")
             return True
         except Exception as e:
-            self.logger.error(f"❌ IB 연결 실패: {e}")
+            self.logger.error(f"❌ IB connection failed: {e}")
             return False
 
     def disconnect(self):
         if self.ib and self.ib.isConnected():
             self.ib.disconnect()
-            self.logger.info("🔌 IB 연결 해제")
+            self.logger.info("🔌 IB disconnected")
 
-    # ── 워치리스트 ────────────────────────────────────────────
+    # ── Watchlist ────────────────────────────────────────────
 
     def setup_watchlist(self, symbols: list[str] = None):
-        """워치리스트 설정 (프리마켓 스캔 또는 수동)"""
+        """Set up watchlist (pre-market scan or manual)"""
         if symbols is None:
-            # 프리마켓 스캐너 실행
+            # Run pre-market scanner
             scanner = PremarketScanner(self.ib, self.config)
             symbols = scanner.scan()
 
@@ -258,19 +258,19 @@ class DayTrader:
                 self.watchlist.append(contract)
                 self.watchlist_symbols.append(sym)
             except Exception as e:
-                self.logger.warning(f"  ⚠️ {sym} 계약 검증 실패: {e}")
+                self.logger.warning(f"  ⚠️ {sym} contract validation failed: {e}")
 
-        self.logger.info(f"👀 워치리스트: {self.watchlist_symbols}")
+        self.logger.info(f"👀 Watchlist: {self.watchlist_symbols}")
 
     def load_portfolio(self):
-        """Day Trader 자체 포지션만 로드 (risk_manager 기반).
+        """Load only Day Trader's own positions (based on risk_manager).
 
-        ⚠️ 중요: IB 포트폴리오(ib.portfolio())는 계좌 내 모든 포지션을 반환하므로
-        Smart Trader 등 다른 전략의 포지션과 섞입니다.
-        Day Trader는 반드시 risk_manager.positions만 참조하여
-        자기가 직접 매수한 포지션만 관리합니다.
+        ⚠️ Important: IB portfolio (ib.portfolio()) returns all positions in the account,
+        which mixes with positions from other strategies like Smart Trader.
+        Day Trader must only reference risk_manager.positions
+        to manage only the positions it directly bought.
         """
-        # IB 전체 포트폴리오는 참고용으로만 읽음 (self.positions에 저장하지 않음)
+        # Read IB full portfolio for reference only (do not store in self.positions)
         self.positions = {}
         if self.risk_manager and self.risk_manager.positions:
             for sym, pos in self.risk_manager.positions.items():
@@ -282,10 +282,10 @@ class DayTrader:
                     "unrealized_pnl": 0,
                 }
 
-    # ── 데이터 수집 ───────────────────────────────────────────
+    # ── Data Collection ───────────────────────────────────────────
 
     def get_intraday_bars(self, contract, bar_size: str = None) -> Optional[pd.DataFrame]:
-        """분봉 데이터 수집"""
+        """Collect intraday bar data"""
         if bar_size is None:
             bar_size = self.config.primary_bar_size
 
@@ -306,11 +306,11 @@ class DayTrader:
             df.set_index("date", inplace=True)
             return df
         except Exception as e:
-            self.logger.error(f"❌ {contract.symbol} 분봉 요청 실패: {e}")
+            self.logger.error(f"❌ {contract.symbol} bar data request failed: {e}")
             return None
 
     def get_current_price(self, contract) -> Optional[float]:
-        """현재가 조회"""
+        """Get current price"""
         try:
             ticker = self.ib.reqMktData(contract, "", False, False)
             self.ib.sleep(1)
@@ -324,10 +324,10 @@ class DayTrader:
         except Exception:
             return None
 
-    # ── 분석 & 매매 ──────────────────────────────────────────
+    # ── Analysis & Trading ──────────────────────────────────────
 
     def analyze_stock(self, contract) -> Optional[dict]:
-        """단일 종목 분봉 분석"""
+        """Analyze single stock intraday bars"""
         symbol = contract.symbol
         df = self.get_intraday_bars(contract)
 
@@ -339,7 +339,7 @@ class DayTrader:
         low = df["low"]
         volume = df["volume"]
 
-        # 오전 세션 체크
+        # Morning session check
         is_morning = False
         try:
             from zoneinfo import ZoneInfo
@@ -348,13 +348,13 @@ class DayTrader:
         except Exception:
             pass
 
-        # 앙상블 분석
+        # Ensemble analysis
         if self.ensemble is None:
             return None
 
         decision = self.ensemble.analyze(symbol, close, high, low, volume, is_morning)
 
-        # Signal Bridge 체크 (선택)
+        # Signal Bridge check (optional)
         bridge_blocked = False
         if self.signal_bridge and decision.final_signal.name == "BUY":
             blocked, reason = self.signal_bridge.should_block_buy()
@@ -371,18 +371,18 @@ class DayTrader:
         }
 
     def process_signal(self, analysis: dict):
-        """분석 결과 → 주문 실행"""
+        """Analysis result -> execute order"""
         decision = analysis["decision"]
         symbol = analysis["symbol"]
         price = analysis["current_price"]
 
-        # 로깅
+        # Logging
         buy_count = sum(1 for s in decision.individual_signals if s.signal.name == "BUY")
         sell_count = sum(1 for s in decision.individual_signals if s.signal.name == "SELL")
 
         self.logger.info(
             f"  🎯 {symbol} | {decision.final_signal.value} | "
-            f"합의: {decision.consensus_score:+.3f} | "
+            f"Consensus: {decision.consensus_score:+.3f} | "
             f"BUY:{buy_count} SELL:{sell_count}"
         )
         for sig in decision.individual_signals:
@@ -397,45 +397,45 @@ class DayTrader:
         if analysis.get("bridge_blocked"):
             return
 
-        # 리스크 체크
+        # Risk check
         if self.risk_manager:
             risk = self.risk_manager.check_risk(symbol, price)
 
-            # 강제 청산 필요
+            # Must liquidate all positions
             if risk.must_close_all:
-                self.logger.warning(f"  🔴 {risk.level.value} — 전량 청산 명령")
+                self.logger.warning(f"  🔴 {risk.level.value} — Full liquidation order")
                 self._liquidate_all()
                 return
 
-            # 개별 종목 청산
+            # Close individual stock
             for sym in risk.must_close_symbols:
-                self.logger.warning(f"  🔴 {sym} 강제 청산")
+                self.logger.warning(f"  🔴 {sym} forced liquidation")
                 self._close_position(sym)
 
-            # 신규 진입 불가
+            # Cannot open new position
             if not risk.can_open_new and decision.final_signal.name == "BUY":
-                self.logger.info(f"  🟡 신규 진입 불가: {', '.join(risk.reasons)}")
+                self.logger.info(f"  🟡 Cannot open new position: {', '.join(risk.reasons)}")
                 return
 
-        # 주문 실행
+        # Execute order
         if decision.final_signal.name == "BUY":
             self._execute_buy(analysis)
         elif decision.final_signal.name == "SELL":
             self._execute_sell(analysis)
 
     def _execute_buy(self, analysis: dict):
-        """매수 주문"""
+        """Execute buy order"""
         symbol = analysis["symbol"]
         price = analysis["current_price"]
         decision = analysis["decision"]
 
-        # 이미 보유 중이면 스킵
+        # Skip if already holding
         if symbol in (self.risk_manager.positions if self.risk_manager else {}):
-            self.logger.info(f"  ⚪ {symbol} 이미 보유 중 — 매수 스킵")
+            self.logger.info(f"  ⚪ {symbol} already held — skipping buy")
             return
 
-        # 포지션 사이징
-        shares = 10  # 기본값
+        # Position sizing
+        shares = 10  # Default
         if self.risk_manager:
             stop_distance = abs(price - decision.stop_loss_price) if decision.stop_loss_price > 0 else 0
             sizing = self.risk_manager.calculate_position_size(
@@ -443,7 +443,7 @@ class DayTrader:
             )
             shares = sizing["shares"]
             self.logger.info(
-                f"  📏 사이징: {shares}주 × ${price:.2f} = "
+                f"  📏 Sizing: {shares} shares × ${price:.2f} = "
                 f"${sizing['dollar_amount']:,.2f} | {sizing['method']}"
             )
 
@@ -454,7 +454,7 @@ class DayTrader:
             )
             return
 
-        # AUTO 모드: 실제 주문
+        # AUTO mode: actual order
         try:
             contract = analysis["contract"]
             if self.config.use_limit_orders:
@@ -467,11 +467,11 @@ class DayTrader:
             self.ib.sleep(1)
 
             self.logger.info(
-                f"  ✅ BUY 주문 전송! {symbol} x{shares} | "
-                f"주문ID: {trade.order.orderId} | 상태: {trade.orderStatus.status}"
+                f"  ✅ BUY order sent! {symbol} x{shares} | "
+                f"OrderID: {trade.order.orderId} | Status: {trade.orderStatus.status}"
             )
 
-            # 리스크 매니저에 포지션 기록
+            # Record position in risk manager
             if self.risk_manager:
                 self.risk_manager.open_position(
                     symbol, "LONG", price, shares,
@@ -480,17 +480,17 @@ class DayTrader:
                 )
 
         except Exception as e:
-            self.logger.error(f"  ❌ BUY 주문 실패: {e}")
+            self.logger.error(f"  ❌ BUY order failed: {e}")
 
     def _execute_sell(self, analysis: dict):
-        """매도 주문 — Day Trader가 직접 매수한 포지션만 매도"""
+        """Execute sell order — only sell positions bought by Day Trader"""
         symbol = analysis["symbol"]
         price = analysis["current_price"]
 
-        # ⚠️ 핵심: risk_manager에 기록된 Day Trader 자체 포지션만 매도
-        # IB 전체 포트폴리오(self.positions)는 참조하지 않음
+        # ⚠️ Key: only sell Day Trader's own positions recorded in risk_manager
+        # Do not reference IB full portfolio (self.positions)
         if not self.risk_manager or symbol not in self.risk_manager.positions:
-            return  # Day Trader가 산 적 없으면 무조건 스킵
+            return  # Skip unconditionally if Day Trader never bought it
 
         current_qty = self.risk_manager.positions[symbol].quantity
         if current_qty <= 0:
@@ -509,24 +509,24 @@ class DayTrader:
             self.ib.sleep(1)
 
             self.logger.info(
-                f"  ✅ SELL 주문 전송! {symbol} x{current_qty} | "
-                f"주문ID: {trade.order.orderId}"
+                f"  ✅ SELL order sent! {symbol} x{current_qty} | "
+                f"OrderID: {trade.order.orderId}"
             )
 
             if self.risk_manager:
                 self.risk_manager.close_position(symbol, price)
 
         except Exception as e:
-            self.logger.error(f"  ❌ SELL 주문 실패: {e}")
+            self.logger.error(f"  ❌ SELL order failed: {e}")
 
     def _close_position(self, symbol: str):
-        """특정 종목 포지션 청산 — Day Trader 자체 포지션만"""
+        """Close position for a specific stock — Day Trader's own positions only"""
         if not HAS_IB:
             return
 
-        # Day Trader가 산 적 없으면 스킵
+        # Skip if Day Trader never bought it
         if not self.risk_manager or symbol not in self.risk_manager.positions:
-            self.logger.info(f"  ⚪ {symbol} Day Trader 포지션 아님 — 청산 스킵")
+            self.logger.info(f"  ⚪ {symbol} not a Day Trader position — skipping liquidation")
             return
 
         qty = self.risk_manager.positions[symbol].quantity
@@ -547,8 +547,8 @@ class DayTrader:
                 break
 
     def _liquidate_all(self):
-        """전 포지션 강제 청산"""
-        self.logger.warning("  🔴🔴🔴 전 포지션 강제 청산 시작!")
+        """Force liquidate all positions"""
+        self.logger.warning("  🔴🔴🔴 Force liquidating all positions!")
 
         if not self.risk_manager:
             return
@@ -556,69 +556,69 @@ class DayTrader:
         symbols = list(self.risk_manager.positions.keys())
         for symbol in symbols:
             self._close_position(symbol)
-            self.logger.info(f"    청산: {symbol}")
+            self.logger.info(f"    Liquidated: {symbol}")
 
-        self.logger.warning("  🔴🔴🔴 전 포지션 청산 완료")
+        self.logger.warning("  🔴🔴🔴 All positions liquidated")
 
-    # ── 메인 루프 ─────────────────────────────────────────────
+    # ── Main Loop ─────────────────────────────────────────────
 
     def run(self, symbols: list[str] = None):
-        """메인 데이 트레이딩 루프"""
+        """Main day trading loop"""
         if not self.ib or not self.ib.isConnected():
             if not self.connect():
                 return
 
-        # 워치리스트 설정
+        # Set up watchlist
         self.setup_watchlist(symbols)
         if not self.watchlist:
-            self.logger.error("❌ 워치리스트 비어있음!")
+            self.logger.error("❌ Watchlist is empty!")
             return
 
-        # 포트폴리오 로드
+        # Load portfolio
         self.load_portfolio()
 
-        # 리스크 매니저 일일 리셋
+        # Daily reset for risk manager
         if self.risk_manager:
             self.risk_manager.reset_daily()
 
         self.running = True
         self.logger.info(
-            f"\n🚀 데이 트레이딩 시작! "
-            f"워치리스트: {self.watchlist_symbols} | "
-            f"분석주기: {self.config.analysis_interval_sec}초"
+            f"\n🚀 Day trading started! "
+            f"Watchlist: {self.watchlist_symbols} | "
+            f"Analysis interval: {self.config.analysis_interval_sec}s"
         )
 
         try:
             while self.running:
-                # 장 상태 확인
+                # Check market status
                 if not self._is_market_open():
-                    self.logger.info("  💤 장 마감 — 대기 중...")
+                    self.logger.info("  💤 Market closed — waiting...")
                     self.ib.sleep(60)
                     continue
 
-                # 리스크 체크 (EOD 등)
+                # Risk check (EOD etc.)
                 if self.risk_manager:
                     risk = self.risk_manager.check_risk()
                     if risk.must_close_all:
                         self._liquidate_all()
-                        self.logger.info("  ⏰ EOD 청산 완료 — 종료")
+                        self.logger.info("  ⏰ EOD liquidation complete — exiting")
                         break
 
-                # 전 종목 분석
+                # Analyze all stocks
                 self._scan_cycle()
 
-                # 대시보드
+                # Dashboard
                 self.print_dashboard()
 
-                # 대기
+                # Wait
                 self.ib.sleep(self.config.analysis_interval_sec)
 
         except KeyboardInterrupt:
-            self.logger.info("\n⛔ 사용자 중단")
+            self.logger.info("\n⛔ User interrupted")
         finally:
-            # 잔여 포지션 처리
+            # Handle remaining positions
             if self.risk_manager and self.risk_manager.positions:
-                self.logger.warning(f"  ⚠️ 잔여 포지션 {len(self.risk_manager.positions)}개")
+                self.logger.warning(f"  ⚠️ {len(self.risk_manager.positions)} remaining positions")
                 if self.config.trade_mode == TradeMode.AUTO:
                     self._liquidate_all()
 
@@ -626,14 +626,14 @@ class DayTrader:
             self.disconnect()
 
     def _scan_cycle(self):
-        """전 종목 1회 분석 사이클"""
+        """Full watchlist single analysis cycle"""
         self.logger.info(f"\n{'─' * 60}")
         self.logger.info(
-            f"  🔄 스캔 사이클 | {datetime.now():%H:%M:%S} | "
-            f"워치리스트: {len(self.watchlist_symbols)}개"
+            f"  🔄 Scan cycle | {datetime.now():%H:%M:%S} | "
+            f"Watchlist: {len(self.watchlist_symbols)} stocks"
         )
 
-        # 현재가 업데이트
+        # Update current prices
         if self.risk_manager and self.risk_manager.positions:
             price_map = {}
             for contract in self.watchlist:
@@ -644,17 +644,17 @@ class DayTrader:
                         price_map[sym] = price
             self.risk_manager.update_prices(price_map)
 
-        # 전 종목 분석
+        # Analyze all stocks
         for contract in self.watchlist:
             try:
                 analysis = self.analyze_stock(contract)
                 if analysis:
                     self.process_signal(analysis)
             except Exception as e:
-                self.logger.error(f"  ❌ {contract.symbol} 분석 오류: {e}")
+                self.logger.error(f"  ❌ {contract.symbol} analysis error: {e}")
 
     def _is_market_open(self) -> bool:
-        """미국 주식 시장 개장 여부"""
+        """Check if US stock market is open"""
         try:
             from signal_bridge import is_market_open
             return is_market_open()
@@ -670,34 +670,34 @@ class DayTrader:
             market_close = now_et.replace(hour=16, minute=0, second=0)
             return market_open <= now_et <= market_close
         except Exception:
-            return True  # 판별 불가 시 실행
+            return True  # Run if unable to determine
 
-    # ── 대시보드 ──────────────────────────────────────────────
+    # ── Dashboard ──────────────────────────────────────────────
 
     def print_dashboard(self):
-        """데이 트레이딩 대시보드"""
+        """Day trading dashboard"""
         now = datetime.now()
 
         print("\n")
         print("╔" + "═" * 68 + "╗")
         print(f"║  🏎️ Day Trader Dashboard          {now:%Y-%m-%d %H:%M:%S}  ║")
         mode_str = '🤖 AUTO' if self.config.trade_mode == TradeMode.AUTO else '🔔 ALERT'
-        print(f"║  모드: {mode_str:50s}  ║")
+        print(f"║  Mode: {mode_str:50s}  ║")
         print("╠" + "═" * 68 + "╣")
 
-        # 리스크 상태
+        # Risk status
         if self.risk_manager:
             status = self.risk_manager.get_status()
             icon = "🟢" if status["daily_pnl"] >= 0 else "🔴"
             line = (
                 f"║  {icon} PnL: ${status['daily_pnl']:+,.2f} "
                 f"({status['daily_pnl_pct']:+.2f}%) | "
-                f"포지션: {status['position_count']}/{status['max_positions']} | "
-                f"매매: {status['trade_count']}회"
+                f"Positions: {status['position_count']}/{status['max_positions']} | "
+                f"Trades: {status['trade_count']}"
             )
             print(f"{line:<69s}║")
 
-            # 포지션 상세
+            # Position details
             if self.risk_manager.positions:
                 for sym, pos in self.risk_manager.positions.items():
                     pnl_icon = "🟢" if pos.unrealized_pnl >= 0 else "🔴"
@@ -710,11 +710,11 @@ class DayTrader:
 
         print("╚" + "═" * 68 + "╝")
 
-    # ── 데몬 모드 ─────────────────────────────────────────────
+    # ── Daemon Mode ─────────────────────────────────────────────
 
     def run_daemon(self):
-        """매일 아침 자동 시작 데몬"""
-        self.logger.info("  🕐 데몬 모드 — 매일 장 시작 시 자동 실행")
+        """Auto-start daemon that runs every morning"""
+        self.logger.info("  🕐 Daemon mode — auto-run at market open daily")
 
         while True:
             try:
@@ -723,46 +723,46 @@ class DayTrader:
             except Exception:
                 now_et = datetime.now()
 
-            # 평일 9:25 ET에 시작 준비
+            # Start preparation at 9:25 ET on weekdays
             if now_et.weekday() < 5 and now_et.hour == 9 and now_et.minute >= 25:
-                self.logger.info(f"  🌅 장 시작 준비 ({now_et:%Y-%m-%d %H:%M})")
+                self.logger.info(f"  🌅 Market open preparation ({now_et:%Y-%m-%d %H:%M})")
                 self.run()
-                self.logger.info("  🌙 장 종료 — 내일까지 대기")
+                self.logger.info("  🌙 Market closed — waiting until tomorrow")
 
             time.sleep(60)
 
 
 # ═══════════════════════════════════════════════════════════════
-#  데모 (IB 없이 로직 테스트)
+#  Demo (logic test without IB)
 # ═══════════════════════════════════════════════════════════════
 
 def demo():
-    """오프라인 데모"""
+    """Offline demo"""
     print("""
     ╔══════════════════════════════════════════════════════════╗
-    ║  🏎️ Day Trader v1.0 데모 (오프라인)                      ║
+    ║  🏎️ Day Trader v1.0 Demo (Offline)                      ║
     ╚══════════════════════════════════════════════════════════╝
     """)
 
-    # 전략 데모
+    # Strategy demo
     try:
         from day_strategies import DayStrategyEnsemble, DayStrategyConfig
         from day_strategies import demo as strategies_demo
         strategies_demo()
     except ImportError as e:
-        print(f"  ⚠️ 전략 모듈 로드 실패: {e}")
+        print(f"  ⚠️ Strategy module load failed: {e}")
 
     print()
 
-    # 리스크 데모
+    # Risk demo
     try:
         from day_risk import demo as risk_demo
         risk_demo()
     except ImportError as e:
-        print(f"  ⚠️ 리스크 모듈 로드 실패: {e}")
+        print(f"  ⚠️ Risk module load failed: {e}")
 
-    print("\n  ✅ 데모 완료!")
-    print("  실제 실행: python run.py --day [--auto]")
+    print("\n  ✅ Demo complete!")
+    print("  Live execution: python run.py --day [--auto]")
 
 
 if __name__ == "__main__":
