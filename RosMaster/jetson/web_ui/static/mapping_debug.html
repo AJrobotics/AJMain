@@ -10,7 +10,7 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
 
 #header {
     background: #12122a; border-bottom: 1px solid #333; padding: 6px 16px;
-    display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap;
 }
 #header h1 { color: #00d4ff; font-size: 16px; white-space: nowrap; }
 .view-btn {
@@ -70,6 +70,10 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
 
 <div id="header">
     <h1>MAPPING DEBUG</h1>
+    <select id="mode-select" onchange="setMode(this.value)" style="background:#1a1a3a;color:#0f8;border:2px solid #0f8;padding:5px 10px;font-family:inherit;font-size:13px;font-weight:bold;border-radius:3px;">
+        <option value="live">Live</option>
+        <option value="offline">Offline</option>
+    </select>
     <button class="view-btn active" data-view="raw" onclick="setView('raw')">Raw Map</button>
     <button class="view-btn" data-view="walls" onclick="setView('walls')">Wall Lines</button>
     <button class="view-btn" data-view="floor" onclick="setView('floor')">Floor Plan</button>
@@ -77,11 +81,7 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
     <button class="hdr-btn" onclick="loadMap()">Load</button>
     <button class="hdr-btn" onclick="fetchGrid()">Refresh Grid</button>
     <button class="hdr-btn danger" onclick="resetMap()">Reset</button>
-    <select id="mode-select" onchange="setMode(this.value)" style="margin-left:auto;background:#1a1a3a;color:#0f8;border:1px solid #444;padding:4px 8px;font-family:inherit;font-size:12px;border-radius:3px;">
-        <option value="live">Live</option>
-        <option value="offline">Offline</option>
-    </select>
-    <span id="conn-info" style="margin-left:8px;">Disconnected</span>
+    <span id="conn-info" style="margin-left:auto;">Disconnected</span>
 </div>
 
 <div id="stats-bar">
@@ -171,6 +171,10 @@ function setMode(mode) {
         info.textContent = 'Offline';
         info.style.color = '#f80';
         selectedRecEntry = null;
+        wallLines = [];
+        poseHistory = [];
+        pose = [15000, 15000, 0];
+        gridData = null;  // clear live grid
         needsRedraw = true;
     } else {
         // Reconnect live
@@ -402,10 +406,17 @@ function draw() {
     if (viewMode === 'walls' || viewMode === 'floor') {
         drawWallLinesView();
     }
-    if (document.getElementById('ov-traj').checked) drawTrajectory();
-    if (document.getElementById('ov-walls').checked && viewMode === 'raw') drawWallLines();
-    if (document.getElementById('ov-robot').checked) drawRobot();
-    if (selectedRecEntry) drawRecScanOnMap(selectedRecEntry);
+    if (appMode === 'offline' && selectedRecEntry) {
+        // Offline: show trajectory up to selected frame + that frame's scan only
+        if (document.getElementById('ov-traj').checked) drawOfflineTrajectory();
+        drawRecScanOnMap(selectedRecEntry);
+    } else {
+        // Live: show everything
+        if (document.getElementById('ov-traj').checked) drawTrajectory();
+        if (document.getElementById('ov-walls').checked && viewMode === 'raw') drawWallLines();
+        if (document.getElementById('ov-robot').checked) drawRobot();
+        if (selectedRecEntry) drawRecScanOnMap(selectedRecEntry);
+    }
 
     ctx.restore();
 }
@@ -495,6 +506,50 @@ function drawRobot() {
         ctx.beginPath();
         ctx.arc(hx, hy, size * 0.7, 0, Math.PI * 2);
         ctx.fill();
+    }
+}
+
+// ============================================================
+// Offline trajectory (up to selected frame only)
+// ============================================================
+function drawOfflineTrajectory() {
+    if (!currentRecLog || !selectedRecEntry) return;
+    const selectedIdx = selectedRecEntry.frame || 0;
+
+    // Draw trajectory up to selected frame (dimmer for past, bright for current)
+    ctx.strokeStyle = 'rgba(0, 200, 255, 0.3)';
+    ctx.lineWidth = 1 / zoom;
+    ctx.beginPath();
+    for (let i = 0; i <= Math.min(selectedIdx, currentRecLog.length - 1); i++) {
+        const p = currentRecLog[i].pose;
+        const x = p[0] / CELL, y = p[1] / CELL;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Draw dots at each recorded pose (small, dim)
+    ctx.fillStyle = 'rgba(0, 200, 255, 0.4)';
+    const dotR = 2 / zoom;
+    for (let i = 0; i <= Math.min(selectedIdx, currentRecLog.length - 1); i++) {
+        const p = currentRecLog[i].pose;
+        ctx.beginPath();
+        ctx.arc(p[0] / CELL, p[1] / CELL, dotR, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Draw future trajectory as very dim dotted
+    if (selectedIdx < currentRecLog.length - 1) {
+        ctx.strokeStyle = 'rgba(100, 100, 100, 0.2)';
+        ctx.setLineDash([2 / zoom, 4 / zoom]);
+        ctx.beginPath();
+        const p0 = currentRecLog[selectedIdx].pose;
+        ctx.moveTo(p0[0] / CELL, p0[1] / CELL);
+        for (let i = selectedIdx + 1; i < currentRecLog.length; i++) {
+            const p = currentRecLog[i].pose;
+            ctx.lineTo(p[0] / CELL, p[1] / CELL);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
     }
 }
 
@@ -590,6 +645,30 @@ function fitView() {
     needsRedraw = true;
 }
 
+function fitOfflineView() {
+    if (!currentRecLog || currentRecLog.length < 2) return;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const entry of currentRecLog) {
+        const gx = entry.pose[0] / CELL, gy = entry.pose[1] / CELL;
+        if (gx < minX) minX = gx;
+        if (gx > maxX) maxX = gx;
+        if (gy < minY) minY = gy;
+        if (gy > maxY) maxY = gy;
+        // Also consider LiDAR range (~5m = 100 cells)
+    }
+    // Add margin for LiDAR range
+    const margin = 100;  // ~5m in grid cells
+    minX -= margin; minY -= margin;
+    maxX += margin; maxY += margin;
+    const w = canvas.width, h = canvas.height;
+    const gw = maxX - minX, gh = maxY - minY;
+    if (gw < 1 || gh < 1) return;
+    zoom = Math.min((w - 40) / gw, (h - 40) / gh);
+    panX = w / 2 - (minX + gw / 2) * zoom;
+    panY = h / 2 - (minY + gh / 2) * zoom;
+    needsRedraw = true;
+}
+
 // ============================================================
 // Render loop + periodic updates
 // ============================================================
@@ -617,9 +696,12 @@ async function fetchRecordings() {
 }
 
 async function openRecording(name, videoFile) {
-    // Auto-switch to offline mode
+    // Auto-switch to offline mode and clear everything
     document.getElementById('mode-select').value = 'offline';
     setMode('offline');
+    gridData = null;
+    wallLines = [];
+    selectedRecEntry = null;
 
     document.getElementById('rec-viewer').style.display = 'block';
     const video = document.getElementById('rec-video');
@@ -643,6 +725,8 @@ async function openRecording(name, videoFile) {
         document.getElementById('st-loops').textContent = '-';
         document.getElementById('st-cells').textContent = currentRecLog.length + ' frames';
         needsRedraw = true;
+        // Auto-fit view to recorded trajectory
+        fitOfflineView();
 
         const tbody = document.getElementById('rec-log-body');
         tbody.innerHTML = currentRecLog.map((entry, i) =>
