@@ -70,6 +70,11 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
 
 <div id="header">
     <h1>MAPPING DEBUG</h1>
+    <nav style="display:flex;gap:8px;margin-left:12px;">
+        <a href="/" style="color:#0df;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#0a0e1a;">Dashboard</a>
+        <a href="/static/sensor_debug.html" style="color:#0f8;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#0a0e1a;">Sensors</a>
+        <a href="/static/mapping_debug.html" style="color:#f80;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#16213e;">Mapping</a>
+    </nav>
     <select id="mode-select" onchange="setMode(this.value)" style="background:#1a1a3a;color:#0f8;border:2px solid #0f8;padding:5px 10px;font-family:inherit;font-size:13px;font-weight:bold;border-radius:3px;">
         <option value="live">Live</option>
         <option value="offline">Offline</option>

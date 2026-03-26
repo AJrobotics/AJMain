@@ -524,60 +524,27 @@ class Explorer:
             # Initial scan
             self._initial_scan()
 
-            # Find the nearest wall, approach it, then orient for following
+            # Simple start: find nearest wall, orient so it's on the correct side
             _log.info("Finding nearest wall...")
             if self.collision:
                 self.collision.update_sectors()
                 sectors = self.collision.get_sector_distances()
-                # Find sector with closest wall (excluding rear ignore)
+                # Find sector with closest wall
                 min_idx = min(range(8), key=lambda i: sectors[i])
-                target_angle = min_idx * 45
-                _log.info(f"Nearest wall in sector {min_idx} ({target_angle}°) at {sectors[min_idx]}mm")
+                _log.info(f"Nearest wall in sector {min_idx} ({min_idx*45}°) at {sectors[min_idx]}mm")
 
-                # Turn to face the wall
-                self._rotate_by(target_angle, speed=0.3)
-
-                # Drive toward the wall until within target distance + margin
-                approach_target = target_wall_dist + 100  # stop a bit before target
-                _log.info(f"Approaching wall (target {approach_target}mm)...")
-                approach_steps = 0
-                while not self._abort and self.state == "exploring" and approach_steps < 200:
-                    self.collision.update_sectors()
-                    front = self.collision.get_sector_distances()[0]
-                    if front <= approach_target:
-                        _log.info(f"Reached wall at {front}mm")
-                        break
-                    self._move_filtered(0.06, 0, 0)  # slow approach
-                    approach_steps += 1
-                    time.sleep(1.0 / EXPLORE_UPDATE_HZ)
-                self._stop_motors()
-
-                # Turn so wall is on the chosen side
-                # After approaching, the wall is in front (sector 0).
-                # For left-follow: turn right 90° → wall ends up on left (sector 6)
-                # For right-follow: turn left 90° → wall ends up on right (sector 2)
-                if self._wall_follow_dir == "right":
-                    self._rotate_by(-90, speed=0.3)  # turn left → wall on right
-                else:
-                    self._rotate_by(90, speed=0.3)   # turn right → wall on left
-
-                # Verify wall is on correct side, adjust if needed
-                self.collision.update_sectors()
-                sectors = self.collision.get_sector_distances()
+                # Turn so that wall is on the follow side
+                # For left-follow: wall should be in sector 6 (270°)
+                # For right-follow: wall should be in sector 2 (90°)
                 wall_sector = 2 if self._wall_follow_dir == "right" else 6
-                if sectors[wall_sector] > 1000:
-                    _log.info(f"Wall not on expected side (sector {wall_sector}={sectors[wall_sector]}mm), adjusting...")
-                    # Find which sector has the wall
-                    min_idx = min(range(8), key=lambda i: sectors[i])
-                    if sectors[min_idx] < 1000:
-                        # Calculate how much to turn to put this sector at sector 2 or 6
-                        current_wall_angle = min_idx * 45
-                        target_wall_angle = wall_sector * 45
-                        turn = target_wall_angle - current_wall_angle
-                        if turn > 180: turn -= 360
-                        if turn < -180: turn += 360
-                        _log.info(f"Wall in sector {min_idx} ({current_wall_angle}°), turning {turn}° to align")
-                        self._rotate_by(turn, speed=0.3)
+                target_wall_angle = wall_sector * 45
+                current_wall_angle = min_idx * 45
+                turn = target_wall_angle - current_wall_angle
+                if turn > 180: turn -= 360
+                if turn < -180: turn += 360
+                if abs(turn) > 10:
+                    _log.info(f"Turning {turn}° to put wall on {'right' if self._wall_follow_dir == 'right' else 'left'} side")
+                    self._rotate_by(turn, speed=0.3)
 
             while not self._abort and self.state == "exploring":
                 # Check time limit
@@ -624,8 +591,9 @@ class Explorer:
                     else:
                         self._rotate_by(-90, speed=0.3)
                     continue
-                elif wall_dist > 1500:
-                    # Lost wall — inside corner, turn 90° toward wall
+                elif wall_dist > max(3000, target_wall_dist * 15):
+                    # Lost wall — only if was previously tracking (not just far away)
+                    # Inside corner: turn 90° toward wall
                     self._stop_motors()
                     _log.info(f"Inside corner: lost wall ({wall_dist}mm), turning 90° toward wall")
                     if self._wall_follow_dir == "right":

@@ -77,6 +77,11 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
 
 <div id="header">
     <h1>SENSOR DEBUG</h1>
+    <nav style="display:flex;gap:8px;margin-left:12px;">
+        <a href="/" style="color:#0df;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#0a0e1a;">Dashboard</a>
+        <a href="/static/sensor_debug.html" style="color:#0f8;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#16213e;">Sensors</a>
+        <a href="/static/mapping_debug.html" style="color:#f80;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#0a0e1a;">Mapping</a>
+    </nav>
     <div class="tab-bar">
         <button class="tab-btn active" data-tab="lidar">LiDAR</button>
         <button class="tab-btn" data-tab="depth">Depth</button>
