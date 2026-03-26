@@ -152,6 +152,7 @@
             <div class="status-item"><span class="dot dot-err" id="dot-depth"></span><span>Depth</span></div>
             <div class="status-item"><span class="dot dot-err" id="dot-cam1"></span><span>Cam</span></div>
             <div class="status-item"><span class="dot dot-err" id="dot-xbee"></span><span>XBee</span></div>
+            <div class="status-item"><span class="dot dot-err" id="dot-gps"></span><span id="gps-label">GPS</span></div>
             <div class="status-item"><span id="battery-val">--V</span></div>
             <div class="status-item"><span id="ip-val">--</span></div>
         </div>
@@ -250,6 +251,7 @@
                         <button class="cal-btn" onclick="explorerCmd('wall_follow')" style="background:#1a1a3a;color:#ff0;">Wall-R</button>
                         <button class="cal-btn" onclick="explorerCmd('wall_follow_left')" style="background:#1a1a3a;color:#ff0;">Wall-L</button>
                         <button class="cal-btn" onclick="explorerCmd('spiral')" style="background:#1a1a3a;color:#0f8;">Spiral</button>
+                        <button class="cal-btn" onclick="explorerCmd('nn_explore')" style="background:#2a1a3a;color:#f0f;">NN</button>
                         <button class="cal-btn" onclick="explorerCmd('scan_test')" style="background:#1a3a3a;color:#0df;">Scan</button>
                         <button class="cal-btn" onclick="explorerCmd('return_home')">Return</button>
                         <button class="cal-btn cal-abort" onclick="explorerCmd('stop')">Stop</button>
@@ -290,6 +292,22 @@
                 <div class="panel-row"><span class="panel-label">Pitch</span><span class="panel-value" id="imu-pitch">--</span></div>
                 <div class="panel-row"><span class="panel-label">Yaw</span><span class="panel-value" id="imu-yaw">--</span></div>
                 <div class="panel-row"><span class="panel-label">Accel Z</span><span class="panel-value" id="imu-az">--</span></div>
+            </div>
+
+            <!-- XBee & GPS -->
+            <div class="panel">
+                <h3>XBee / GPS</h3>
+                <div class="panel-row"><span class="panel-label">XBee</span><span class="panel-value"><span id="xbee-status" style="color:#ff4444;">N/C</span> <button class="cal-btn" id="xbee-toggle" onclick="xbeeToggle()" style="padding:1px 6px;font-size:10px;background:#1a3a1a;color:#0f8;margin-left:6px;">ON</button></span></div>
+                <div class="panel-row"><span class="panel-label">RX / TX</span><span class="panel-value" id="xbee-counts">0 / 0</span></div>
+                <div class="panel-row"><span class="panel-label">Last From</span><span class="panel-value" id="xbee-last-addr">--</span></div>
+                <div class="panel-row"><span class="panel-label">GPS</span><span class="panel-value" id="gps-status" style="color:#ff4444;">N/C</span></div>
+                <div class="panel-row"><span class="panel-label">Position</span><span class="panel-value" id="gps-position" style="font-size:10px;">--</span></div>
+                <div class="panel-row"><span class="panel-label">Sats</span><span class="panel-value" id="gps-sats">--</span></div>
+                <div style="margin-top:6px;display:flex;gap:3px;">
+                    <input type="text" id="xbee-msg" placeholder="Message to broadcast" style="flex:1;background:#0a0a1a;color:#0df;border:1px solid #333;padding:3px 6px;font-size:11px;">
+                    <button class="cal-btn" onclick="xbeeBroadcast()" style="background:#1a2a3a;color:#0df;padding:2px 8px;">Send</button>
+                </div>
+                <div id="xbee-log" style="margin-top:4px;max-height:80px;overflow-y:auto;font-size:10px;color:#888;font-family:monospace;"></div>
             </div>
 
             <!-- Collision Avoidance -->

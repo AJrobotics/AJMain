@@ -611,6 +611,40 @@ function connectStatusWS() {
                 document.getElementById('dot-depth').className = 'dot dot-ok';
             }
 
+            // XBee status
+            const xbeeDot = document.getElementById('dot-xbee');
+            if (xbeeDot) xbeeDot.className = data.xbee_connected ? 'dot dot-ok' : 'dot dot-err';
+            const xbeeStatus = document.getElementById('xbee-status');
+            if (xbeeStatus) {
+                xbeeStatus.textContent = data.xbee_connected ? 'Connected' : 'N/C';
+                xbeeStatus.style.color = data.xbee_connected ? '#00ff88' : '#ff4444';
+            }
+
+            // GPS status
+            const gpsDot = document.getElementById('dot-gps');
+            const gpsLabel = document.getElementById('gps-label');
+            if (gpsDot && data.gps) {
+                gpsDot.className = data.gps.fix ? 'dot dot-ok' : (data.gps.satellites > 0 ? 'dot dot-sim' : 'dot dot-err');
+                if (gpsLabel) gpsLabel.textContent = data.gps.fix ? 'GPS ' + data.gps.satellites + 'sat' : 'GPS';
+                const gpsStatusEl = document.getElementById('gps-status');
+                const gpsPosEl = document.getElementById('gps-position');
+                const gpsSatsEl = document.getElementById('gps-sats');
+                if (gpsStatusEl) {
+                    gpsStatusEl.textContent = data.gps.fix ? 'Fix' : 'No fix';
+                    gpsStatusEl.style.color = data.gps.fix ? '#00ff88' : '#ffaa00';
+                }
+                if (gpsPosEl) {
+                    if (data.gps.fix) {
+                        const lat = Math.abs(data.gps.latitude).toFixed(4) + (data.gps.latitude >= 0 ? 'N' : 'S');
+                        const lon = Math.abs(data.gps.longitude).toFixed(4) + (data.gps.longitude >= 0 ? 'E' : 'W');
+                        gpsPosEl.textContent = lat + ' ' + lon + ' ' + data.gps.altitude_m.toFixed(0) + 'm';
+                    } else {
+                        gpsPosEl.textContent = '--';
+                    }
+                }
+                if (gpsSatsEl) gpsSatsEl.textContent = data.gps.satellites;
+            }
+
             if (data.imu) {
                 document.getElementById('imu-roll').textContent = data.imu.angles.roll.toFixed(1) + '\u00B0';
                 document.getElementById('imu-pitch').textContent = data.imu.angles.pitch.toFixed(1) + '\u00B0';
@@ -744,7 +778,7 @@ function explorerCmd(action) {
         payload.direction = 'left';
     }
     // Pass time limit and wall distance to all exploration modes
-    if (['start', 'floor_plan', 'wall_follow', 'spiral'].includes(payload.action)) {
+    if (['start', 'floor_plan', 'wall_follow', 'spiral', 'nn_explore'].includes(payload.action)) {
         const timeEl = document.getElementById('explore-time');
         if (timeEl) payload.time_limit = parseInt(timeEl.value) || 300;
         const wallEl = document.getElementById('wall-dist');
@@ -828,6 +862,64 @@ function toggleLandmarks(enabled) {
     });
 }
 window.toggleLandmarks = toggleLandmarks;
+
+// --- XBee / GPS panel ---
+let _xbeePollTimer = null;
+function pollXBeeStatus() {
+    fetch('/api/xbee').then(r => r.json()).then(d => {
+        const countsEl = document.getElementById('xbee-counts');
+        const lastEl = document.getElementById('xbee-last-addr');
+        if (countsEl) countsEl.textContent = d.rx_count + ' / ' + d.tx_count;
+        if (lastEl) lastEl.textContent = d.last_rx_addr || '--';
+        updateXbeeToggleBtn(d.enabled);
+    }).catch(() => {});
+}
+_xbeePollTimer = setInterval(pollXBeeStatus, 3000);
+pollXBeeStatus();
+
+function xbeeToggle() {
+    fetch('/api/xbee').then(r => r.json()).then(d => {
+        const action = d.enabled ? 'disable' : 'enable';
+        fetch('/api/xbee', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action}),
+        }).then(r => r.json()).then(r => {
+            updateXbeeToggleBtn(r.enabled);
+        });
+    });
+}
+function updateXbeeToggleBtn(enabled) {
+    const btn = document.getElementById('xbee-toggle');
+    if (btn) {
+        btn.textContent = enabled ? 'ON' : 'OFF';
+        btn.style.background = enabled ? '#1a3a1a' : '#3a1a1a';
+        btn.style.color = enabled ? '#0f8' : '#f44';
+    }
+}
+window.xbeeToggle = xbeeToggle;
+
+function xbeeBroadcast() {
+    const input = document.getElementById('xbee-msg');
+    const msg = input.value.trim();
+    if (!msg) return;
+    fetch('/api/xbee', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: msg}),
+    }).then(r => r.json()).then(d => {
+        const log = document.getElementById('xbee-log');
+        if (log) {
+            const line = document.createElement('div');
+            line.textContent = '> ' + msg;
+            line.style.color = '#0df';
+            log.appendChild(line);
+            log.scrollTop = log.scrollHeight;
+        }
+        input.value = '';
+    }).catch(() => {});
+}
+window.xbeeBroadcast = xbeeBroadcast;
 
 // --- Collision thresholds ---
 function setCollision() {

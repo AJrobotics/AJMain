@@ -31,7 +31,8 @@
       "Bash(ssh dongchul@192.168.1.91 'grep -n \"\"yolo\\\\|YOLO\\\\|Startup\"\" /home/dongchul/AJMain/app.py')",
       "Bash(ssh dongchul@192.168.1.91 \"pkill -f ''python.*app.py'' || true\")",
       "Bash(ssh dongchul@192.168.1.91 \"pkill -f ''python3.*app.py'' 2>/dev/null; true\")",
-      "Bash(ssh dongchul@192.168.1.91 \"ps aux | grep app.py | grep -v grep\")"
+      "Bash(ssh dongchul@192.168.1.91 \"ps aux | grep app.py | grep -v grep\")",
+      "Bash(git add:*)"
     ]
   }
 }

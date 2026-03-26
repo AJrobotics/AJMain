@@ -65,6 +65,7 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
 .map-item:hover { background: #1a1a3a; }
 #wall-info span { color: #0df; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/ort.min.js"></script>
 </head>
 <body>
 
@@ -78,10 +79,12 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
     <select id="mode-select" onchange="setMode(this.value)" style="background:#1a1a3a;color:#0f8;border:2px solid #0f8;padding:5px 10px;font-family:inherit;font-size:13px;font-weight:bold;border-radius:3px;">
         <option value="live">Live</option>
         <option value="offline">Offline</option>
+        <option value="simulation">Simulation</option>
     </select>
     <button class="view-btn active" data-view="raw" onclick="setView('raw')">Raw Map</button>
     <button class="view-btn" data-view="walls" onclick="setView('walls')">Wall Lines</button>
     <button class="view-btn" data-view="floor" onclick="setView('floor')">Floor Plan</button>
+    <button class="view-btn" data-view="gps" onclick="setView('gps')">GPS</button>
     <button class="hdr-btn" onclick="saveMap()">Save</button>
     <button class="hdr-btn" onclick="loadMap()">Load</button>
     <button class="hdr-btn" onclick="fetchGrid()">Refresh Grid</button>
@@ -127,8 +130,150 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
             <div class="sp-title">Recordings</div>
             <div id="rec-list">Loading...</div>
         </div>
+        <div class="sp-section" id="gps-panel" style="display:none;">
+            <div class="sp-title">GPS</div>
+            <div class="sp-row"><span>Fix:</span><span id="gps-fix" style="color:#f44;">No</span></div>
+            <div class="sp-row"><span>Satellites:</span><span id="gps-sats">0</span></div>
+            <div class="sp-row"><span>Latitude:</span><span id="gps-lat">-</span></div>
+            <div class="sp-row"><span>Longitude:</span><span id="gps-lon">-</span></div>
+            <div class="sp-row"><span>Altitude:</span><span id="gps-alt">-</span></div>
+            <div class="sp-row"><span>Speed:</span><span id="gps-speed">-</span></div>
+            <div class="sp-row"><span>Heading:</span><span id="gps-heading">-</span></div>
+            <div class="sp-row"><span>UTC:</span><span id="gps-utc">-</span></div>
+            <div class="sp-row"><span>Age:</span><span id="gps-age" style="color:#888;">-</span></div>
+            <div class="sp-title" style="margin-top:10px;">COMM TEST</div>
+            <div class="sp-row">
+                <span>Master:</span>
+                <select id="ct-master" style="background:#1a1a3a;color:#0f8;border:1px solid #333;font-size:11px;">
+                    <option value="dreamer">Dreamer</option>
+                    <option value="christy">Christy</option>
+                </select>
+            </div>
+            <div class="sp-row"><span>Slave:</span><span style="color:#0df;">Rosmaster</span></div>
+            <div style="display:flex;gap:3px;margin:6px 0;flex-wrap:wrap;">
+                <button class="hdr-btn" onclick="commTestQuery('http')" style="font-size:10px;padding:3px 6px;">Query HTTP</button>
+                <button class="hdr-btn" onclick="commTestQuery('xbee')" style="font-size:10px;padding:3px 6px;">Query XBee</button>
+            </div>
+            <div style="display:flex;gap:3px;margin:0 0 6px;flex-wrap:wrap;">
+                <button class="hdr-btn" onclick="commTestSend('http')" style="font-size:10px;padding:3px 6px;">Send HTTP</button>
+                <button class="hdr-btn" onclick="commTestSend('xbee')" style="font-size:10px;padding:3px 6px;">Send XBee</button>
+            </div>
+            <div class="sp-row">
+                <span>Test Lat:</span>
+                <input id="ct-test-lat" type="number" step="0.000001" value="37.421998"
+                    style="width:90px;background:#1a1a3a;color:#0f8;border:1px solid #333;font-size:10px;text-align:right;">
+            </div>
+            <div class="sp-row">
+                <span>Test Lon:</span>
+                <input id="ct-test-lon" type="number" step="0.000001" value="-122.084000"
+                    style="width:90px;background:#1a1a3a;color:#0f8;border:1px solid #333;font-size:10px;text-align:right;">
+            </div>
+            <label class="sp-check"><input type="checkbox" id="ct-use-live" onchange="commTestUpdateInputs()">Use Slave GPS</label>
+            <div class="sp-title" style="margin-top:6px;">RESULTS</div>
+            <div id="ct-results" style="font-size:10px;color:#888;max-height:160px;overflow-y:auto;border:1px solid #222;padding:4px;background:#080810;">
+                No tests run yet
+            </div>
+        </div>
+        <div class="sp-section" id="sim-panel" style="display:none;">
+            <div class="sp-title">Simulation</div>
+            <div class="sp-row"><span>Policy:</span>
+                <select id="sim-policy" onchange="simPolicy=this.value;simRunOnce();" style="background:#1a1a3a;color:#0f8;border:1px solid #333;font-size:11px;">
+                    <option value="rule">Rule-based</option>
+                    <option value="nn">Neural Network</option>
+                </select>
+            </div>
+            <div class="sp-row"><span>Robot:</span><span id="sim-pose-info">Click map to place</span></div>
+            <div class="sp-row"><span>Level:</span><span id="sim-level">-</span></div>
+            <div class="sp-row"><span>Sectors:</span><span id="sim-sectors" style="font-size:9px;">-</span></div>
+            <div class="sp-row"><span>Frontiers:</span><span id="sim-frontier-info">-</span></div>
+            <div class="sp-row"><span>Target:</span><span id="sim-target-info">-</span></div>
+            <div class="sp-row"><span>Explored:</span><span id="sim-explored-info">-</span></div>
+            <div class="sp-row"><span>Step:</span><span id="sim-step-info">0</span></div>
+            <div class="sp-row"><span>Collisions:</span><span id="sim-collision-info" style="color:#f44;">0</span></div>
+            <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+                <button class="hdr-btn" onclick="simStepOnce()" style="font-size:11px;">Step</button>
+                <button class="hdr-btn" id="sim-auto-btn" onclick="simToggleAuto()" style="font-size:11px;">Auto ▶</button>
+                <select id="sim-speed" onchange="simChangeSpeed(this.value)" style="background:#1a1a2a;color:#0df;border:1px solid #333;font-size:10px;padding:2px;">
+                    <option value="200">Slow</option>
+                    <option value="50" selected>Normal</option>
+                    <option value="10">Fast</option>
+                    <option value="1">Max</option>
+                </select>
+                <button class="hdr-btn danger" onclick="simReset()" style="font-size:11px;">Reset</button>
+                <button class="hdr-btn" onclick="simGenerateRoom();fitView();simInit();" style="font-size:11px;background:#1a2a3a;color:#0df;">New Room</button>
+            </div>
+            <div style="margin-top:4px;font-size:10px;color:#666;">
+                Click map to place robot. Drag to set heading.
+            </div>
+        </div>
+        <div class="sp-section" id="train-panel" style="display:none;">
+            <div class="sp-title">Training Pipeline</div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+                <div style="display:flex;align-items:center;gap:4px;">
+                    <span style="font-size:10px;color:#0df;">Task:</span>
+                    <select id="train-task" style="flex:1;background:#0a0a1a;color:#ff0;border:1px solid #333;padding:2px;font-size:11px;">
+                        <option value="explore">Explore</option>
+                        <option value="floor_plan">Floor Plan</option>
+                        <option value="wall_follow">Wall Follow</option>
+                    </select>
+                    <span id="train-task-status" style="font-size:9px;color:#666;white-space:nowrap;"></span>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                    <button class="hdr-btn" onclick="trainStep('generate')" style="font-size:11px;width:100%;text-align:left;background:#1a2a1a;">
+                        1. Generate Maps</button>
+                    <span id="train-maps-count" style="font-size:10px;color:#888;white-space:nowrap;">0 maps</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                    <button class="hdr-btn" onclick="trainStep('train')" style="font-size:11px;width:100%;text-align:left;background:#1a1a2a;">
+                        2. Train NN</button>
+                    <input type="number" id="train-timesteps" value="500000" min="5000" max="2000000" step="50000"
+                        style="width:55px;background:#0a0a1a;color:#0df;border:1px solid #333;padding:2px;font-size:10px;text-align:right;" title="Timesteps">
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                    <button class="hdr-btn" onclick="trainStep('evaluate')" style="font-size:11px;width:100%;text-align:left;background:#2a1a1a;">
+                        3. Evaluate</button>
+                    <span id="train-model-status" style="font-size:10px;color:#888;white-space:nowrap;">no model</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                    <button class="hdr-btn" onclick="simLoadONNX();document.getElementById('sim-policy').value='nn';simPolicy='nn';" style="font-size:11px;width:100%;text-align:left;background:#1a2a2a;">
+                        4. Load in Sim</button>
+                    <span id="train-onnx-status" style="font-size:10px;color:#888;white-space:nowrap;">-</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                    <button class="hdr-btn" onclick="trainStep('deploy')" style="font-size:11px;width:100%;text-align:left;background:#2a2a1a;">
+                        5. Deploy to Jetson</button>
+                    <span style="font-size:10px;color:#666;">scp + deploy</span>
+                </div>
+            </div>
+            <div style="margin-top:6px;display:flex;gap:4px;">
+                <button class="hdr-btn danger" onclick="trainStep('stop')" style="font-size:11px;">Stop</button>
+                <span id="train-status-label" style="font-size:10px;color:#888;margin-left:4px;line-height:24px;">Idle</span>
+            </div>
+            <div id="train-progress-wrap" style="display:none;margin-top:4px;">
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:#0df;margin-bottom:2px;">
+                    <span id="train-progress-text">0 / 100,000 steps</span>
+                    <span id="train-progress-pct">0%</span>
+                </div>
+                <div style="width:100%;height:10px;background:#111;border:1px solid #333;border-radius:3px;overflow:hidden;">
+                    <div id="train-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#0af,#0f8);transition:width 0.3s;"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:9px;color:#666;margin-top:2px;">
+                    <span id="train-reward-text">Reward: -</span>
+                    <span id="train-eta-text">ETA: -</span>
+                </div>
+            </div>
+            <div id="train-log" style="margin-top:4px;max-height:150px;overflow-y:auto;background:#050510;border:1px solid #222;padding:4px;font-size:9px;color:#888;font-family:monospace;white-space:pre-wrap;word-break:break-all;">
+                Ready. Click Step 1 to start.
+            </div>
+        </div>
         <div class="sp-section" id="rec-viewer" style="display:none;">
             <div class="sp-title">Playback</div>
+            <div style="display:flex;gap:4px;margin-bottom:4px;">
+                <button class="hdr-btn" id="build-map-btn" onclick="buildMapFromRecording()" style="font-size:11px;flex:1;">Build Map</button>
+                <button class="hdr-btn" id="test-in-sim-btn" onclick="testBuiltMapInSim()" style="font-size:11px;display:none;background:#1a2a3a;color:#0df;">Test in Sim</button>
+                <button class="hdr-btn danger" id="clear-built-map-btn" onclick="clearBuiltMap()" style="font-size:11px;display:none;">Clear</button>
+            </div>
+            <div id="build-map-status" style="font-size:10px;color:#888;margin-bottom:4px;display:none;"></div>
             <video id="rec-video" controls style="width:100%;background:#000;border:1px solid #333;"></video>
             <div id="rec-pose-info" style="font-size:10px;color:#0f8;margin-top:4px;">-</div>
             <canvas id="rec-lidar-canvas" width="200" height="200" style="width:100%;background:#0a0a1a;border:1px solid #333;margin-top:4px;"></canvas>
@@ -144,6 +289,23 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
 
 <script>
 // ============================================================
+// Host configuration
+// ============================================================
+// URL params: ?robot=192.168.1.99:8080 (Jetson for live data/recordings)
+// When served from Dreamer (localhost:8080), robot API/WS calls go to Jetson
+// When served from Jetson directly, everything is same-origin
+const urlParams = new URLSearchParams(window.location.search);
+const ROBOT_HOST = urlParams.get('robot') || null;  // null = same origin
+const LOCAL_HOST = location.host;  // where page is served from
+
+// Robot API base URL (for live data, recordings, SLAM)
+const ROBOT_BASE = ROBOT_HOST ? ('http://' + ROBOT_HOST) : '';
+const ROBOT_WS = ROBOT_HOST || LOCAL_HOST;
+
+// Training API always goes to local server (Dreamer)
+const TRAIN_BASE = '';  // same origin
+
+// ============================================================
 // State
 // ============================================================
 const GRID = 600, CELL = 50;
@@ -151,10 +313,40 @@ let gridData = null;        // Float32Array (600x600)
 let wallLines = [];
 let pose = [15000, 15000, 0];
 let poseHistory = [];
-let viewMode = 'raw';       // raw, walls, floor
+let viewMode = 'raw';       // raw, walls, floor, gps
 let needsRedraw = true;
 let selectedRecEntry = null; // recording entry to overlay on main canvas
-let appMode = 'live';        // live or offline
+let appMode = 'live';        // live, offline, or simulation
+
+// ============================================================
+// Simulation State
+// ============================================================
+let simRobot = { x: 15000, y: 15000, theta: 0 };
+let simScan = [];           // [{angle, dist}, ...] ray-cast results (360 rays)
+let simSectors = new Float32Array(8).fill(9999);
+let simFrontiers = [];      // [{x, y}, ...] frontier cell positions (world mm)
+let simClusters = [];       // [{cx, cy, count}, ...] sorted by distance
+let simTarget = null;       // selected cluster target
+let simLevel = 'CLEAR';
+let simPlacing = false;     // true while dragging to set heading
+let simPlaceStart = null;   // {x, y} mouse down position for heading drag
+let simStep = 0;
+let simCollisions = 0;
+let simExplored = new Set();
+let simAutoRunning = false;
+let simAutoTimer = null;
+let simOnnxSession = null;  // ONNX Runtime session for NN inference
+let simPolicy = 'rule';     // 'rule' or 'nn'
+const SIM_STOP = 100, SIM_SLOW = 200, SIM_CAUTION = 300;
+const SIM_MAX_RANGE = 6000; // mm
+const SIM_IGNORE_ANGLE = 140; // rear degrees to ignore
+const SIM_DT = 0.2;        // seconds per step
+const SIM_SECTOR_SIZE = 45; // degrees per sector
+
+// GPS state
+let gpsData = { fix: false, satellites: 0, latitude: 0, longitude: 0, altitude_m: 0, speed_knots: 0, heading_deg: 0, utc_time: '', timestamp: 0 };
+let gpsHistory = [];        // [{lat, lon, ts}, ...] position trail
+let gpsTimer = null;
 
 // Zoom/pan state
 let zoom = 1.0;
@@ -171,8 +363,12 @@ let dpr = window.devicePixelRatio || 1;
 function setMode(mode) {
     appMode = mode;
     const info = document.getElementById('conn-info');
+    const simPanel = document.getElementById('sim-panel');
+
+    // Stop sim auto-run when leaving simulation
+    if (simAutoTimer) { clearInterval(simAutoTimer); simAutoTimer = null; simAutoRunning = false; }
+
     if (mode === 'offline') {
-        // Disconnect live WebSocket
         if (ws) { ws.onclose = null; ws.close(); ws = null; }
         info.textContent = 'Offline';
         info.style.color = '#f80';
@@ -180,13 +376,33 @@ function setMode(mode) {
         wallLines = [];
         poseHistory = [];
         pose = [15000, 15000, 0];
-        gridData = null;  // clear live grid
+        gridData = null;
+        builtMapTrajectory = [];
+        if (simPanel) simPanel.style.display = 'none';
+        trainPanelVisibility(false);
+        needsRedraw = true;
+    } else if (mode === 'simulation') {
+        if (ws) { ws.onclose = null; ws.close(); ws = null; }
+        info.textContent = 'Simulation';
+        info.style.color = '#ff0';
+        selectedRecEntry = null;
+        builtMapTrajectory = [];
+        // Keep gridData — we need the map! If fetch fails, simInit generates a default room.
+        if (!gridData) {
+            fetchGrid().then(() => { simInit(); });
+        } else {
+            simInit();
+        }
+        if (simPanel) simPanel.style.display = 'block';
+        trainPanelVisibility(true);
         needsRedraw = true;
     } else {
-        // Reconnect live
         info.textContent = 'Connecting...';
         info.style.color = '#888';
         selectedRecEntry = null;
+        builtMapTrajectory = [];
+        if (simPanel) simPanel.style.display = 'none';
+        trainPanelVisibility(false);
         connectWS();
         fetchGrid();
         needsRedraw = true;
@@ -199,8 +415,7 @@ function setMode(mode) {
 let ws = null;
 function connectWS() {
     if (appMode === 'offline') return;
-    const host = location.host || '192.168.1.99:8080';
-    ws = new WebSocket('ws://' + host + '/ws/slam');
+    ws = new WebSocket('ws://' + ROBOT_WS + '/ws/slam');
     ws.onopen = () => { document.getElementById('conn-info').textContent = 'Live'; document.getElementById('conn-info').style.color = '#0f8'; };
     ws.onclose = () => { if (appMode === 'live') { document.getElementById('conn-info').textContent = 'Disconnected'; document.getElementById('conn-info').style.color = '#888'; setTimeout(connectWS, 3000); } };
     ws.onerror = () => ws.close();
@@ -218,7 +433,7 @@ function connectWS() {
 // ============================================================
 // API calls
 // ============================================================
-const API = '/api/slam_data';
+const API = ROBOT_BASE + '/api/slam_data';
 
 async function fetchGrid() {
     try {
@@ -299,6 +514,12 @@ async function resetMap() {
 function setView(mode) {
     viewMode = mode;
     document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === mode));
+    document.getElementById('gps-panel').style.display = mode === 'gps' ? '' : 'none';
+    if (mode === 'gps') {
+        gpsStartPolling();
+    } else {
+        gpsStopPolling();
+    }
     needsRedraw = true;
 }
 
@@ -337,6 +558,7 @@ mapWrap.addEventListener('wheel', (e) => {
 });
 
 mapWrap.addEventListener('mousedown', (e) => {
+    if (appMode === 'simulation' && e.button === 0) return;  // handled by sim handler
     if (e.button === 0) { dragging = true; dragStartX = e.clientX; dragStartY = e.clientY; panStartX = panX; panStartY = panY; }
 });
 window.addEventListener('mousemove', (e) => {
@@ -406,17 +628,31 @@ function draw() {
     ctx.translate(panX, panY);
     ctx.scale(zoom, zoom);
 
+    if (viewMode === 'gps') {
+        ctx.restore();
+        drawGpsView(w, h);
+        return;
+    }
     if (viewMode === 'raw' || viewMode === 'floor') {
         drawGrid();
     }
     if (viewMode === 'walls' || viewMode === 'floor') {
         drawWallLinesView();
     }
-    if (appMode === 'offline' && selectedRecEntry) {
-        // Offline: show trajectory up to selected frame + that frame's scan + landmarks
-        if (document.getElementById('ov-traj').checked) drawOfflineTrajectory();
-        drawRecScanOnMap(selectedRecEntry);
-        if (document.getElementById('ov-landmarks').checked) drawLandmarks(selectedRecEntry);
+    if (appMode === 'simulation') {
+        // Simulation mode: draw virtual robot, LiDAR rays, sectors, frontiers
+        drawSimulation();
+    } else if (appMode === 'offline') {
+        // Offline: show built-map trajectory + selected frame overlay
+        if (document.getElementById('ov-traj').checked && builtMapTrajectory.length > 0) {
+            drawBuiltMapTrajectory();
+        } else if (document.getElementById('ov-traj').checked && selectedRecEntry) {
+            drawOfflineTrajectory();
+        }
+        if (selectedRecEntry) {
+            drawRecScanOnMap(selectedRecEntry);
+            if (document.getElementById('ov-landmarks').checked) drawLandmarks(selectedRecEntry);
+        }
     } else {
         // Live: show everything
         if (document.getElementById('ov-traj').checked) drawTrajectory();
@@ -761,10 +997,13 @@ async function openRecording(name, videoFile) {
     gridData = null;
     wallLines = [];
     selectedRecEntry = null;
+    builtMapTrajectory = [];
+    document.getElementById('clear-built-map-btn').style.display = 'none';
+    document.getElementById('build-map-status').style.display = 'none';
 
     document.getElementById('rec-viewer').style.display = 'block';
     const video = document.getElementById('rec-video');
-    video.src = '/recordings/' + videoFile;
+    video.src = ROBOT_BASE + '/recordings/' + videoFile;
 
     // Load pose log
     try {
@@ -903,6 +1142,212 @@ function drawRecLidar(entry) {
     ctx.fillText('T+' + entry.t + 's  ' + entry.scan.length + ' pts', cx, h - 4);
 }
 
+// ============================================================
+// Build Map from Recording (offline occupancy grid construction)
+// ============================================================
+let builtMapTrajectory = [];  // [{x, y, theta}, ...] for trajectory overlay
+
+function buildMapFromRecording() {
+    if (!currentRecLog || currentRecLog.length === 0) {
+        alert('No recording loaded. Select a recording first.');
+        return;
+    }
+
+    const btn = document.getElementById('build-map-btn');
+    const statusEl = document.getElementById('build-map-status');
+    const clearBtn = document.getElementById('clear-built-map-btn');
+    btn.disabled = true;
+    btn.textContent = 'Building...';
+    statusEl.style.display = 'block';
+    statusEl.textContent = 'Processing frame 0 / ' + currentRecLog.length + '...';
+
+    // Use setTimeout to allow UI to update before heavy computation
+    setTimeout(() => {
+        _buildMapFromRecordingSync();
+        btn.disabled = false;
+        btn.textContent = 'Build Map';
+        clearBtn.style.display = '';
+        document.getElementById('test-in-sim-btn').style.display = '';
+        // Count wall cells
+        let wallCount = 0;
+        for (let i = 0; i < GRID * GRID; i++) if (gridData[i] > 2.0) wallCount++;
+        statusEl.textContent = 'Done: ' + currentRecLog.length + ' frames, ' +
+            wallCount + ' wall cells';
+    }, 50);
+}
+
+function _buildMapFromRecordingSync() {
+    const L_FREE = -0.3;
+    const L_OCC = 1.5;
+    const L_MIN = -5.0;
+    const L_MAX = 10.0;
+    const MAX_RANGE_MM = 6000;
+    const statusEl = document.getElementById('build-map-status');
+
+    // Initialize fresh grid
+    gridData = new Float32Array(GRID * GRID);
+    builtMapTrajectory = [];
+
+    const totalFrames = currentRecLog.length;
+
+    for (let f = 0; f < totalFrames; f++) {
+        const entry = currentRecLog[f];
+        if (!entry.pose || !entry.scan || entry.scan.length === 0) continue;
+
+        const px_mm = entry.pose[0];  // world mm
+        const py_mm = entry.pose[1];
+        const theta_rad = entry.pose[2] * Math.PI / 180;
+
+        // Store trajectory point
+        builtMapTrajectory.push({ x: px_mm, y: py_mm, theta: theta_rad });
+
+        // Robot position in grid coords
+        const ox = px_mm / CELL;
+        const oy = py_mm / CELL;
+
+        const cosT = Math.cos(theta_rad);
+        const sinT = Math.sin(theta_rad);
+
+        for (let s = 0; s < entry.scan.length; s++) {
+            const angle_deg = entry.scan[s][0];
+            const dist_mm = entry.scan[s][1];
+            if (dist_mm < 25 || dist_mm > MAX_RANGE_MM) continue;
+
+            // Scan point in robot-local frame
+            const rad = angle_deg * Math.PI / 180;
+            const lx = dist_mm * Math.cos(rad);
+            const ly = dist_mm * Math.sin(rad);
+
+            // Transform to world frame
+            const wx = px_mm + cosT * lx - sinT * ly;
+            const wy = py_mm + sinT * lx + cosT * ly;
+
+            // Hit cell in grid coords
+            const hx = Math.floor(wx / CELL);
+            const hy = Math.floor(wy / CELL);
+
+            // Bresenham ray trace from robot to hit point
+            const x0 = Math.floor(ox);
+            const y0 = Math.floor(oy);
+            const x1 = hx;
+            const y1 = hy;
+
+            let cx = x0, cy = y0;
+            let dx = Math.abs(x1 - x0);
+            let dy = Math.abs(y1 - y0);
+            const sx = x0 < x1 ? 1 : -1;
+            const sy = y0 < y1 ? 1 : -1;
+            let err = dx - dy;
+
+            // Trace ray — mark free cells along the path
+            while (true) {
+                if (cx === x1 && cy === y1) break;
+                if (cx >= 0 && cx < GRID && cy >= 0 && cy < GRID) {
+                    const idx = cy * GRID + cx;
+                    gridData[idx] = Math.max(L_MIN, gridData[idx] + L_FREE);
+                }
+                const e2 = 2 * err;
+                if (e2 > -dy) { err -= dy; cx += sx; }
+                if (e2 < dx) { err += dx; cy += sy; }
+            }
+
+            // Mark the hit cell as occupied
+            if (hx >= 0 && hx < GRID && hy >= 0 && hy < GRID) {
+                const idx = hy * GRID + hx;
+                gridData[idx] = Math.min(L_MAX, gridData[idx] + L_OCC);
+            }
+        }
+
+        // Update status every 10 frames
+        if (f % 10 === 0) {
+            statusEl.textContent = 'Processing frame ' + (f + 1) + ' / ' + totalFrames + '...';
+        }
+    }
+
+    // Update stats bar
+    let wallCells = 0, freeCells = 0;
+    for (let i = 0; i < gridData.length; i++) {
+        if (gridData[i] > 2.0) wallCells++;
+        else if (gridData[i] < -1.5) freeCells++;
+    }
+    document.getElementById('st-cells').textContent = (wallCells + freeCells) + ' touched';
+    document.getElementById('st-coverage').textContent =
+        ((wallCells + freeCells) / (GRID * GRID) * 100).toFixed(1);
+
+    // Auto-fit view and redraw
+    fitView();
+    needsRedraw = true;
+}
+
+function clearBuiltMap() {
+    gridData = null;
+    builtMapTrajectory = [];
+    document.getElementById('clear-built-map-btn').style.display = 'none';
+    document.getElementById('test-in-sim-btn').style.display = 'none';
+    document.getElementById('build-map-status').style.display = 'none';
+    needsRedraw = true;
+}
+
+function testBuiltMapInSim() {
+    // Keep gridData — switch to simulation mode
+    if (!gridData) { alert('Build map first'); return; }
+    document.getElementById('mode-select').value = 'simulation';
+    setMode('simulation');
+    // Find a free cell to place robot
+    simInit();
+    fitView();
+}
+
+// Draw built-map trajectory in the offline draw path
+function drawBuiltMapTrajectory() {
+    if (builtMapTrajectory.length < 2) return;
+
+    // Draw full path
+    ctx.strokeStyle = 'rgba(0, 220, 255, 0.7)';
+    ctx.lineWidth = 1.5 / zoom;
+    ctx.beginPath();
+    for (let i = 0; i < builtMapTrajectory.length; i++) {
+        const gx = builtMapTrajectory[i].x / CELL;
+        const gy = builtMapTrajectory[i].y / CELL;
+        if (i === 0) ctx.moveTo(gx, gy); else ctx.lineTo(gx, gy);
+    }
+    ctx.stroke();
+
+    // Draw pose dots
+    ctx.fillStyle = 'rgba(0, 220, 255, 0.5)';
+    const dotR = 2 / zoom;
+    for (let i = 0; i < builtMapTrajectory.length; i++) {
+        const gx = builtMapTrajectory[i].x / CELL;
+        const gy = builtMapTrajectory[i].y / CELL;
+        ctx.beginPath();
+        ctx.arc(gx, gy, dotR, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Start marker (green)
+    const start = builtMapTrajectory[0];
+    ctx.fillStyle = '#0f0';
+    ctx.beginPath();
+    ctx.arc(start.x / CELL, start.y / CELL, 5 / zoom, 0, Math.PI * 2);
+    ctx.fill();
+
+    // End marker (red)
+    const end = builtMapTrajectory[builtMapTrajectory.length - 1];
+    ctx.fillStyle = '#f00';
+    ctx.beginPath();
+    ctx.arc(end.x / CELL, end.y / CELL, 5 / zoom, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Direction arrow at end
+    ctx.strokeStyle = '#ff0';
+    ctx.lineWidth = 2 / zoom;
+    const sz = 12 / zoom;
+    ctx.beginPath();
+    ctx.moveTo(end.x / CELL, end.y / CELL);
+    ctx.lineTo(end.x / CELL + Math.cos(end.theta) * sz, end.y / CELL + Math.sin(end.theta) * sz);
+    ctx.stroke();
+}
+
 // Periodic data refresh (only in live mode)
 setInterval(() => {
     if (appMode === 'live') {
@@ -919,6 +1364,1273 @@ setInterval(() => {
 }, 10000);
 
 // ============================================================
+// Simulation Engine (all client-side, no backend needed)
+// ============================================================
+
+function simGenerateRoom() {
+    // Generate a room + hallway on the grid (all in JavaScript, no server needed)
+    gridData = new Float32Array(GRID * GRID);  // all zeros = unknown
+    const W = 3.0;  // wall log-odds
+    const F = -2.0; // free log-odds
+
+    const cx = GRID / 2, cy = GRID / 2;
+    // Main room: 6m x 5m (120 x 100 cells)
+    const rw = 120, rh = 100;
+    const rx1 = cx - rw / 2, ry1 = cy - rh / 2 - 20;
+    const rx2 = rx1 + rw, ry2 = ry1 + rh;
+
+    // Draw room walls (2 cells thick)
+    for (let t = 0; t < 2; t++) {
+        for (let x = rx1; x <= rx2; x++) { gridData[(ry1+t)*GRID+x] = W; gridData[(ry2-t)*GRID+x] = W; }
+        for (let y = ry1; y <= ry2; y++) { gridData[y*GRID+(rx1+t)] = W; gridData[y*GRID+(rx2-t)] = W; }
+    }
+    // Fill room interior as free
+    for (let y = ry1+2; y < ry2-1; y++)
+        for (let x = rx1+2; x < rx2-1; x++)
+            gridData[y * GRID + x] = F;
+
+    // Hallway from bottom wall: 1.5m wide x 4m long (30 x 80 cells)
+    const hw = 30, hl = 80;
+    const hx1 = cx - hw / 2, hx2 = cx + hw / 2;
+    const hy1 = ry2, hy2 = ry2 + hl;
+
+    // Clear doorway
+    for (let y = ry2-1; y <= ry2+1; y++)
+        for (let x = hx1+2; x < hx2-1; x++)
+            gridData[y * GRID + x] = F;
+
+    // Hallway walls
+    for (let t = 0; t < 2; t++) {
+        for (let y = hy1; y <= hy2; y++) { gridData[y*GRID+(hx1+t)] = W; gridData[y*GRID+(hx2-1-t)] = W; }
+        for (let x = hx1; x <= hx2; x++) gridData[(hy2-t)*GRID+x] = W;
+    }
+    // Hallway interior
+    for (let y = hy1; y < hy2-1; y++)
+        for (let x = hx1+2; x < hx2-1; x++)
+            gridData[y * GRID + x] = F;
+
+    // Add a small obstacle box in the room (table: 1m x 0.5m)
+    const ox = cx + 20, oy = cy - 30;
+    for (let y = oy; y < oy + 10; y++)
+        for (let x = ox; x < ox + 20; x++)
+            gridData[y * GRID + x] = W;
+
+    // Add a second room connected via hallway end
+    const r2w = 80, r2h = 60;
+    const r2x1 = cx - r2w / 2, r2y1 = hy2;
+    const r2x2 = r2x1 + r2w, r2y2 = r2y1 + r2h;
+    for (let t = 0; t < 2; t++) {
+        for (let x = r2x1; x <= r2x2; x++) { gridData[(r2y1+t)*GRID+x] = W; gridData[(r2y2-t)*GRID+x] = W; }
+        for (let y = r2y1; y <= r2y2; y++) { gridData[y*GRID+(r2x1+t)] = W; gridData[y*GRID+(r2x2-t)] = W; }
+    }
+    for (let y = r2y1+2; y < r2y2-1; y++)
+        for (let x = r2x1+2; x < r2x2-1; x++)
+            gridData[y * GRID + x] = F;
+    // Clear doorway between hallway and second room
+    for (let y = r2y1-1; y <= r2y1+1; y++)
+        for (let x = hx1+2; x < hx2-1; x++)
+            gridData[y * GRID + x] = F;
+
+    console.log('Generated default room + hallway + second room');
+    needsRedraw = true;
+}
+
+function simInit() {
+    simRobot = { x: 15000, y: 15000, theta: 0 };
+    simStep = 0;
+    simCollisions = 0;
+    simExplored = new Set();
+    simScan = [];
+    simSectors = new Float32Array(8).fill(9999);
+    simFrontiers = [];
+    simClusters = [];
+    simTarget = null;
+    simLevel = 'CLEAR';
+
+    // If no grid data, generate a default room
+    if (!gridData) {
+        simGenerateRoom();
+        fitView();
+    }
+
+    if (gridData) {
+        // Find a free cell to spawn on
+        const cx = GRID / 2, cy = GRID / 2;
+        let bestD = Infinity, bx = cx, by = cy;
+        for (let dy = -50; dy <= 50; dy++) {
+            for (let dx = -50; dx <= 50; dx++) {
+                const gx = cx + dx, gy = cy + dy;
+                if (gx >= 0 && gx < GRID && gy >= 0 && gy < GRID && gridData[gy * GRID + gx] < -0.5) {
+                    const d = dx * dx + dy * dy;
+                    if (d < bestD) { bestD = d; bx = gx; by = gy; }
+                }
+            }
+        }
+        simRobot.x = bx * CELL;
+        simRobot.y = by * CELL;
+    }
+    simRunOnce();
+    simUpdatePanel();
+    needsRedraw = true;
+}
+
+function simReset() {
+    simInit();
+}
+
+// --- Ray-casting (DDA through occupancy grid) ---
+function simRaycast() {
+    if (!gridData) return;
+    const ox = simRobot.x / CELL;
+    const oy = simRobot.y / CELL;
+    const maxCells = SIM_MAX_RANGE / CELL; // 120
+    simScan = [];
+
+    for (let i = 0; i < 360; i++) {
+        const angle = simRobot.theta + i * Math.PI / 180;
+        const dx = Math.cos(angle);
+        const dy = Math.sin(angle);
+        let dist = SIM_MAX_RANGE;
+
+        // DDA ray march
+        let cx = Math.floor(ox), cy = Math.floor(oy);
+        const stepX = dx > 0 ? 1 : -1;
+        const stepY = dy > 0 ? 1 : -1;
+        let tMaxX = dx === 0 ? Infinity : ((cx + (dx > 0 ? 1 : 0)) - ox) / dx;
+        let tMaxY = dy === 0 ? Infinity : ((cy + (dy > 0 ? 1 : 0)) - oy) / dy;
+        const tDeltaX = dx === 0 ? Infinity : Math.abs(1.0 / dx);
+        const tDeltaY = dy === 0 ? Infinity : Math.abs(1.0 / dy);
+
+        for (let s = 0; s < maxCells; s++) {
+            if (cx < 0 || cx >= GRID || cy < 0 || cy >= GRID) break;
+            if (gridData[cy * GRID + cx] > 0.8) {
+                dist = Math.max(25, Math.sqrt((cx - ox) ** 2 + (cy - oy) ** 2) * CELL);
+                break;
+            }
+            if (tMaxX < tMaxY) { tMaxX += tDeltaX; cx += stepX; }
+            else { tMaxY += tDeltaY; cy += stepY; }
+        }
+        simScan.push({ angle: i, dist: dist });
+    }
+}
+
+// --- Compute 8 collision sectors ---
+function simComputeSectors() {
+    simSectors = new Float32Array(8).fill(9999);
+    const halfIgnore = SIM_IGNORE_ANGLE / 2;
+
+    for (const { angle, dist } of simScan) {
+        const aDeg = angle;
+        const fromRear = Math.abs(((aDeg - 180) + 180) % 360 - 180);
+        if (fromRear < halfIgnore) continue;
+        const sector = Math.floor(((aDeg + SIM_SECTOR_SIZE / 2) % 360) / SIM_SECTOR_SIZE) % 8;
+        if (dist < simSectors[sector]) simSectors[sector] = dist;
+    }
+
+    // Determine level
+    const gMin = Math.min(...simSectors);
+    if (gMin < SIM_STOP) simLevel = 'STOP';
+    else if (gMin < SIM_SLOW) simLevel = 'SLOW';
+    else if (gMin < SIM_CAUTION) simLevel = 'CAUTION';
+    else simLevel = 'CLEAR';
+}
+
+// --- Find frontiers (free cells adjacent to unknown) ---
+function simFindFrontiers() {
+    if (!gridData) { simFrontiers = []; return; }
+    simFrontiers = [];
+    // Scan grid — free cell (< -1.5) with unknown neighbor (|v| < 0.5)
+    for (let y = 1; y < GRID - 1; y++) {
+        for (let x = 1; x < GRID - 1; x++) {
+            const v = gridData[y * GRID + x];
+            if (v >= -0.5) continue; // not clearly free
+            // Check neighbors for unknown
+            const up = gridData[(y - 1) * GRID + x];
+            const dn = gridData[(y + 1) * GRID + x];
+            const lt = gridData[y * GRID + (x - 1)];
+            const rt = gridData[y * GRID + (x + 1)];
+            const isUnk = (v2) => v2 > -0.5 && v2 < 0.5;
+            if (isUnk(up) || isUnk(dn) || isUnk(lt) || isUnk(rt)) {
+                simFrontiers.push({ x: x * CELL, y: y * CELL });
+            }
+        }
+    }
+}
+
+// --- Cluster frontiers ---
+function simClusterFrontiers() {
+    simClusters = [];
+    if (simFrontiers.length === 0) return;
+
+    const binSize = CELL * 4; // 200mm
+    const bins = {};
+    for (const f of simFrontiers) {
+        const key = Math.floor(f.x / binSize) + ',' + Math.floor(f.y / binSize);
+        if (!bins[key]) bins[key] = [];
+        bins[key].push(f);
+    }
+
+    const visited = new Set();
+    for (const key in bins) {
+        if (visited.has(key)) continue;
+        const cluster = [];
+        const queue = [key];
+        visited.add(key);
+        while (queue.length) {
+            const bk = queue.shift();
+            if (bins[bk]) cluster.push(...bins[bk]);
+            const [bx, by] = bk.split(',').map(Number);
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    const nk = (bx + dx) + ',' + (by + dy);
+                    if (!visited.has(nk) && bins[nk]) {
+                        visited.add(nk);
+                        queue.push(nk);
+                    }
+                }
+            }
+        }
+        if (cluster.length >= 5) {
+            let sx = 0, sy = 0;
+            for (const p of cluster) { sx += p.x; sy += p.y; }
+            simClusters.push({ cx: sx / cluster.length, cy: sy / cluster.length, count: cluster.length });
+        }
+    }
+
+    // Sort by distance from robot
+    simClusters.sort((a, b) => {
+        const da = Math.hypot(a.cx - simRobot.x, a.cy - simRobot.y);
+        const db = Math.hypot(b.cx - simRobot.x, b.cy - simRobot.y);
+        return da - db;
+    });
+
+    // Pick target (nearest cluster)
+    simTarget = simClusters.length > 0 ? simClusters[0] : null;
+}
+
+// --- Mark explored cells ---
+function simMarkExplored() {
+    let newCells = 0;
+    const ox = Math.floor(simRobot.x / CELL);
+    const oy = Math.floor(simRobot.y / CELL);
+    const maxR = SIM_MAX_RANGE / CELL;
+
+    for (let i = 0; i < 360; i += 3) { // every 3° for speed
+        const angle = simRobot.theta + i * Math.PI / 180;
+        const dx = Math.cos(angle);
+        const dy = Math.sin(angle);
+        const rayDist = simScan[i] ? simScan[i].dist / CELL : maxR;
+        const steps = Math.min(Math.floor(rayDist), maxR);
+
+        for (let s = 1; s < steps; s++) {
+            const cx = ox + Math.floor(dx * s);
+            const cy = oy + Math.floor(dy * s);
+            if (cx < 0 || cx >= GRID || cy < 0 || cy >= GRID) break;
+            if (gridData[cy * GRID + cx] > 0.8) break; // wall
+            const key = cx + ',' + cy;
+            if (!simExplored.has(key) && gridData[cy * GRID + cx] < -0.5) {
+                simExplored.add(key);
+                newCells++;
+            }
+        }
+    }
+    return newCells;
+}
+
+// --- Rule-based policy ---
+function simRuleBasedAction() {
+    if (!simTarget) return { vx: 0, vy: 0, vz: 0.3 }; // spin to find frontiers
+
+    const dx = simTarget.cx - simRobot.x;
+    const dy = simTarget.cy - simRobot.y;
+    const targetAngle = Math.atan2(dy, dx);
+    let headingError = targetAngle - simRobot.theta;
+    headingError = Math.atan2(Math.sin(headingError), Math.cos(headingError));
+
+    if (Math.abs(headingError) > 0.3) {
+        // Turn toward target
+        const vz = headingError > 0 ? 0.3 : -0.3;
+        return { vx: 0, vy: 0, vz: Math.abs(headingError) > 1.57 ? vz * 1.5 : vz };
+    } else {
+        // Move forward with steering correction
+        const dist = Math.hypot(dx, dy);
+        const vx = Math.min(0.08, dist / 1000.0);
+        return { vx, vy: 0, vz: headingError * 0.3 };
+    }
+}
+
+// --- NN policy (ONNX inference) ---
+async function simNNAction() {
+    if (!simOnnxSession) {
+        // Fallback to rule-based if no model loaded
+        return simRuleBasedAction();
+    }
+    // Downsample 360 rays → 36 bins (min per 10°)
+    const bins = new Float32Array(36);
+    for (let b = 0; b < 36; b++) {
+        let minD = SIM_MAX_RANGE;
+        for (let j = 0; j < 10; j++) {
+            const idx = b * 10 + j;
+            if (idx < simScan.length && simScan[idx].dist < minD) minD = simScan[idx].dist;
+        }
+        bins[b] = Math.min(minD / SIM_MAX_RANGE, 1.0);
+    }
+
+    try {
+        const input = new ort.Tensor('float32', bins, [1, 36]);
+        const results = await simOnnxSession.run({ lidar_scan: input });
+        const action = results.action.data;
+        // Map [-1,1] → velocities (match robot_env.py ranges)
+        return {
+            vx: action[0] * 0.10 + 0.05,   // [-0.05, 0.15]
+            vy: action[1] * 0.12,            // [-0.12, 0.12] mecanum strafe
+            vz: action[2] * 1.0              // [-1.0, 1.0]
+        };
+    } catch (e) {
+        console.error('NN inference error:', e);
+        return simRuleBasedAction();
+    }
+}
+
+// --- Collision filter (same as collision_avoidance.py) ---
+function simCollisionFilter(vx, vy, vz) {
+    const speed = Math.sqrt(vx * vx + vy * vy);
+    if (speed < 0.001) return { vx, vy, vz };
+
+    const gMin = Math.min(...simSectors);
+    if (gMin < SIM_STOP) return { vx: 0, vy: 0, vz };
+
+    const moveAngle = ((Math.atan2(-vy, vx) * 180 / Math.PI) % 360 + 360) % 360;
+    const target = Math.floor(((moveAngle + SIM_SECTOR_SIZE / 2) % 360) / SIM_SECTOR_SIZE) % 8;
+    let dirMin = 9999;
+    for (let d = -2; d <= 2; d++) {
+        const s = ((target + d) % 8 + 8) % 8;
+        if (simSectors[s] < dirMin) dirMin = simSectors[s];
+    }
+
+    const checkMin = Math.min(gMin, dirMin);
+    let scale;
+    if (checkMin < SIM_STOP) scale = 0;
+    else if (checkMin < SIM_SLOW) scale = 0.3;
+    else if (checkMin < SIM_CAUTION) scale = 0.7;
+    else scale = 1.0;
+
+    return { vx: vx * scale, vy: vy * scale, vz };
+}
+
+// --- Run all simulation computations (no movement) ---
+function simRunOnce() {
+    simRaycast();
+    simComputeSectors();
+    simFindFrontiers();
+    simClusterFrontiers();
+    simMarkExplored();
+    simUpdatePanel();
+    needsRedraw = true;
+}
+
+// --- Step: move robot one step ---
+async function simStepOnce() {
+    let action;
+    if (simPolicy === 'nn') {
+        action = await simNNAction();
+    } else {
+        action = simRuleBasedAction();
+    }
+
+    // Apply collision filter
+    const safe = simCollisionFilter(action.vx, action.vy, action.vz);
+
+    // Move robot
+    const cosT = Math.cos(simRobot.theta);
+    const sinT = Math.sin(simRobot.theta);
+    const dx = (safe.vx * cosT - safe.vy * sinT) * SIM_DT * 1000;
+    const dy = (safe.vx * sinT + safe.vy * cosT) * SIM_DT * 1000;
+    const newX = simRobot.x + dx;
+    const newY = simRobot.y + dy;
+
+    // Hard wall check: don't enter wall cells (robot radius ~150mm = 3 cells)
+    const cx = Math.floor(newX / CELL), cy = Math.floor(newY / CELL);
+    let blocked = false;
+    for (let ox = -2; ox <= 2 && !blocked; ox++) {
+        for (let oy = -2; oy <= 2 && !blocked; oy++) {
+            const gx = cx + ox, gy = cy + oy;
+            if (gx >= 0 && gx < GRID && gy >= 0 && gy < GRID) {
+                const dist = Math.sqrt((newX - (gx + 0.5) * CELL) ** 2 + (newY - (gy + 0.5) * CELL) ** 2);
+                if (dist < 120 && gridData && gridData[gy * GRID + gx] > 2.0) {
+                    blocked = true;
+                }
+            }
+        }
+    }
+    if (!blocked) {
+        simRobot.x = newX;
+        simRobot.y = newY;
+    } else {
+        simCollisions++;
+    }
+    simRobot.theta += safe.vz * SIM_DT;
+    simRobot.theta = Math.atan2(Math.sin(simRobot.theta), Math.cos(simRobot.theta));
+
+    // Clamp to grid
+    simRobot.x = Math.max(CELL, Math.min(GRID * CELL - CELL, simRobot.x));
+    simRobot.y = Math.max(CELL, Math.min(GRID * CELL - CELL, simRobot.y));
+
+    simStep++;
+    simRunOnce();
+}
+
+// --- Auto-run toggle ---
+let simSpeedMs = 50;  // default Normal speed
+
+function simChangeSpeed(val) {
+    simSpeedMs = parseInt(val);
+    // If already running, restart with new speed
+    if (simAutoRunning) {
+        if (simAutoTimer) clearInterval(simAutoTimer);
+        simAutoTimer = setInterval(() => simStepOnce(), simSpeedMs);
+    }
+}
+
+function simToggleAuto() {
+    simAutoRunning = !simAutoRunning;
+    const btn = document.getElementById('sim-auto-btn');
+    if (simAutoRunning) {
+        btn.textContent = 'Auto ⏸';
+        btn.style.background = '#3a3a1a';
+        simAutoTimer = setInterval(() => simStepOnce(), simSpeedMs);
+    } else {
+        btn.textContent = 'Auto ▶';
+        btn.style.background = '';
+        if (simAutoTimer) { clearInterval(simAutoTimer); simAutoTimer = null; }
+    }
+}
+
+// --- Update side panel info ---
+function simUpdatePanel() {
+    const degH = Math.round(simRobot.theta * 180 / Math.PI);
+    document.getElementById('sim-pose-info').textContent =
+        '(' + Math.round(simRobot.x) + ', ' + Math.round(simRobot.y) + ') @ ' + degH + '°';
+
+    const lvlEl = document.getElementById('sim-level');
+    lvlEl.textContent = simLevel;
+    lvlEl.style.color = simLevel === 'STOP' ? '#f00' : simLevel === 'SLOW' ? '#f80' :
+                         simLevel === 'CAUTION' ? '#ff0' : '#0f8';
+
+    document.getElementById('sim-sectors').textContent =
+        Array.from(simSectors).map(d => d >= 9999 ? '-' : Math.round(d)).join(' ');
+
+    document.getElementById('sim-frontier-info').textContent =
+        simFrontiers.length + ' cells → ' + simClusters.length + ' clusters';
+
+    if (simTarget) {
+        const d = Math.round(Math.hypot(simTarget.cx - simRobot.x, simTarget.cy - simRobot.y));
+        document.getElementById('sim-target-info').textContent =
+            '(' + Math.round(simTarget.cx) + ', ' + Math.round(simTarget.cy) + ') ' + d + 'mm';
+    } else {
+        document.getElementById('sim-target-info').textContent = 'None';
+    }
+
+    // Count free cells for coverage
+    let totalFree = 0;
+    if (gridData) {
+        for (let i = 0; i < gridData.length; i++) {
+            if (gridData[i] < -0.5) totalFree++;
+        }
+    }
+    const pct = totalFree > 0 ? (simExplored.size / totalFree * 100).toFixed(1) : '0';
+    document.getElementById('sim-explored-info').textContent =
+        simExplored.size + ' / ' + totalFree + ' (' + pct + '%)';
+
+    document.getElementById('sim-step-info').textContent = simStep;
+    document.getElementById('sim-collision-info').textContent = simCollisions;
+}
+
+// --- Drawing for simulation mode ---
+function drawSimulation() {
+    if (!gridData) return;
+
+    const rx = simRobot.x / CELL;
+    const ry = simRobot.y / CELL;
+    const theta = simRobot.theta;
+
+    // Draw explored cells overlay (semi-transparent green)
+    if (simExplored.size > 0) {
+        ctx.fillStyle = 'rgba(0, 255, 100, 0.15)';
+        for (const key of simExplored) {
+            const [cx, cy] = key.split(',').map(Number);
+            ctx.fillRect(cx, cy, 1, 1);
+        }
+    }
+
+    // Draw frontier cells (magenta dots)
+    if (simFrontiers.length > 0 && simFrontiers.length < 5000) {
+        ctx.fillStyle = 'rgba(255, 0, 255, 0.4)';
+        for (const f of simFrontiers) {
+            ctx.fillRect(f.x / CELL - 0.5, f.y / CELL - 0.5, 1, 1);
+        }
+    }
+
+    // Draw LiDAR scan points
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.6)';
+    const dotR = 1.5 / zoom;
+    const cosT = Math.cos(theta), sinT = Math.sin(theta);
+    for (const { angle, dist } of simScan) {
+        if (dist >= SIM_MAX_RANGE - 10) continue;
+        const rad = angle * Math.PI / 180;
+        const lx = dist * Math.cos(rad), ly = dist * Math.sin(rad);
+        const wx = rx + (cosT * lx - sinT * ly) / CELL;
+        const wy = ry + (sinT * lx + cosT * ly) / CELL;
+        ctx.beginPath();
+        ctx.arc(wx, wy, dotR, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Draw collision sector arcs
+    for (let i = 0; i < 8; i++) {
+        const d = simSectors[i];
+        if (d >= 9999) continue;
+        const a1 = (i * 45 - 22.5) * Math.PI / 180 + theta;
+        const a2 = (i * 45 + 22.5) * Math.PI / 180 + theta;
+        const r = Math.min(d / CELL, 80 / zoom);
+        const color = d < SIM_STOP ? 'rgba(255,0,0,0.3)' :
+                      d < SIM_SLOW ? 'rgba(255,128,0,0.3)' :
+                      d < SIM_CAUTION ? 'rgba(255,255,0,0.2)' : 'rgba(0,255,0,0.1)';
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(rx, ry);
+        ctx.arc(rx, ry, r, a1, a2);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    // Draw cluster centroids (numbered)
+    for (let i = 0; i < Math.min(simClusters.length, 10); i++) {
+        const c = simClusters[i];
+        const gx = c.cx / CELL, gy = c.cy / CELL;
+        const isTarget = simTarget && c === simTarget;
+        ctx.fillStyle = isTarget ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 255, 255, 0.5)';
+        ctx.beginPath();
+        ctx.arc(gx, gy, (isTarget ? 5 : 3) / zoom, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.font = (8 / zoom) + 'px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('' + (i + 1), gx, gy + 3 / zoom);
+    }
+
+    // Draw arrow to target
+    if (simTarget) {
+        const tx = simTarget.cx / CELL, ty = simTarget.cy / CELL;
+        ctx.strokeStyle = '#0f8';
+        ctx.lineWidth = 2 / zoom;
+        ctx.setLineDash([4 / zoom, 4 / zoom]);
+        ctx.beginPath();
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(tx, ty);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // Draw robot
+    const sz = 6 / zoom;
+    ctx.fillStyle = '#f00';
+    ctx.beginPath();
+    ctx.arc(rx, ry, sz, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ff0';
+    ctx.lineWidth = 2 / zoom;
+    ctx.beginPath();
+    ctx.moveTo(rx, ry);
+    ctx.lineTo(rx + Math.cos(theta) * sz * 3, ry + Math.sin(theta) * sz * 3);
+    ctx.stroke();
+
+    // Draw depth FOV cone
+    ctx.strokeStyle = 'rgba(255, 165, 0, 0.3)';
+    ctx.lineWidth = 1 / zoom;
+    const fovLen = 60 / zoom;
+    ctx.beginPath();
+    ctx.moveTo(rx, ry);
+    ctx.lineTo(rx + Math.cos(theta - Math.PI / 6) * fovLen, ry + Math.sin(theta - Math.PI / 6) * fovLen);
+    ctx.moveTo(rx, ry);
+    ctx.lineTo(rx + Math.cos(theta + Math.PI / 6) * fovLen, ry + Math.sin(theta + Math.PI / 6) * fovLen);
+    ctx.stroke();
+}
+
+// --- Simulation mouse interaction (place robot + set heading) ---
+function simMouseDown(e) {
+    if (appMode !== 'simulation') return;
+    const rect = mapWrap.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * dpr;
+    const my = (e.clientY - rect.top) * dpr;
+    const gx = (mx - panX) / zoom;
+    const gy = (my - panY) / zoom;
+    const wx = gx * CELL;
+    const wy = gy * CELL;
+
+    simPlacing = true;
+    simPlaceStart = { mx: e.clientX, my: e.clientY };
+    simRobot.x = wx;
+    simRobot.y = wy;
+}
+
+function simMouseUp(e) {
+    if (!simPlacing) return;
+    simPlacing = false;
+
+    // If dragged, set heading
+    const dx = e.clientX - simPlaceStart.mx;
+    const dy = e.clientY - simPlaceStart.my;
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+        simRobot.theta = Math.atan2(dy, dx);
+    }
+
+    simStep = 0;
+    simExplored = new Set();
+    simRunOnce();
+}
+
+// Hook into existing mouse handlers
+mapWrap.addEventListener('mousedown', (e) => {
+    if (appMode === 'simulation' && e.button === 0) {
+        simMouseDown(e);
+        return;
+    }
+});
+window.addEventListener('mouseup', (e) => {
+    if (simPlacing) simMouseUp(e);
+});
+
+// ============================================================
+// Training Pipeline Controls
+// ============================================================
+let trainPollTimer = null;
+let trainStartTime = null;
+
+function trainStep(action) {
+    const logEl = document.getElementById('train-log');
+    if (action === 'generate') {
+        logEl.textContent = 'Generating training maps...\n';
+        fetch('/api/train/generate', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ count: 30, seed: Date.now() % 10000 })
+        }).then(r => r.json()).then(d => {
+            if (!d.ok) { logEl.textContent += 'ERROR: ' + d.message + '\n'; return; }
+            trainStartPolling();
+        }).catch(e => logEl.textContent += 'Fetch error: ' + e + '\n');
+
+    } else if (action === 'train') {
+        const steps = parseInt(document.getElementById('train-timesteps').value) || 500000;
+        const task = document.getElementById('train-task').value;
+        logEl.textContent = 'Training ' + task + ' (' + steps.toLocaleString() + ' steps)...\n';
+        fetch('/api/train/train', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ timesteps: steps, task: task })
+        }).then(r => r.json()).then(d => {
+            if (!d.ok) { logEl.textContent += 'ERROR: ' + d.message + '\n'; return; }
+            trainStartPolling();
+        }).catch(e => logEl.textContent += 'Fetch error: ' + e + '\n');
+
+    } else if (action === 'evaluate') {
+        logEl.textContent = 'Evaluating model (NN vs Rule-based)...\n';
+        fetch('/api/train/evaluate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' })
+            .then(r => r.json()).then(d => {
+                if (!d.ok) { logEl.textContent += 'ERROR: ' + d.message + '\n'; return; }
+                trainStartPolling();
+            }).catch(e => logEl.textContent += 'Fetch error: ' + e + '\n');
+
+    } else if (action === 'deploy') {
+        logEl.textContent = 'Deploying to Jetson...\n';
+        fetch('/api/train/deploy', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' })
+            .then(r => r.json()).then(d => {
+                if (!d.ok) { logEl.textContent += 'ERROR: ' + d.message + '\n'; return; }
+                trainStartPolling();
+            }).catch(e => logEl.textContent += 'Fetch error: ' + e + '\n');
+
+    } else if (action === 'stop') {
+        fetch('/api/train/stop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' })
+            .then(r => r.json()).then(d => {
+                logEl.textContent += (d.message || 'Stopped') + '\n';
+            });
+    }
+}
+
+function trainStartPolling() {
+    if (trainPollTimer) clearInterval(trainPollTimer);
+    trainPollTimer = setInterval(trainPollStatus, 1500);
+}
+
+function trainPollStatus() {
+    fetch('/api/train/status').then(r => r.json()).then(d => {
+        const logEl = document.getElementById('train-log');
+        const statusEl = document.getElementById('train-status-label');
+        const mapsEl = document.getElementById('train-maps-count');
+        const modelEl = document.getElementById('train-model-status');
+        const onnxEl = document.getElementById('train-onnx-status');
+
+        // Update counts
+        if (mapsEl) mapsEl.textContent = d.maps_count + ' maps';
+        // Per-task model status
+        const selTask = document.getElementById('train-task') ? document.getElementById('train-task').value : 'explore';
+        const taskInfo = d.models && d.models[selTask];
+        if (taskInfo) {
+            if (modelEl) {
+                modelEl.textContent = taskInfo.pt ? 'ready' : (taskInfo.checkpoints > 0 ? taskInfo.checkpoints + ' ckpt' : 'no model');
+                modelEl.style.color = taskInfo.pt ? '#0f8' : '#888';
+            }
+            if (onnxEl) {
+                onnxEl.textContent = taskInfo.onnx ? 'ONNX ready' : '-';
+                onnxEl.style.color = taskInfo.onnx ? '#0f8' : '#888';
+            }
+            const taskStatusEl = document.getElementById('train-task-status');
+            if (taskStatusEl) {
+                const parts = [];
+                if (taskInfo.onnx) parts.push('ONNX');
+                if (taskInfo.pt) parts.push('PT');
+                if (taskInfo.checkpoints > 0) parts.push(taskInfo.checkpoints + 'ckpt');
+                taskStatusEl.textContent = parts.length ? parts.join(', ') : '';
+                taskStatusEl.style.color = taskInfo.onnx ? '#0f8' : '#888';
+            }
+        } else {
+            if (modelEl) { modelEl.textContent = d.pt_ready ? 'ready' : 'no model'; modelEl.style.color = d.pt_ready ? '#0f8' : '#888'; }
+            if (onnxEl) { onnxEl.textContent = d.onnx_ready ? 'ONNX ready' : '-'; onnxEl.style.color = d.onnx_ready ? '#0f8' : '#888'; }
+        }
+
+        // Update status
+        if (d.running) {
+            statusEl.textContent = 'Running: ' + d.label;
+            statusEl.style.color = '#ff0';
+        } else if (d.exit_code !== null) {
+            statusEl.textContent = d.exit_code === 0 ? 'Done: ' + d.label : 'Failed: ' + d.label;
+            statusEl.style.color = d.exit_code === 0 ? '#0f8' : '#f44';
+            // Stop polling when process ends
+            if (trainPollTimer) { clearInterval(trainPollTimer); trainPollTimer = null; }
+        } else {
+            statusEl.textContent = 'Idle';
+            statusEl.style.color = '#888';
+        }
+
+        // Update progress bar (during training)
+        const progWrap = document.getElementById('train-progress-wrap');
+        const progBar = document.getElementById('train-progress-bar');
+        const progText = document.getElementById('train-progress-text');
+        const progPct = document.getElementById('train-progress-pct');
+        const rewardText = document.getElementById('train-reward-text');
+        const etaText = document.getElementById('train-eta-text');
+        if (d.label === 'train' && d.train_target > 0) {
+            progWrap.style.display = 'block';
+            const cur = d.train_current || 0;
+            const tgt = d.train_target;
+            const pct = Math.min(100, (cur / tgt * 100));
+            progBar.style.width = pct.toFixed(1) + '%';
+            progText.textContent = cur.toLocaleString() + ' / ' + tgt.toLocaleString() + ' steps';
+            progPct.textContent = pct.toFixed(1) + '%';
+            if (d.train_reward) rewardText.textContent = 'Reward: ' + d.train_reward;
+            // ETA estimate
+            if (!trainStartTime && cur > 0) trainStartTime = Date.now();
+            if (trainStartTime && cur > 0 && pct < 100) {
+                const elapsed = (Date.now() - trainStartTime) / 1000;
+                const rate = cur / elapsed;  // steps/sec
+                const remaining = (tgt - cur) / rate;
+                const mins = Math.floor(remaining / 60);
+                const secs = Math.floor(remaining % 60);
+                etaText.textContent = 'ETA: ' + mins + 'm ' + secs + 's (' + rate.toFixed(0) + ' steps/s)';
+            }
+            if (!d.running) {
+                trainStartTime = null;
+                if (d.exit_code === 0) {
+                    progBar.style.width = '100%';
+                    progPct.textContent = '100%';
+                    etaText.textContent = 'Done!';
+                }
+            }
+        } else if (!d.running) {
+            progWrap.style.display = 'none';
+        }
+
+        // Update log
+        if (d.log && d.log.length > 0) {
+            logEl.textContent = d.log.join('\n');
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+    }).catch(() => {});
+}
+
+// Show/hide train panel with sim panel
+function trainPanelVisibility(show) {
+    const el = document.getElementById('train-panel');
+    if (el) el.style.display = show ? 'block' : 'none';
+    if (show) trainPollStatus();  // initial status check
+}
+
+// --- Load ONNX model ---
+async function simLoadONNX() {
+    if (typeof ort === 'undefined') {
+        console.log('ONNX Runtime Web not loaded — NN policy unavailable');
+        return;
+    }
+    try {
+        simOnnxSession = await ort.InferenceSession.create('/models/nav_policy.onnx');
+        console.log('ONNX model loaded successfully');
+    } catch (e) {
+        console.log('No ONNX model found (expected at /models/nav_policy.onnx):', e.message);
+        simOnnxSession = null;
+    }
+}
+
+// ============================================================
+// GPS
+// ============================================================
+function gpsStartPolling() {
+    if (gpsTimer) return;
+    gpsFetch();
+    gpsTimer = setInterval(gpsFetch, 1000);
+}
+
+function gpsStopPolling() {
+    if (gpsTimer) { clearInterval(gpsTimer); gpsTimer = null; }
+}
+
+async function gpsFetch() {
+    try {
+        const r = await fetch(ROBOT_BASE + '/api/gps');
+        gpsData = await r.json();
+        gpsUpdatePanel();
+        if (gpsData.fix && gpsData.latitude !== 0) {
+            const last = gpsHistory[gpsHistory.length - 1];
+            if (!last || last.lat !== gpsData.latitude || last.lon !== gpsData.longitude) {
+                gpsHistory.push({ lat: gpsData.latitude, lon: gpsData.longitude, ts: Date.now() });
+                if (gpsHistory.length > 500) gpsHistory.shift();
+            }
+        }
+        if (viewMode === 'gps') needsRedraw = true;
+    } catch(e) {
+        if (viewMode === 'gps') {
+            document.getElementById('gps-fix').textContent = 'N/A';
+            document.getElementById('gps-fix').style.color = '#888';
+        }
+    }
+}
+
+function gpsUpdatePanel() {
+    const g = gpsData;
+    const fixEl = document.getElementById('gps-fix');
+    fixEl.textContent = g.fix ? 'Yes' : 'No';
+    fixEl.style.color = g.fix ? '#0f8' : '#f44';
+    document.getElementById('gps-sats').textContent = g.satellites;
+    if (g.fix && g.latitude !== 0) {
+        const latDir = g.latitude >= 0 ? 'N' : 'S';
+        const lonDir = g.longitude >= 0 ? 'E' : 'W';
+        document.getElementById('gps-lat').textContent = Math.abs(g.latitude).toFixed(6) + '\u00b0' + latDir;
+        document.getElementById('gps-lon').textContent = Math.abs(g.longitude).toFixed(6) + '\u00b0' + lonDir;
+        document.getElementById('gps-alt').textContent = g.altitude_m.toFixed(1) + ' m';
+        document.getElementById('gps-speed').textContent = g.speed_knots.toFixed(1) + ' kts';
+        document.getElementById('gps-heading').textContent = g.heading_deg.toFixed(1) + '\u00b0';
+    } else {
+        document.getElementById('gps-lat').textContent = '-';
+        document.getElementById('gps-lon').textContent = '-';
+        document.getElementById('gps-alt').textContent = '-';
+        document.getElementById('gps-speed').textContent = '-';
+        document.getElementById('gps-heading').textContent = '-';
+    }
+    document.getElementById('gps-utc').textContent = g.utc_time || '-';
+    // Age: how old the data is
+    if (g.timestamp > 0) {
+        // timestamp is monotonic on the server, so approximate age
+        document.getElementById('gps-age').textContent = 'live';
+        document.getElementById('gps-age').style.color = '#0f8';
+    } else {
+        document.getElementById('gps-age').textContent = 'no data';
+        document.getElementById('gps-age').style.color = '#f44';
+    }
+}
+
+function drawGpsView(w, h) {
+    // Full canvas GPS dashboard (no zoom/pan transform)
+    ctx.fillStyle = '#080810';
+    ctx.fillRect(0, 0, w, h);
+
+    const cx = w / 2, cy = h / 2;
+    const g = gpsData;
+    const sc = dpr;
+
+    // --- Compass circle ---
+    const compassR = Math.min(w, h) * 0.28;
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2 * sc;
+    ctx.beginPath();
+    ctx.arc(cx, cy * 0.55, compassR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Compass ticks & labels
+    const dirs = ['N', 'E', 'S', 'W'];
+    for (let i = 0; i < 360; i += 15) {
+        const rad = (i - 90) * Math.PI / 180;
+        const inner = i % 90 === 0 ? 0.82 : i % 45 === 0 ? 0.88 : 0.92;
+        const x1 = cx + Math.cos(rad) * compassR * inner;
+        const y1 = cy * 0.55 + Math.sin(rad) * compassR * inner;
+        const x2 = cx + Math.cos(rad) * compassR;
+        const y2 = cy * 0.55 + Math.sin(rad) * compassR;
+        ctx.strokeStyle = i % 90 === 0 ? '#0df' : '#444';
+        ctx.lineWidth = i % 90 === 0 ? 2 * sc : 1 * sc;
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+    // Cardinal labels
+    ctx.font = `bold ${16 * sc}px Consolas, monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let i = 0; i < 4; i++) {
+        const rad = (i * 90 - 90) * Math.PI / 180;
+        const lx = cx + Math.cos(rad) * compassR * 1.12;
+        const ly = cy * 0.55 + Math.sin(rad) * compassR * 1.12;
+        ctx.fillStyle = i === 0 ? '#f44' : '#0df';
+        ctx.fillText(dirs[i], lx, ly);
+    }
+
+    // Heading needle
+    if (g.fix) {
+        const hRad = (g.heading_deg - 90) * Math.PI / 180;
+        ctx.strokeStyle = '#f44';
+        ctx.lineWidth = 3 * sc;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy * 0.55);
+        ctx.lineTo(cx + Math.cos(hRad) * compassR * 0.75, cy * 0.55 + Math.sin(hRad) * compassR * 0.75);
+        ctx.stroke();
+        // Heading text in center
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${24 * sc}px Consolas, monospace`;
+        ctx.fillText(g.heading_deg.toFixed(1) + '\u00b0', cx, cy * 0.55);
+    } else {
+        ctx.fillStyle = '#666';
+        ctx.font = `bold ${20 * sc}px Consolas, monospace`;
+        ctx.fillText('NO FIX', cx, cy * 0.55);
+    }
+
+    // --- Bottom info panel ---
+    const infoY = cy * 1.15;
+    ctx.textAlign = 'left';
+    ctx.font = `${14 * sc}px Consolas, monospace`;
+    const col1 = cx - compassR * 1.2;
+    const col2 = cx + 20 * sc;
+    const lh = 22 * sc;
+
+    // Fix status
+    ctx.fillStyle = g.fix ? '#0f8' : '#f44';
+    ctx.beginPath();
+    ctx.arc(col1, infoY + 4 * sc, 5 * sc, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ccc';
+    ctx.fillText('Fix: ' + (g.fix ? 'YES' : 'NO'), col1 + 14 * sc, infoY + 5 * sc);
+
+    // Satellites
+    ctx.fillStyle = '#0df';
+    ctx.fillText('Sats: ' + g.satellites, col2, infoY + 5 * sc);
+
+    // Satellite signal bars
+    const barX = col2 + 90 * sc;
+    const maxBars = Math.min(g.satellites, 16);
+    for (let i = 0; i < maxBars; i++) {
+        const bh = (6 + i * 1.2) * sc;
+        ctx.fillStyle = i < 4 ? '#f44' : i < 8 ? '#ff0' : '#0f8';
+        ctx.fillRect(barX + i * 7 * sc, infoY + 5 * sc - bh, 5 * sc, bh);
+    }
+
+    // Position
+    if (g.fix && g.latitude !== 0) {
+        const latDir = g.latitude >= 0 ? 'N' : 'S';
+        const lonDir = g.longitude >= 0 ? 'E' : 'W';
+        ctx.fillStyle = '#0f8';
+        ctx.font = `bold ${16 * sc}px Consolas, monospace`;
+        ctx.fillText(Math.abs(g.latitude).toFixed(6) + '\u00b0' + latDir, col1, infoY + lh + 5 * sc);
+        ctx.fillText(Math.abs(g.longitude).toFixed(6) + '\u00b0' + lonDir, col2, infoY + lh + 5 * sc);
+
+        ctx.fillStyle = '#ccc';
+        ctx.font = `${14 * sc}px Consolas, monospace`;
+        ctx.fillText('Alt: ' + g.altitude_m.toFixed(1) + 'm', col1, infoY + lh * 2 + 5 * sc);
+        ctx.fillText('Speed: ' + g.speed_knots.toFixed(1) + ' kts', col2, infoY + lh * 2 + 5 * sc);
+    } else {
+        ctx.fillStyle = '#666';
+        ctx.font = `${14 * sc}px Consolas, monospace`;
+        ctx.fillText('Waiting for GPS fix...', col1, infoY + lh + 5 * sc);
+    }
+
+    // UTC time
+    ctx.fillStyle = '#888';
+    ctx.fillText('UTC: ' + (g.utc_time || '--:--:--'), col1, infoY + lh * 3 + 5 * sc);
+
+    // --- Position trail (mini map) ---
+    if (gpsHistory.length >= 2) {
+        const trailW = compassR * 1.5;
+        const trailH = compassR * 0.8;
+        const trailX = cx - trailW / 2;
+        const trailY = infoY + lh * 4 + 10 * sc;
+
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1 * sc;
+        ctx.strokeRect(trailX, trailY, trailW, trailH);
+
+        // Find bounds
+        let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+        for (const p of gpsHistory) {
+            if (p.lat < minLat) minLat = p.lat;
+            if (p.lat > maxLat) maxLat = p.lat;
+            if (p.lon < minLon) minLon = p.lon;
+            if (p.lon > maxLon) maxLon = p.lon;
+        }
+        const dLat = maxLat - minLat || 0.0001;
+        const dLon = maxLon - minLon || 0.0001;
+        const margin = 10 * sc;
+
+        ctx.strokeStyle = '#0f8';
+        ctx.lineWidth = 1.5 * sc;
+        ctx.beginPath();
+        for (let i = 0; i < gpsHistory.length; i++) {
+            const px = trailX + margin + (gpsHistory[i].lon - minLon) / dLon * (trailW - margin * 2);
+            const py = trailY + trailH - margin - (gpsHistory[i].lat - minLat) / dLat * (trailH - margin * 2);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+
+        // Current position dot
+        const last = gpsHistory[gpsHistory.length - 1];
+        const dotX = trailX + margin + (last.lon - minLon) / dLon * (trailW - margin * 2);
+        const dotY = trailY + trailH - margin - (last.lat - minLat) / dLat * (trailH - margin * 2);
+        ctx.fillStyle = '#ff0';
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, 4 * sc, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#666';
+        ctx.font = `${10 * sc}px Consolas, monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText('Position Trail (' + gpsHistory.length + ' pts)', cx, trailY + trailH + 12 * sc);
+        ctx.textAlign = 'left';
+    }
+}
+
+// ============================================================
+// GPS Comm Test
+// ============================================================
+const ROSMASTER_XBEE_ADDR = '0013A20041BB8E1F';
+let commTestLog = [];
+
+function commTestAddResult(entry) {
+    commTestLog.unshift(entry);
+    if (commTestLog.length > 50) commTestLog.pop();
+    const el = document.getElementById('ct-results');
+    el.innerHTML = commTestLog.map(e => {
+        const color = e.status === 'ok' ? '#0f8' : e.status === 'pending' ? '#ff0' : '#f44';
+        const rssiStr = e.rssi != null ? ' RSSI:' + e.rssi + 'dBm' : '';
+        return '<div style="border-bottom:1px solid #1a1a2a;padding:2px 0;">' +
+            '<span style="color:' + color + ';">[' + e.status.toUpperCase() + ']</span> ' +
+            '<span style="color:#0df;">' + e.channel + '/' + e.direction + '</span> ' +
+            (e.latency_ms != null ? e.latency_ms + 'ms' : '') + rssiStr +
+            '<br><span style="color:#888;font-size:9px;">' + (e.data || '') + '</span>' +
+            '</div>';
+    }).join('');
+}
+
+function commTestUpdateInputs() {
+    const useLive = document.getElementById('ct-use-live').checked;
+    if (useLive && gpsData.fix && gpsData.latitude !== 0) {
+        document.getElementById('ct-test-lat').value = gpsData.latitude.toFixed(6);
+        document.getElementById('ct-test-lon').value = gpsData.longitude.toFixed(6);
+    }
+    document.getElementById('ct-test-lat').disabled = useLive;
+    document.getElementById('ct-test-lon').disabled = useLive;
+}
+
+async function commTestQuery(channel) {
+    const master = document.getElementById('ct-master').value;
+    const t0 = performance.now();
+
+    if (channel === 'http') {
+        try {
+            const r = await fetch(ROBOT_BASE + '/api/gps');
+            const d = await r.json();
+            const latency = Math.round(performance.now() - t0);
+            commTestAddResult({
+                channel: 'HTTP', direction: 'query', status: 'ok',
+                latency_ms: latency, rssi: null,
+                data: d.fix
+                    ? 'Fix=' + d.fix + ' ' + d.latitude.toFixed(6) + ',' + d.longitude.toFixed(6) + ' Sats=' + d.satellites
+                    : 'NoFix Sats=' + d.satellites,
+            });
+        } catch(e) {
+            commTestAddResult({
+                channel: 'HTTP', direction: 'query', status: 'fail',
+                latency_ms: Math.round(performance.now() - t0), rssi: null, data: e.message,
+            });
+        }
+    } else if (channel === 'xbee') {
+        try {
+            // Snapshot received_count before sending
+            const before = await (await fetch('/api/comm/' + master + '/heartbeat/status')).json();
+            const rxBefore = before.received_count || 0;
+
+            // Send XBee "gps" command
+            const sendR = await fetch('/api/comm/' + master + '/xbee/send', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ message: 'gps', target_addr: ROSMASTER_XBEE_ADDR }),
+            });
+            const sendD = await sendR.json();
+            if (!sendD.success) {
+                commTestAddResult({
+                    channel: 'XBee', direction: 'query', status: 'fail',
+                    latency_ms: Math.round(performance.now() - t0), rssi: null,
+                    data: 'Send failed: ' + (sendD.error || JSON.stringify(sendD)),
+                });
+                return;
+            }
+
+            commTestAddResult({
+                channel: 'XBee', direction: 'query', status: 'pending',
+                latency_ms: null, rssi: null, data: 'Waiting for XBee response...',
+            });
+
+            // Poll for response (up to 5s)
+            let found = false;
+            for (let i = 0; i < 10; i++) {
+                await new Promise(r => setTimeout(r, 500));
+                const after = await (await fetch('/api/comm/' + master + '/heartbeat/status')).json();
+                if ((after.received_count || 0) > rxBefore) {
+                    const hist = after.history || [];
+                    const newest = hist[hist.length - 1];
+                    commTestLog.shift(); // remove pending
+                    commTestAddResult({
+                        channel: 'XBee', direction: 'query', status: 'ok',
+                        latency_ms: Math.round(performance.now() - t0),
+                        rssi: (newest && newest.rssi) || after.last_rssi,
+                        data: (newest && newest.msg) || JSON.stringify(newest),
+                    });
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                commTestLog.shift();
+                commTestAddResult({
+                    channel: 'XBee', direction: 'query', status: 'fail',
+                    latency_ms: Math.round(performance.now() - t0), rssi: null,
+                    data: 'Timeout (5s) — no XBee response',
+                });
+            }
+        } catch(e) {
+            commTestAddResult({
+                channel: 'XBee', direction: 'query', status: 'fail',
+                latency_ms: Math.round(performance.now() - t0), rssi: null, data: e.message,
+            });
+        }
+    }
+}
+
+async function commTestSend(channel) {
+    const master = document.getElementById('ct-master').value;
+    const useLive = document.getElementById('ct-use-live').checked;
+    let lat, lon;
+    if (useLive && gpsData.fix) {
+        lat = gpsData.latitude;
+        lon = gpsData.longitude;
+    } else {
+        lat = parseFloat(document.getElementById('ct-test-lat').value);
+        lon = parseFloat(document.getElementById('ct-test-lon').value);
+    }
+    const t0 = performance.now();
+
+    if (channel === 'http') {
+        try {
+            const r = await fetch(ROBOT_BASE + '/api/gps/test_receive', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ latitude: lat, longitude: lon, source: master }),
+            });
+            const d = await r.json();
+            const latency = Math.round(performance.now() - t0);
+            if (d.ok) {
+                const own = d.own_gps || {};
+                commTestAddResult({
+                    channel: 'HTTP', direction: 'send', status: 'ok',
+                    latency_ms: latency, rssi: null,
+                    data: 'Sent ' + lat.toFixed(6) + ',' + lon.toFixed(6) +
+                        ' | Slave: ' + (own.fix ? own.latitude.toFixed(6) + ',' + own.longitude.toFixed(6) : 'no fix'),
+                });
+            } else {
+                commTestAddResult({
+                    channel: 'HTTP', direction: 'send', status: 'fail',
+                    latency_ms: latency, rssi: null, data: d.error || 'Unknown error',
+                });
+            }
+        } catch(e) {
+            commTestAddResult({
+                channel: 'HTTP', direction: 'send', status: 'fail',
+                latency_ms: Math.round(performance.now() - t0), rssi: null, data: e.message,
+            });
+        }
+    } else if (channel === 'xbee') {
+        try {
+            const before = await (await fetch('/api/comm/' + master + '/heartbeat/status')).json();
+            const rxBefore = before.received_count || 0;
+
+            const sendR = await fetch('/api/comm/' + master + '/xbee/send', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    message: 'gps_test ' + lat.toFixed(6) + ',' + lon.toFixed(6),
+                    target_addr: ROSMASTER_XBEE_ADDR,
+                }),
+            });
+            const sendD = await sendR.json();
+            if (!sendD.success) {
+                commTestAddResult({
+                    channel: 'XBee', direction: 'send', status: 'fail',
+                    latency_ms: Math.round(performance.now() - t0), rssi: null,
+                    data: 'Send failed: ' + (sendD.error || JSON.stringify(sendD)),
+                });
+                return;
+            }
+
+            commTestAddResult({
+                channel: 'XBee', direction: 'send', status: 'pending',
+                latency_ms: null, rssi: null,
+                data: 'Sent ' + lat.toFixed(6) + ',' + lon.toFixed(6) + ' — waiting...',
+            });
+
+            let found = false;
+            for (let i = 0; i < 10; i++) {
+                await new Promise(r => setTimeout(r, 500));
+                const after = await (await fetch('/api/comm/' + master + '/heartbeat/status')).json();
+                if ((after.received_count || 0) > rxBefore) {
+                    const hist = after.history || [];
+                    const newest = hist[hist.length - 1];
+                    commTestLog.shift();
+                    commTestAddResult({
+                        channel: 'XBee', direction: 'send', status: 'ok',
+                        latency_ms: Math.round(performance.now() - t0),
+                        rssi: (newest && newest.rssi) || after.last_rssi,
+                        data: (newest && newest.msg) || JSON.stringify(newest),
+                    });
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                commTestLog.shift();
+                commTestAddResult({
+                    channel: 'XBee', direction: 'send', status: 'fail',
+                    latency_ms: Math.round(performance.now() - t0), rssi: null,
+                    data: 'Timeout (5s)',
+                });
+            }
+        } catch(e) {
+            commTestAddResult({
+                channel: 'XBee', direction: 'send', status: 'fail',
+                latency_ms: Math.round(performance.now() - t0), rssi: null, data: e.message,
+            });
+        }
+    }
+}
+
+// ============================================================
 // Init
 // ============================================================
 setTimeout(async () => {
@@ -930,6 +2642,7 @@ setTimeout(async () => {
     fetchWallLines();
     fetchMapList();
     fetchRecordings();
+    simLoadONNX();  // try loading NN model (non-blocking)
     render();
 }, 100);
 </script>

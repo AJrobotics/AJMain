@@ -949,6 +949,62 @@ def api_xbee_responders():
         return jsonify({"error": str(e), "responders": []}), 200
 
 
+@app.route("/api/xbee/gps")
+def api_xbee_gps():
+    """Parse GPS data from XBee text messages in event log."""
+    import re
+    log_path = os.path.expanduser("~/logs/xbee/xbee_events.log")
+    if not os.path.exists(log_path):
+        return jsonify({"devices": {}, "error": "Log file not found"})
+
+    fix_re = re.compile(
+        r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*TEXT from (\w+): "
+        r"R(\d+): Fix=(\d+) Sats=(\d+) ([\d.]+)([NS]) ([\d.]+)([EW]) ([\d.]+)m Bat=([\d.]+)V"
+    )
+    nofix_re = re.compile(
+        r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*TEXT from (\w+): "
+        r"R(\d+): No fix, (\d+) sats Bat=([\d.]+)V"
+    )
+
+    devices = {}
+    trail = []  # recent positions for path drawing
+
+    try:
+        with open(log_path, "r") as f:
+            lines = f.readlines()[-500:]
+
+        for line in lines:
+            m = fix_re.search(line)
+            if m:
+                ts, mac, rid, fix, sats, lat, lat_d, lon, lon_d, alt, bat = m.groups()
+                lat_f = float(lat) * (1 if lat_d == "N" else -1)
+                lon_f = float(lon) * (1 if lon_d == "E" else -1)
+                name = f"R{rid}"
+                entry = {
+                    "name": name, "mac": mac, "fix": int(fix) > 0,
+                    "satellites": int(sats), "latitude": lat_f, "longitude": lon_f,
+                    "altitude_m": float(alt), "battery_v": float(bat), "timestamp": ts,
+                }
+                devices[name] = entry
+                trail.append({"lat": lat_f, "lon": lon_f, "ts": ts})
+                continue
+
+            m2 = nofix_re.search(line)
+            if m2:
+                ts, mac, rid, sats, bat = m2.groups()
+                name = f"R{rid}"
+                if name not in devices or not devices[name].get("fix"):
+                    devices[name] = {
+                        "name": name, "mac": mac, "fix": False,
+                        "satellites": int(sats), "latitude": 0, "longitude": 0,
+                        "altitude_m": 0, "battery_v": float(bat), "timestamp": ts,
+                    }
+
+        return jsonify({"devices": devices, "trail": trail[-50:]})
+    except Exception as e:
+        return jsonify({"devices": {}, "error": str(e)})
+
+
 @app.route("/api/xbee/log-file")
 def api_xbee_log_file():
     """Fetch a specific XBee log file (local file read — Flask runs on Christy)."""
@@ -1210,6 +1266,16 @@ def api_cashcow_logs():
         return jsonify({"logs": output.strip().splitlines()})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/cashcow/trader-status")
+def api_cashcow_trader_status():
+    """Proxy to CashCow trader status API (avoids CORS)."""
+    try:
+        r = http_requests.get("http://192.168.1.91:5000/api/trader/status", timeout=10)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"running": False, "error": str(e)}), 200
 
 
 @app.route("/api/cashcow/portfolio")
@@ -2360,6 +2426,27 @@ def cameras_eufy_history():
         return jsonify(resp.json())
     except Exception as e:
         return jsonify({"events": [], "error": str(e)})
+
+
+# --- Alexa Devices ---
+
+try:
+    from Christy.alexa_service import ALEXA_DEVICES as _alexa_devices
+except ImportError:
+    _alexa_devices = []
+
+
+@app.route("/api/alexa/status")
+def api_alexa_status():
+    """Alexa device list (discovered from Amazon account)."""
+    return jsonify({
+        "available": True,
+        "connected": len(_alexa_devices) > 0,
+        "device_count": len(_alexa_devices),
+        "devices": _alexa_devices,
+        "tts_available": False,
+        "tts_note": "TTS requires Home Assistant — setup guide at /api/alexa/help",
+    })
 
 
 # --- Startup ---

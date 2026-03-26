@@ -28,6 +28,8 @@ from collision_avoidance import CollisionAvoidance
 from calibration import CalibrationRunner
 from slam_engine import SLAMEngine, CELL_SIZE_MM, GRID_SIZE
 from explorer import Explorer
+from gps_reader import GpsReader
+from xbee_comm import XBeeComm
 
 PORT = 8080
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -48,6 +50,8 @@ calibration = CalibrationRunner()
 slam = SLAMEngine(ignore_angle=140)
 explorer = Explorer(slam=slam, ignore_angle=120)
 slam_clients = set()
+gps = GpsReader()
+xbee = XBeeComm(gps_reader=gps)
 
 # Persistent Rosmaster instance for status (uses CH340 on ttyUSB1/ttyUSB2, not ttyUSB0)
 bot = None
@@ -401,6 +405,10 @@ class ExplorerHandler(tornado.web.RequestHandler):
             elif action == "scan_test":
                 result = explorer.start_scan_test()
                 _start_recording()
+            elif action == "nn_explore":
+                time_limit = int(data.get("time_limit", 300))
+                result = explorer.start_nn_explore(time_limit=time_limit)
+                _start_recording()
             elif action == "stop":
                 result = explorer.stop()
                 _stop_recording()
@@ -463,6 +471,51 @@ class LandmarkHandler(tornado.web.RequestHandler):
             print("Landmarks cleared", flush=True)
         self.write(json.dumps({"ok": True, "use_landmarks": slam.use_landmarks,
                                "count": len(slam._landmarks)}))
+
+
+class GpsHandler(tornado.web.RequestHandler):
+    def get(self):
+        self.write(json.dumps(gps.get_data()))
+
+
+class GpsTestReceiveHandler(tornado.web.RequestHandler):
+    def post(self):
+        """Receive test GPS data from master, return ack + own GPS."""
+        try:
+            data = json.loads(self.request.body)
+            print(f"GPS Test RX: {data}", flush=True)
+            own_gps = gps.get_data()
+            self.write(json.dumps({
+                "ok": True,
+                "received": data,
+                "own_gps": own_gps,
+                "timestamp": time.time(),
+            }))
+        except Exception as e:
+            self.write(json.dumps({"ok": False, "error": str(e)}))
+
+
+class XBeeStatusHandler(tornado.web.RequestHandler):
+    def get(self):
+        status = xbee.get_status()
+        status["enabled"] = xbee.running
+        self.write(json.dumps(status))
+
+    def post(self):
+        data = json.loads(self.request.body)
+        action = data.get("action", "")
+        if action == "enable":
+            if not xbee.running:
+                xbee.start()
+            self.write(json.dumps({"ok": True, "enabled": True}))
+        elif action == "disable":
+            xbee.stop()
+            self.write(json.dumps({"ok": True, "enabled": False}))
+        elif data.get("message"):
+            xbee.broadcast(data["message"])
+            self.write(json.dumps({"ok": True}))
+        else:
+            self.write(json.dumps({"ok": False, "error": "no action or message"}))
 
 
 class ShutdownHandler(tornado.web.RequestHandler):
@@ -993,6 +1046,8 @@ def broadcast_status():
         },
         "lidar_connected": lidar.connected,
         "depth_connected": depth.connected,
+        "xbee_connected": xbee.connected,
+        "gps": gps.get_data(),
         "scan_counts": lidar.flush_scan_counts(),
         "ts": time.time(),
     })
@@ -1022,12 +1077,16 @@ def make_app():
         (r"/api/slam_params", SlamParamsHandler),
         (r"/api/landmarks", LandmarkHandler),
         (r"/api/shutdown", ShutdownHandler),
+        (r"/api/gps", GpsHandler),
+        (r"/api/gps/test_receive", GpsTestReceiveHandler),
+        (r"/api/xbee", XBeeStatusHandler),
         (r"/ws/slam", SlamWSHandler),
         (r"/ws/status", StatusWSHandler),
         (r"/ws/debug", DebugWSHandler),
         (r"/ws/timing", TimingWSHandler),
         (r"/static/(.*)", tornado.web.StaticFileHandler, {"path": STATIC_DIR}),
         (r"/recordings/(.*)", tornado.web.StaticFileHandler, {"path": RECORDING_DIR}),
+        (r"/models/(.*)", tornado.web.StaticFileHandler, {"path": "/home/jetson/RosMaster/models"}),
     ], debug=False)
 
 
@@ -1065,9 +1124,20 @@ def main():
     calibration.bot = bot
     calibration.collision = collision
 
-    # Connect explorer to bot and collision avoidance
+    # Connect explorer to bot, collision avoidance, and LiDAR reader
     explorer.bot = bot
     explorer.collision = collision
+    explorer.lidar_reader = lidar
+
+    # Start GPS reader
+    gps.start()
+
+    # Start XBee communication
+    xbee.bot = bot
+    xbee.collision = collision
+    xbee.explorer = explorer
+    xbee.slam = slam
+    xbee.start()
 
     app = make_app()
     app.listen(PORT, address="0.0.0.0")
@@ -1100,6 +1170,8 @@ def main():
         global bot
         print("\nShutting down...")
         _stop_recording()  # save any in-progress recording
+        xbee.stop()
+        gps.stop()
         lidar.stop()
         depth.stop()
         cam_primary.stop()

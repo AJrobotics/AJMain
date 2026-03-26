@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ machine_name }} - AJ Robotics</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -862,6 +864,25 @@
                         </div>
                     </div>
 
+                    <!-- Robot Navigation (GPS Map) -->
+                    <div id="gps-section" style="display:none;">
+                        <div class="card" style="border-color:#7c4dff;">
+                            <div class="trader-header">
+                                <h3 style="color:#7c4dff;">Robot Navigation</h3>
+                                <span id="gps-badge" style="background:#555;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">No Fix</span>
+                            </div>
+                            <div id="gps-map" style="height:300px;margin-top:10px;border-radius:8px;background:#0a192f;"></div>
+                            <div id="gps-info" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px 16px;font-size:12px;color:#aaa;">
+                                <span>Lat: <span id="gps-lat" style="color:#e0e0e0;">--</span></span>
+                                <span>Lon: <span id="gps-lon" style="color:#e0e0e0;">--</span></span>
+                                <span>Sats: <span id="gps-sats" style="color:#e0e0e0;">--</span></span>
+                                <span>Alt: <span id="gps-alt" style="color:#e0e0e0;">--</span></span>
+                                <span>Bat: <span id="gps-bat" style="color:#e0e0e0;">--</span></span>
+                                <span>Updated: <span id="gps-time" style="color:#888;">--</span></span>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Log Viewer -->
                     <div id="log-viewer-section" style="display:none;">
                         <div class="card" style="border-color:#00e5ff;">
@@ -912,6 +933,10 @@
                             <span class="p-value" id="cc-trader">--</span>
                         </div>
                         <div class="panel-info-row">
+                            <span class="p-label">Day Trader</span>
+                            <span class="p-value" id="cc-day-trader">--</span>
+                        </div>
+                        <div class="panel-info-row">
                             <span class="p-label">Open Positions</span>
                             <span class="p-value" id="cc-positions">--</span>
                         </div>
@@ -949,6 +974,24 @@
                         <div style="margin-top:8px;text-align:center;font-size:10px;color:#555;" id="cam-footer">
                             Loading camera config...
                         </div>
+                        <!-- Eufy Events Table -->
+                        <div style="margin-top:12px;">
+                            <h4 style="color:#00e5ff;font-size:12px;margin-bottom:6px;">Recent Eufy Events</h4>
+                            <div style="max-height:180px;overflow-y:auto;" id="eufy-events-wrap">
+                                <table style="width:100%;font-size:11px;border-collapse:collapse;" id="eufy-events-table">
+                                    <thead>
+                                        <tr style="color:#888;text-align:left;border-bottom:1px solid #1e3a5f;">
+                                            <th style="padding:3px 6px;">Source</th>
+                                            <th style="padding:3px 6px;">Time</th>
+                                            <th style="padding:3px 6px;">Detected</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="eufy-events-body">
+                                        <tr><td colspan="3" style="color:#555;text-align:center;padding:10px;">Loading...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                     <!-- Camera fullscreen modal -->
                     <div class="cam-modal-overlay" id="cam-modal" onclick="closeCamModal()">
@@ -968,36 +1011,18 @@
                         </div>
                     </div>
 
-                    <!-- Panel 3: Alexa Devices (Home Assistant) -->
+                    <!-- Panel 3: Alexa Devices -->
                     <div class="panel-card panel-alexa" id="panel-alexa">
                         <h3>
                             <span class="panel-icon">&#128266;</span>
                             Alexa Devices
+                            <span class="panel-badge" id="alexa-badge" style="background:#555;">loading</span>
                         </h3>
-                        <div class="ha-status">
-                            <span class="ha-dot" id="ha-dot"></span>
-                            <span style="color:#aaa;" id="ha-status-text">Home Assistant — Not Configured</span>
+                        <div class="device-list" id="alexa-device-list">
+                            <!-- Populated by JS -->
                         </div>
-                        <div class="device-list">
-                            <div class="device-item">
-                                <span><span class="dev-icon">&#128266;</span>Living Room Echo</span>
-                                <span class="dev-status">Pending Setup</span>
-                            </div>
-                            <div class="device-item">
-                                <span><span class="dev-icon">&#128266;</span>Bedroom Echo Dot</span>
-                                <span class="dev-status">Pending Setup</span>
-                            </div>
-                            <div class="device-item">
-                                <span><span class="dev-icon">&#128161;</span>Smart Lights</span>
-                                <span class="dev-status">Pending Setup</span>
-                            </div>
-                            <div class="device-item">
-                                <span><span class="dev-icon">&#127777;</span>Thermostat</span>
-                                <span class="dev-status">Pending Setup</span>
-                            </div>
-                        </div>
-                        <div style="margin-top:10px;text-align:center;font-size:11px;color:#555;">
-                            Home Assistant integration coming soon
+                        <div style="margin-top:8px;text-align:center;font-size:10px;color:#555;" id="alexa-footer">
+                            TTS requires Home Assistant (coming soon)
                         </div>
                     </div>
 
@@ -1061,12 +1086,24 @@
                                 <th style="text-align:right;padding:8px 6px;">Mkt Value</th>
                                 <th style="text-align:right;padding:8px 6px;">P&L</th>
                                 <th style="text-align:right;padding:8px 6px;">P&L %</th>
+                                <th style="text-align:right;padding:8px 6px;">Purchased</th>
                             </tr>
                         </thead>
                         <tbody id="pf-positions-body">
-                            <tr><td colspan="7" style="text-align:center;color:#555;padding:20px;">Loading portfolio...</td></tr>
+                            <tr><td colspan="8" style="text-align:center;color:#555;padding:20px;">Loading portfolio...</td></tr>
                         </tbody>
                     </table>
+
+                    <!-- Trade History (last 10 days) -->
+                    <div style="margin-top:16px;border-top:1px solid #0f3460;padding-top:12px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                            <h3 style="color:#b388ff;font-size:14px;margin:0;">Trade History (Last 10 Days)</h3>
+                            <span id="trade-history-count" style="font-size:11px;color:#555;"></span>
+                        </div>
+                        <div id="trade-history-list" style="max-height:300px;overflow-y:auto;font-size:12px;">
+                            <div style="text-align:center;color:#555;padding:12px;">Loading...</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1760,7 +1797,7 @@
                 const positions = d.positions || [];
                 const tbody = document.getElementById('pf-positions-body');
                 if (positions.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#555;padding:20px;">No open positions</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#555;padding:20px;">No open positions</td></tr>';
                     return;
                 }
                 positions.sort((a, b) => Math.abs(b.marketValue) - Math.abs(a.marketValue));
@@ -1786,6 +1823,13 @@
                         traderTag = '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#e9456033;color:#e94560;border:1px solid #e94560;margin-left:4px;">Bug</span>';
                     }
 
+                    // Format purchase date
+                    let purchDate = '';
+                    if (p.purchase_date) {
+                        const parts = p.purchase_date.split('-');
+                        purchDate = parseInt(parts[1]) + '/' + parseInt(parts[2]);
+                    }
+
                     return '<tr style="border-bottom:1px solid #0f3460;">' +
                         '<td style="padding:6px;color:' + symColor + ';font-weight:bold;">' + p.symbol + traderTag + '</td>' +
                         '<td style="padding:6px;text-align:right;color:' + qtyColor + ';">' + (p.quantity > 0 ? '+' : '') + p.quantity + '</td>' +
@@ -1794,10 +1838,80 @@
                         '<td style="padding:6px;text-align:right;">$' + p.marketValue.toLocaleString('en-US', {minimumFractionDigits:0}) + '</td>' +
                         '<td style="padding:6px;text-align:right;color:' + pnlColor + ';font-weight:bold;">' + (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(0) + '</td>' +
                         '<td style="padding:6px;text-align:right;color:' + pnlColor + ';">' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(1) + '%</td>' +
+                        '<td style="padding:6px;text-align:right;color:#888;font-size:12px;">' + purchDate + '</td>' +
                     '</tr>';
                 }).join('');
             })
             .catch(err => console.error('Portfolio load failed:', err));
+        }
+
+        // Trade History
+        function loadTradeHistory() {
+            if (MACHINE !== 'CashCow') return;
+            fetch('/api/trader/trade-history?days=10')
+                .then(r => r.json())
+                .then(trades => {
+                    const container = document.getElementById('trade-history-list');
+                    const countEl = document.getElementById('trade-history-count');
+                    if (!trades || trades.length === 0) {
+                        container.innerHTML = '<div style="text-align:center;color:#555;padding:12px;">No trades in last 10 days</div>';
+                        countEl.textContent = '';
+                        return;
+                    }
+                    const holdTrades = trades.filter(t => t.status === 'Hold');
+                    const solds = trades.filter(t => t.status === 'Sold').length;
+                    const totalUnrealizedPnl = holdTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+                    const pnlColor = totalUnrealizedPnl >= 0 ? '#00e676' : '#e94560';
+                    const pnlSign = totalUnrealizedPnl >= 0 ? '+' : '';
+                    countEl.innerHTML = '<span style="color:#00e676;">' + holdTrades.length + ' Hold</span> · <span style="color:#888;">' + solds + ' Sold</span> · ' + trades.length + ' total' +
+                        ' · <span style="color:' + pnlColor + ';font-weight:bold;">Unrealized: ' + pnlSign + '$' + totalUnrealizedPnl.toFixed(2) + '</span>';
+
+                    let html = '<table style="width:100%;border-collapse:collapse;">';
+                    html += '<thead><tr style="border-bottom:1px solid #0f3460;color:#666;">';
+                    html += '<th style="text-align:left;padding:4px 6px;">Symbol</th>';
+                    html += '<th style="text-align:right;padding:4px 6px;">Qty</th>';
+                    html += '<th style="text-align:center;padding:4px 6px;">Status</th>';
+                    html += '<th style="text-align:center;padding:4px 6px;">Trader</th>';
+                    html += '<th style="text-align:right;padding:4px 6px;">P&L</th>';
+                    html += '<th style="text-align:right;padding:4px 6px;">Bought</th>';
+                    html += '<th style="text-align:right;padding:4px 6px;">Sold</th>';
+                    html += '</tr></thead><tbody>';
+
+                    trades.forEach(t => {
+                        const isHold = t.status === 'Hold';
+                        const statusColor = isHold ? '#00e676' : '#888';
+                        const statusBg = isHold ? '#00e67622' : '#88888822';
+                        const symColor = isHold ? '#00e5ff' : '#666';
+
+                        let pnlStr = '--';
+                        let pnlColor = '#555';
+                        if (t.pnl !== null && t.pnl !== undefined) {
+                            pnlColor = t.pnl >= 0 ? '#00e676' : '#e94560';
+                            pnlStr = (t.pnl >= 0 ? '+' : '') + '$' + t.pnl.toFixed(0);
+                        }
+
+                        const traderColor = t.trader === 'Day' ? '#ffab40' : '#b388ff';
+                        const fmtDate = (d) => {
+                            if (!d) return '--';
+                            const p = d.split('-');
+                            return parseInt(p[1]) + '/' + parseInt(p[2]);
+                        };
+
+                        html += '<tr style="border-bottom:1px solid #0a192f;">';
+                        html += '<td style="padding:4px 6px;color:' + symColor + ';font-weight:bold;">' + t.symbol + '</td>';
+                        html += '<td style="padding:4px 6px;text-align:right;">' + t.qty + '</td>';
+                        html += '<td style="padding:4px 6px;text-align:center;"><span style="font-size:10px;padding:1px 6px;border-radius:3px;background:' + statusBg + ';color:' + statusColor + ';">' + t.status + '</span></td>';
+                        html += '<td style="padding:4px 6px;text-align:center;color:' + traderColor + ';font-size:10px;">' + t.trader + '</td>';
+                        html += '<td style="padding:4px 6px;text-align:right;color:' + pnlColor + ';">' + pnlStr + '</td>';
+                        html += '<td style="padding:4px 6px;text-align:right;color:#888;">' + fmtDate(t.buy_date) + '</td>';
+                        html += '<td style="padding:4px 6px;text-align:right;color:#888;">' + fmtDate(t.sell_date) + '</td>';
+                        html += '</tr>';
+                    });
+
+                    html += '</tbody></table>';
+                    container.innerHTML = html;
+                })
+                .catch(err => console.error('Trade history load failed:', err));
         }
 
         // Smart Trader (CashCow only)
@@ -2622,22 +2736,26 @@
                 })
                 .catch(() => { setText('cc-gateway', 'Unknown'); });
 
-            fetch('http://192.168.1.91:5000/api/trader/status')
+            fetch('/api/cashcow/trader-status')
                 .then(r => r.json())
                 .then(d => {
                     const badge = document.getElementById('cc-badge');
                     const ms = d.market_status || 'closed';
+                    const smart = d.smart_running;
+                    const day = d.day_running;
                     let label, badgeCls;
-                    if (d.running) {
+                    if (smart || day) {
+                        const parts = [];
+                        if (smart) parts.push('Smart');
+                        if (day) parts.push('Day');
                         if (ms === 'open' || ms === 'trading') {
-                            label = 'Trading'; badgeCls = 'panel-badge badge-ok';
+                            label = parts.join('+') + ' Trading'; badgeCls = 'panel-badge badge-ok';
                         } else if (ms === 'pre-market') {
-                            label = 'Pre-Market'; badgeCls = 'panel-badge'; badge.style.background = '#42a5f5'; badge.style.color = '#fff';
+                            label = parts.join('+') + ' Pre-Mkt'; badgeCls = 'panel-badge'; badge.style.background = '#42a5f5'; badge.style.color = '#fff';
                         } else if (ms === 'after-hours') {
-                            label = 'After-Hours'; badgeCls = 'panel-badge'; badge.style.background = '#ffa726'; badge.style.color = '#000';
+                            label = parts.join('+') + ' After-Hrs'; badgeCls = 'panel-badge'; badge.style.background = '#ffa726'; badge.style.color = '#000';
                         } else {
-                            label = 'Idle (' + ms.replace('-',' ').replace(/\b\w/g, c => c.toUpperCase()) + ')';
-                            badgeCls = 'panel-badge badge-warn';
+                            label = parts.join('+') + ' Idle'; badgeCls = 'panel-badge badge-warn';
                         }
                     } else {
                         if (ms === 'open' || ms === 'trading') {
@@ -2648,7 +2766,10 @@
                     }
                     badge.textContent = label;
                     badge.className = badgeCls;
-                    setText('cc-trader', d.running ? 'Running (' + (d.mode || '--') + ')' : 'Not Running');
+                    setText('cc-trader', d.smart_running ? 'Running (' + (d.mode || 'AUTO') + ')' : 'Not Running');
+                    document.getElementById('cc-trader').style.color = d.smart_running ? '#00e676' : '#e94560';
+                    setText('cc-day-trader', d.day_running ? 'Running (AUTO)' : 'Not Running');
+                    document.getElementById('cc-day-trader').style.color = d.day_running ? '#00e676' : '#e94560';
 
                     // Last check time
                     const now = new Date();
@@ -3075,18 +3196,20 @@
                             const eventEl = document.getElementById('cam-event-' + camId);
                             if (!eventEl) return;
 
-                            // Find latest event for this camera's eufy_sn
+                            // Find latest event for this camera's eufy_sn, fall back to all events
                             const sn = cam.eufy_sn;
                             const camEvents = sn ? events.filter(e => e.deviceSN === sn) : events;
-                            if (camEvents.length > 0) {
-                                const latest = camEvents[0];
+                            const displayEvents = camEvents.length > 0 ? camEvents : events;
+                            if (displayEvents.length > 0) {
+                                const latest = displayEvents[0];
                                 const time = new Date(latest.timestamp).toLocaleTimeString();
                                 const icon = latest.type === 'person' ? '🚶' :
                                              latest.type === 'motion' ? '💨' :
                                              latest.type === 'pet' ? '🐾' :
                                              latest.type === 'doorbell' ? '🔔' :
                                              latest.type === 'push' ? '📩' : '⚡';
-                                eventEl.innerHTML = `${icon} ${latest.type} @ ${time}`;
+                                const src = (camEvents.length === 0 && latest.deviceName) ? latest.deviceName + ': ' : '';
+                                eventEl.innerHTML = `${icon} ${src}${latest.type} @ ${time}`;
                                 eventEl.style.color = '#ffc107';
                                 if (dot) dot.className = 'cam-dot online';
 
@@ -3104,11 +3227,140 @@
                             }
                         });
                     }
+                    // Update eufy events table
+                    updateEufyTable(events);
                 })
                 .catch(() => {});
         }
+
+        function updateEufyTable(events) {
+            const tbody = document.getElementById('eufy-events-body');
+            if (!tbody) return;
+            // Filter to actionable events only (motion, person, pet, doorbell, push)
+            const shown = events.filter(e => ['motion','person','pet','doorbell','push'].includes(e.type) && e.data?.state !== false);
+            if (shown.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="color:#555;text-align:center;padding:10px;">No events today</td></tr>';
+                return;
+            }
+            tbody.innerHTML = shown.slice(0, 20).map(e => {
+                const time = new Date(e.timestamp).toLocaleTimeString();
+                const icon = e.type === 'person' ? '🚶' : e.type === 'motion' ? '💨' : e.type === 'pet' ? '🐾' : e.type === 'doorbell' ? '🔔' : '📩';
+                const detected = icon + ' ' + e.type.charAt(0).toUpperCase() + e.type.slice(1);
+                const name = e.deviceName || e.deviceSN?.slice(-6) || '?';
+                return `<tr style="border-bottom:1px solid #0d2137;">
+                    <td style="padding:3px 6px;color:#e0e0e0;">${name}</td>
+                    <td style="padding:3px 6px;color:#888;">${time}</td>
+                    <td style="padding:3px 6px;color:#ffc107;">${detected}</td>
+                </tr>`;
+            }).join('');
+        }
+
         // Poll eufy events every 10 seconds
         setInterval(pollEufyEvents, 10000);
+
+        // --- Robot Navigation (GPS Map) ---
+
+        let _gpsMap = null;
+        let _gpsMarker = null;
+        let _gpsTrail = null;
+        let _gpsInitialized = false;
+
+        function initGpsMap() {
+            if (MACHINE !== 'Christy') return;
+            document.getElementById('gps-section').style.display = '';
+            _gpsMap = L.map('gps-map', {attributionControl: false}).setView([34.505, -118.328], 16);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+            }).addTo(_gpsMap);
+            L.control.attribution({prefix: false}).addTo(_gpsMap);
+            // Robot marker (red circle)
+            _gpsMarker = L.circleMarker([34.505, -118.328], {
+                radius: 8, fillColor: '#e94560', color: '#fff', weight: 2, fillOpacity: 0.9
+            }).addTo(_gpsMap).bindPopup('ROSMASTER');
+            // Trail polyline
+            _gpsTrail = L.polyline([], {color: '#7c4dff', weight: 2, opacity: 0.7}).addTo(_gpsMap);
+            // Fix map size after container becomes visible
+            setTimeout(() => _gpsMap.invalidateSize(), 200);
+        }
+
+        function loadGpsStatus() {
+            if (MACHINE !== 'Christy' || !_gpsMap) return;
+            fetch('/api/xbee/gps')
+                .then(r => r.json())
+                .then(data => {
+                    const badge = document.getElementById('gps-badge');
+                    const d = data.devices?.R3;
+                    if (!d) {
+                        badge.textContent = 'No Data';
+                        badge.style.background = '#555';
+                        return;
+                    }
+                    if (d.fix && d.latitude && d.longitude) {
+                        const pos = [d.latitude, d.longitude];
+                        badge.textContent = 'Fix (' + d.satellites + ' sats)';
+                        badge.style.background = '#00e676';
+                        badge.style.color = '#000';
+                        _gpsMarker.setLatLng(pos);
+                        _gpsMarker.setPopupContent('ROSMASTER<br>' + d.latitude.toFixed(5) + ', ' + d.longitude.toFixed(5));
+                        if (!_gpsInitialized) {
+                            _gpsMap.setView(pos, 17);
+                            _gpsInitialized = true;
+                        }
+                        // Update trail
+                        if (data.trail && data.trail.length > 0) {
+                            _gpsTrail.setLatLngs(data.trail.map(p => [p.lat, p.lon]));
+                        }
+                        document.getElementById('gps-lat').textContent = d.latitude.toFixed(5) + '\u00b0' + (d.latitude >= 0 ? 'N' : 'S');
+                        document.getElementById('gps-lon').textContent = Math.abs(d.longitude).toFixed(5) + '\u00b0' + (d.longitude >= 0 ? 'E' : 'W');
+                        document.getElementById('gps-alt').textContent = d.altitude_m + 'm';
+                    } else {
+                        badge.textContent = 'No Fix (' + (d.satellites || 0) + ' sats)';
+                        badge.style.background = '#e94560';
+                        badge.style.color = '#fff';
+                        document.getElementById('gps-lat').textContent = '--';
+                        document.getElementById('gps-lon').textContent = '--';
+                        document.getElementById('gps-alt').textContent = '--';
+                    }
+                    document.getElementById('gps-sats').textContent = d.satellites || 0;
+                    document.getElementById('gps-bat').textContent = d.battery_v ? d.battery_v + 'V' : '--';
+                    document.getElementById('gps-bat').style.color = d.battery_v < 10 ? '#e94560' : d.battery_v < 11 ? '#ffc107' : '#00e676';
+                    if (d.timestamp) {
+                        const parts = d.timestamp.split(' ');
+                        document.getElementById('gps-time').textContent = parts.length > 1 ? parts[1] : d.timestamp;
+                    }
+                })
+                .catch(() => {});
+        }
+
+        // --- Alexa Devices ---
+
+        function loadAlexaStatus() {
+            if (MACHINE !== 'Christy') return;
+            fetch('/api/alexa/status')
+                .then(r => r.json())
+                .then(d => {
+                    const badge = document.getElementById('alexa-badge');
+                    const list = document.getElementById('alexa-device-list');
+                    const devices = d.devices || [];
+                    const online = devices.filter(x => x.online).length;
+
+                    badge.textContent = online + '/' + devices.length + ' Online';
+                    badge.style.background = online > 0 ? '#00e676' : '#e94560';
+                    badge.style.color = online > 0 ? '#000' : '#fff';
+
+                    list.innerHTML = '';
+                    devices.forEach(dev => {
+                        const dot = dev.online ? '<span style="color:#00e676;">Online</span>' : '<span style="color:#e94560;">Offline</span>';
+                        list.innerHTML += '<div class="device-item"><span><span class="dev-icon">&#128266;</span>' + dev.name + '</span><span class="dev-status">' + dot + '</span></div>';
+                    });
+                })
+                .catch(() => {});
+        }
+
+        // Init Alexa panel on Christy
+        if (MACHINE === 'Christy') {
+            loadAlexaStatus();
+        }
 
         // --- Gram client-side detection & remote XBee control ---
 
@@ -3219,6 +3471,7 @@
             loadIBGatewayStatus();
             loadDayTraderPanel();
             loadTradingLimits();
+            loadTradeHistory();
             setInterval(loadPortfolio, 30000);
             setInterval(loadTraderStatus, 30000);
             setInterval(loadIBGatewayStatus, 30000);
@@ -3234,6 +3487,9 @@
             initCameraDashboard();
             setInterval(loadXbeeStatus, 15000);
             setInterval(loadResponders, 15000);
+            initGpsMap();
+            loadGpsStatus();
+            setInterval(loadGpsStatus, 10000);
             setInterval(loadCashCowPanel, 30000);
             setInterval(loadDayTraderPanel, 15000);
         }

@@ -32,10 +32,12 @@ INITIAL_SCAN_SPEED = 0.2   # rad/s — very slow initial 360° scan
 
 
 class Explorer:
-    def __init__(self, slam=None, bot=None, collision=None, ignore_angle=120):
+    def __init__(self, slam=None, bot=None, collision=None, ignore_angle=120,
+                 lidar_reader=None):
         self.slam = slam
         self.bot = bot
         self.collision = collision
+        self.lidar_reader = lidar_reader  # for NN mode LiDAR scan access
         self.explore_speed = EXPLORE_SPEED  # can be changed live via API
         self.ignore_angle = ignore_angle
 
@@ -48,6 +50,9 @@ class Explorer:
         self.lock = threading.Lock()
         self._blocked_zones = []  # list of (angle_rad, expire_time)
         self.time_limit = 300     # seconds (default 5 minutes, 0 = no limit)
+
+        # NN navigator (lazy-loaded)
+        self._nn_navigator = None
 
     def _move_filtered(self, vx, vy, vz):
         """Move with collision avoidance."""
@@ -803,6 +808,102 @@ class Explorer:
         finally:
             self._stop_motors()
             self.state = "idle"
+
+    def start_nn_explore(self, time_limit=None):
+        """Start NN-based exploration using trained navigation policy.
+
+        The neural network takes LiDAR scan data and outputs motor commands.
+        Collision avoidance still applies — NN outputs go through filter_motion().
+        """
+        if self.state not in ("idle", "stopped"):
+            return {"error": f"Explorer busy: {self.state}"}
+
+        # Lazy-load NN navigator
+        if self._nn_navigator is None:
+            try:
+                from nn_navigator import NNNavigator
+                self._nn_navigator = NNNavigator()
+            except Exception as e:
+                _log.error(f"Failed to load NN navigator: {e}")
+                return {"error": f"NN model not available: {e}"}
+
+        if not self._nn_navigator.available:
+            return {"error": "NN model not loaded (check /home/jetson/RosMaster/models/nav_policy.pt)"}
+
+        if time_limit is not None:
+            self.time_limit = time_limit
+        self._abort = False
+        self.state = "exploring"
+        self._thread = threading.Thread(target=self._nn_explore_loop, daemon=True)
+        self._thread.start()
+        _log.info("NN exploration started (time_limit=%ss)", self.time_limit)
+        return {"ok": True}
+
+    def _nn_explore_loop(self):
+        """Main loop for NN-based exploration."""
+        start_time = time.time()
+        step_dt = 1.0 / EXPLORE_UPDATE_HZ  # 0.2s
+
+        try:
+            # Initial 360° scan
+            self._initial_scan()
+
+            while not self._abort and self.state == "exploring":
+                # Check time limit
+                elapsed = time.time() - start_time
+                if self.time_limit and elapsed > self.time_limit:
+                    _log.info("NN explore time limit reached (%.0fs)", elapsed)
+                    self.state = "arrived"
+                    return
+
+                # Get LiDAR scan from shared memory
+                lidar_scan = self._get_lidar_360()
+                if lidar_scan is None:
+                    time.sleep(step_dt)
+                    continue
+
+                # Get NN action
+                vx, vy, vz = self._nn_navigator.get_action(lidar_scan)
+
+                # Apply collision avoidance
+                self._move_filtered(vx, vy, vz)
+
+                time.sleep(step_dt)
+
+        except Exception as e:
+            _log.error(f"NN explore error: {e}", exc_info=True)
+        finally:
+            self._stop_motors()
+            if self.state == "exploring":
+                self.state = "idle"
+
+    def _get_lidar_360(self):
+        """Get 360° LiDAR distances from shared memory.
+
+        Returns array of 360 distances in mm, or None if not available.
+        Scan items are dicts: {"angle": deg, "dist": mm}
+        """
+        if not self.lidar_reader:
+            return None
+
+        try:
+            scan = self.lidar_reader.get_scan()
+            if not scan:
+                return None
+
+            # Convert scan point dicts to 360-bin distances
+            distances = np.full(360, 6000.0, dtype=np.float32)
+            for pt in scan:
+                angle_deg = pt.get("angle", 0)
+                dist_mm = pt.get("dist", 0)
+                idx = int(round(angle_deg)) % 360
+                if dist_mm > 0 and dist_mm < distances[idx]:
+                    distances[idx] = dist_mm
+
+            return distances
+        except Exception as e:
+            _log.error(f"Error reading LiDAR for NN: {e}")
+            return None
 
     def stop(self):
         self._abort = True

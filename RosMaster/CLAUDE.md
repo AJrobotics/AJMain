@@ -267,6 +267,55 @@ jetson/
 - **Wall lines** view: extracted straight wall segments
 - **Recording list** with playback
 
+## NN Navigation Training
+Training uses PPO (Proximal Policy Optimization) on Dreamer (RTX 4070) with Stable Baselines3.
+
+**Observation:** 36 LiDAR bins (10° each, normalized [0,1])
+**Action:** 3 continuous values → (vx, vy, vz) motor commands
+**Goal:** Maximize room exploration coverage while avoiding collisions
+
+**Realism parameters (sim-to-real transfer):**
+| Parameter | Value | Reason |
+|-----------|-------|--------|
+| Robot radius | 150mm | Physical body size — LiDAR measures from center |
+| LiDAR noise | ±30mm Gaussian | Real RPLidar S2 measurement noise |
+| LiDAR dropout | 2% of rays | Random missing points (occlusion, surface absorption) |
+| Velocity noise | ±10% forward, ±15% lateral | Mecanum wheel slip (lateral is worse) |
+| Heading drift | ±0.3°/step | IMU noise accumulation |
+| Rear ignore zone | 140° | Cables/devices block rear LiDAR (matches real robot) |
+| STOP distance | 100mm | Hard safety: block all translation |
+| SLOW distance | 200mm | Reduce speed to 30% |
+| CAUTION distance | 300mm | Reduce speed to 70% |
+| Max vx | -0.05 to 0.15 m/s | Forward/backward speed limits |
+| Max vy | ±0.12 m/s | Lateral strafe speed (mecanum advantage) |
+| Max vz | ±1.0 rad/s | Rotation speed |
+| Step interval | 0.2s (5 Hz) | Matches real explorer update rate |
+
+**Reward function:**
+- +1.0 per newly explored cell
+- -50.0 per collision (blocked by wall or collision filter)
+- -0.1 per step (time penalty for efficiency)
+- +5.0 bonus if coverage > 80% at episode end
+
+**Episode termination:** 95% coverage (success), 200 collisions (stuck), or 1000 steps (timeout)
+
+**Training pipeline (all from mapping_debug.html Simulation mode):**
+1. Generate Maps — create diverse training rooms (map_generator.py)
+2. Train NN — PPO training (train.py), 500K+ steps recommended
+3. Evaluate — compare NN vs rule-based (evaluate.py)
+4. Load in Sim — test ONNX model in browser simulation
+5. Deploy to Jetson — scp nav_policy.pt to /home/jetson/RosMaster/models/
+
+**Key files:**
+- `training/robot_env.py` — Gymnasium environment with realistic physics
+- `training/train.py` — PPO training script with ONNX/TorchScript export
+- `training/evaluate.py` — NN vs rule-based comparison
+- `training/map_generator.py` — Diverse room generator
+- `jetson/nn_navigator.py` — Inference on Jetson (loads TorchScript model)
+- `serve_local.py` — Local HTTP server for training UI on Dreamer (port 8080)
+
+**IMU yaw vs heading:** With mecanum wheels, IMU yaw (body orientation) differs from movement direction during strafe. LiDAR is mounted on the body, so IMU yaw is the correct angle for scan-to-world transformation. SLAM mapping is unaffected by this distinction.
+
 ## Known Issues
 - **STM32 USB intermittent**: sometimes only 1 CH340 appears instead of 2. The STM32 driver board's CH340 USB path can change between boots depending on expansion board power-up timing. Server `init_bot()` tests battery voltage > 1V to verify connection.
 - **Serial port conflict**: Only ONE process can open `/dev/rosmaster` at a time. The OLED `status_display.py` must NOT open it — only `server.py` should.

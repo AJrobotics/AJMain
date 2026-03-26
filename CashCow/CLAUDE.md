@@ -24,6 +24,12 @@ All trading code MUST enforce these rules. They are non-negotiable and apply to 
 - If the daily limit is reached, reject the order and log a warning.
 - The daily limit is configurable per trader and must be enforced independently for each trader (Smart, Day, Politician).
 
+## Logging Language
+
+- All trader log messages MUST be in **English**. No Korean or other languages in log output.
+- This applies to Smart Trader, Day Trader, and Politician Trader.
+- Emoji usage in logs is fine (✅, 🔴, 🎯, etc.), but all text must be English.
+
 ## Intraday Bar Data Caching
 
 - After market close, save 10-min resolution intraday bars for all traded symbols to `~/ib_smart_trader/logs/intraday_cache/{YYYY-MM-DD}.json`.

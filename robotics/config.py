@@ -12,7 +12,7 @@ HEARTBEAT_REPLY = "Roger!"    # legacy — devices now reply with their own name
 # Device-specific heartbeat replies (device replies with its own call sign)
 DEVICE_REPLIES = {
     "R1": "R1!",
-    "R3": "R3!",       # Gram
+    "R3": "R3!",       # ROSMASTER
     "R4": "R4!",       # Dreamer
 }
 
@@ -40,7 +40,7 @@ COORDINATOR_MAC = "0013A20041BB8CF4"  # Christy
 KNOWN_XBEE_MACS = {
     "0013A20041BB8CF4": "Christy",
     "0013A20041BB8D5E": "R1",
-    "0013A20041BB8E1F": "Gram (R3)",
+    "0013A20041BB8E1F": "ROSMASTER (R3)",
     "0013A20041741E51": "Dreamer",
 }
 

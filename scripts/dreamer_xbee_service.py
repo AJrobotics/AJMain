@@ -53,6 +53,22 @@ def heartbeat_toggle():
         return jsonify({"ok": True, "running": False})
 
 
+@app.route("/api/xbee/send", methods=["POST"])
+def xbee_send():
+    """Send a message via XBee to a specific address or broadcast."""
+    responder = get_responder()
+    data = request.json or {}
+    msg = data.get("message", "")
+    if not msg:
+        return jsonify({"success": False, "error": "No message"}), 400
+    target_addr = data.get("target_addr")
+    if target_addr:
+        ok = responder.send_data_to(msg, target_addr)
+    else:
+        ok = responder.send_data(msg)
+    return jsonify({"success": ok})
+
+
 @app.route("/api/heartbeat/health")
 def health():
     """Health check endpoint."""

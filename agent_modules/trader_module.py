@@ -110,6 +110,13 @@ class TraderModule:
 
             ib.disconnect()
 
+            # Look up purchase dates from trader logs
+            position_dates = self._get_position_dates(
+                [p["symbol"] for p in positions]
+            )
+            for p in positions:
+                p["purchase_date"] = position_dates.get(p["symbol"], "")
+
             result = {
                 "connected": True,
                 "account": acct,
@@ -134,6 +141,217 @@ class TraderModule:
                 "positions": [],
                 "position_count": 0,
             }
+
+    def _get_position_dates(self, symbols: list) -> dict:
+        """Parse trader logs to find the most recent BUY date for each symbol."""
+        if not symbols:
+            return {}
+        dates = {}  # symbol -> "YYYY-MM-DD"
+        # Log files to search (most recent entries win)
+        log_files = [
+            os.path.expanduser("~/ib_smart_trader/day_trader.log"),
+            os.path.expanduser("~/ib_smart_trader/ib_smart_trader/smart_trader.log"),
+        ]
+        # Dated logs: "2026-03-25 10:11:38,053 [INFO]   ✅ BUY order sent! GOOGL x51"
+        buy_re_dated = re.compile(
+            r"^(\d{4}-\d{2}-\d{2})\s+\d{2}:\d{2}:\d{2}.*BUY order sent!\s+(\w+)\s+x"
+        )
+        sym_set = set(symbols)
+        for lf in log_files:
+            if not os.path.isfile(lf):
+                continue
+            try:
+                with open(lf, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        m = buy_re_dated.match(line)
+                        if m and m.group(2) in sym_set:
+                            dates[m.group(2)] = m.group(1)
+            except Exception:
+                continue
+
+        # stdout logs have no date prefix: "09:16:51   ✅ BUY order sent! QQQ x25"
+        # Use file modification date as fallback
+        stdout_logs = [
+            os.path.join(TRADER_LOG_DIR, "day_trader_stdout.log"),
+            os.path.join(TRADER_LOG_DIR, "trader_stdout.log"),
+        ]
+        buy_re_short = re.compile(
+            r"^\d{2}:\d{2}:\d{2}\s+.*BUY order sent!\s+(\w+)\s+x"
+        )
+        today_str = _dt.now().strftime("%Y-%m-%d")
+        for lf in stdout_logs:
+            if not os.path.isfile(lf):
+                continue
+            try:
+                with open(lf, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        m = buy_re_short.match(line)
+                        if m and m.group(1) in sym_set:
+                            # stdout logs are from today's session
+                            if m.group(1) not in dates:
+                                dates[m.group(1)] = today_str
+            except Exception:
+                continue
+        return dates
+
+    def _build_trade_history(self, days: int = 10) -> list:
+        """Parse trader logs for the last N days and build trade history.
+
+        Returns a list of trade rounds: each is a buy matched with sells.
+        Cross-references current IB positions to determine hold/sold status.
+        """
+        cutoff = (_dt.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        order_re = re.compile(
+            r"^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}).*"
+            r"(BUY|SELL) order sent!\s+(\w+)\s+x(\d+)"
+        )
+
+        # Collect all orders from dated log files
+        orders = []  # list of {side, symbol, qty, date, time}
+        log_files = [
+            os.path.expanduser("~/ib_smart_trader/day_trader.log"),
+            os.path.expanduser("~/ib_smart_trader/ib_smart_trader/smart_trader.log"),
+        ]
+        for lf in log_files:
+            if not os.path.isfile(lf):
+                continue
+            trader_label = "Day" if "day_trader" in lf else "Smart"
+            try:
+                with open(lf, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        m = order_re.match(line)
+                        if not m:
+                            continue
+                        date_str = m.group(1)
+                        if date_str < cutoff:
+                            continue
+                        orders.append({
+                            "side": m.group(3),
+                            "symbol": m.group(4),
+                            "qty": int(m.group(5)),
+                            "date": date_str,
+                            "time": m.group(2),
+                            "trader": trader_label,
+                        })
+            except Exception:
+                continue
+
+        # Also parse stdout logs (today only, no date prefix)
+        stdout_logs = [
+            (os.path.join(TRADER_LOG_DIR, "day_trader_stdout.log"), "Day"),
+            (os.path.join(TRADER_LOG_DIR, "trader_stdout.log"), "Smart"),
+        ]
+        stdout_re = re.compile(
+            r"^(\d{2}:\d{2}:\d{2})\s+.*"
+            r"(BUY|SELL) order sent!\s+(\w+)\s+x(\d+)"
+        )
+        today_str = _dt.now().strftime("%Y-%m-%d")
+        for lf, trader_label in stdout_logs:
+            if not os.path.isfile(lf):
+                continue
+            try:
+                with open(lf, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        m = stdout_re.match(line)
+                        if not m:
+                            continue
+                        orders.append({
+                            "side": m.group(2),
+                            "symbol": m.group(3),
+                            "qty": int(m.group(4)),
+                            "date": today_str,
+                            "time": m.group(1),
+                            "trader": trader_label,
+                        })
+            except Exception:
+                continue
+
+        # Sort by date+time
+        orders.sort(key=lambda o: o["date"] + o["time"])
+
+        # Get current positions to determine hold/sold
+        current_positions = {}
+        try:
+            port_data = self._get_ib_portfolio()
+            if port_data.get("connected"):
+                for p in port_data.get("positions", []):
+                    current_positions[p["symbol"]] = {
+                        "qty": p["quantity"],
+                        "avgCost": p["avgCost"],
+                        "marketPrice": p["marketPrice"],
+                        "unrealizedPNL": p["unrealizedPNL"],
+                    }
+        except Exception:
+            pass
+
+        # Build trade rounds: match BUYs to SELLs per symbol
+        # Track open buy inventory per symbol
+        open_buys = {}  # symbol -> [list of {qty_remaining, date, time, trader}]
+        trades = []  # completed or open trade rounds
+
+        for order in orders:
+            sym = order["symbol"]
+            if order["side"] == "BUY":
+                if sym not in open_buys:
+                    open_buys[sym] = []
+                open_buys[sym].append({
+                    "qty_remaining": order["qty"],
+                    "qty_original": order["qty"],
+                    "date": order["date"],
+                    "time": order["time"],
+                    "trader": order["trader"],
+                })
+            elif order["side"] == "SELL":
+                sell_qty = order["qty"]
+                if sym in open_buys and open_buys[sym]:
+                    # Match against oldest open buy (FIFO)
+                    while sell_qty > 0 and open_buys[sym]:
+                        buy = open_buys[sym][0]
+                        matched = min(sell_qty, buy["qty_remaining"])
+                        buy["qty_remaining"] -= matched
+                        sell_qty -= matched
+                        if buy["qty_remaining"] <= 0:
+                            # Buy fully sold
+                            trades.append({
+                                "symbol": sym,
+                                "qty": buy["qty_original"],
+                                "status": "Sold",
+                                "buy_date": buy["date"],
+                                "buy_time": buy["time"],
+                                "sell_date": order["date"],
+                                "sell_time": order["time"],
+                                "trader": buy["trader"],
+                                "pnl": None,
+                            })
+                            open_buys[sym].pop(0)
+
+        # Remaining open buys = currently held
+        for sym, buys in open_buys.items():
+            for buy in buys:
+                if buy["qty_remaining"] <= 0:
+                    continue
+                pos = current_positions.get(sym, {})
+                pnl = pos.get("unrealizedPNL")
+                trades.append({
+                    "symbol": sym,
+                    "qty": buy["qty_remaining"],
+                    "status": "Hold",
+                    "buy_date": buy["date"],
+                    "buy_time": buy["time"],
+                    "sell_date": None,
+                    "sell_time": None,
+                    "trader": buy["trader"],
+                    "pnl": round(pnl, 2) if pnl is not None else None,
+                    "avg_cost": pos.get("avgCost"),
+                    "mkt_price": pos.get("marketPrice"),
+                })
+
+        # Sort: Hold first, then by date descending
+        trades.sort(key=lambda t: (0 if t["status"] == "Hold" else 1, t["buy_date"]), reverse=False)
+        # Actually reverse so most recent first, but Hold on top
+        trades.sort(key=lambda t: (0 if t["status"] == "Hold" else 1, -(int(t["buy_date"].replace("-","")))))
+
+        return trades
 
     def _get_market_status(self) -> dict:
         """Return current US market status based on Eastern Time."""
@@ -438,6 +656,13 @@ class TraderModule:
                 json.dump(limits, f, indent=2)
             logger.info("Trading limits updated [%s]: %s", trader_type, limits[trader_type])
             return jsonify({"success": True, "limits": limits})
+
+        @bp.route("/api/trader/trade-history")
+        def trade_history():
+            """Return trade history for the last N days from log files."""
+            days = request.args.get("days", 10, type=int)
+            history = self._build_trade_history(days)
+            return jsonify(history)
 
         @bp.route("/api/trader/logs")
         def trader_logs():

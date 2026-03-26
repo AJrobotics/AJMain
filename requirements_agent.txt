@@ -5,3 +5,4 @@ digi-xbee>=1.4
 pyserial>=3.5
 requests>=2.28
 opencv-python-headless>=4.8
+alexapy>=1.29
