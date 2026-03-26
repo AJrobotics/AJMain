@@ -519,27 +519,65 @@ class Explorer:
         try:
             explore_start = time.time()
             target_wall_dist = getattr(self, '_wall_follow_dist', 500)
-            wall_tolerance = 150    # mm — acceptable range ±
+            wall_tolerance = max(50, target_wall_dist // 3)  # proportional tolerance
 
             # Initial scan
             self._initial_scan()
 
-            # Find the nearest wall and orient toward it
+            # Find the nearest wall, approach it, then orient for following
             _log.info("Finding nearest wall...")
             if self.collision:
                 self.collision.update_sectors()
                 sectors = self.collision.get_sector_distances()
                 # Find sector with closest wall (excluding rear ignore)
                 min_idx = min(range(8), key=lambda i: sectors[i])
-                # Turn to face the wall
-                target_angle = min_idx * 45  # sector center angle
+                target_angle = min_idx * 45
                 _log.info(f"Nearest wall in sector {min_idx} ({target_angle}°) at {sectors[min_idx]}mm")
+
+                # Turn to face the wall
                 self._rotate_by(target_angle, speed=0.3)
-                # Now turn 90° so wall is on the chosen side
+
+                # Drive toward the wall until within target distance + margin
+                approach_target = target_wall_dist + 100  # stop a bit before target
+                _log.info(f"Approaching wall (target {approach_target}mm)...")
+                approach_steps = 0
+                while not self._abort and self.state == "exploring" and approach_steps < 200:
+                    self.collision.update_sectors()
+                    front = self.collision.get_sector_distances()[0]
+                    if front <= approach_target:
+                        _log.info(f"Reached wall at {front}mm")
+                        break
+                    self._move_filtered(0.06, 0, 0)  # slow approach
+                    approach_steps += 1
+                    time.sleep(1.0 / EXPLORE_UPDATE_HZ)
+                self._stop_motors()
+
+                # Turn so wall is on the chosen side
+                # After approaching, the wall is in front (sector 0).
+                # For left-follow: turn right 90° → wall ends up on left (sector 6)
+                # For right-follow: turn left 90° → wall ends up on right (sector 2)
                 if self._wall_follow_dir == "right":
-                    self._rotate_by(-90, speed=0.3)
+                    self._rotate_by(-90, speed=0.3)  # turn left → wall on right
                 else:
-                    self._rotate_by(90, speed=0.3)
+                    self._rotate_by(90, speed=0.3)   # turn right → wall on left
+
+                # Verify wall is on correct side, adjust if needed
+                self.collision.update_sectors()
+                sectors = self.collision.get_sector_distances()
+                wall_sector = 2 if self._wall_follow_dir == "right" else 6
+                if sectors[wall_sector] > 1000:
+                    _log.info(f"Wall not on expected side (sector {wall_sector}={sectors[wall_sector]}mm), adjusting...")
+                    # Find which sector has the wall
+                    min_idx = min(range(8), key=lambda i: sectors[i])
+                    if sectors[min_idx] < 1000:
+                        # Calculate how much to turn to put this sector at sector 2 or 6
+                        current_wall_angle = min_idx * 45
+                        target_wall_angle = wall_sector * 45
+                        turn = target_wall_angle - current_wall_angle
+                        if turn > 180: turn -= 360
+                        if turn < -180: turn += 360
+                        _log.info(f"Wall in sector {min_idx} ({current_wall_angle}°), turning {turn}° to align")
+                        self._rotate_by(turn, speed=0.3)
 
             while not self._abort and self.state == "exploring":
                 # Check time limit
@@ -566,43 +604,66 @@ class Explorer:
 
                 front_dist = sectors[0]
 
-                # Steering logic — use lateral strafe (mecanum) instead of turning
+                # Steering logic — use lateral strafe (mecanum) to maintain wall distance
                 vx = self.explore_speed
                 vy = 0
                 vz = 0
+
+                # Also check opposite side — don't drift into the other wall
+                if self._wall_follow_dir == "right":
+                    opposite_dist = sectors[6]  # left side
+                else:
+                    opposite_dist = sectors[2]  # right side
 
                 if front_dist < 500:
                     # Wall ahead — stop and turn 90° away from wall side
                     self._stop_motors()
                     _log.info(f"Corner: wall ahead ({front_dist}mm), turning 90°")
                     if self._wall_follow_dir == "right":
-                        self._rotate_by(90, speed=0.3)  # turn left
+                        self._rotate_by(90, speed=0.3)
                     else:
-                        self._rotate_by(-90, speed=0.3)  # turn right
+                        self._rotate_by(-90, speed=0.3)
                     continue
                 elif wall_dist > 1500:
-                    # Lost wall — inside corner, turn 90° toward wall to follow it
+                    # Lost wall — inside corner, turn 90° toward wall
                     self._stop_motors()
                     _log.info(f"Inside corner: lost wall ({wall_dist}mm), turning 90° toward wall")
                     if self._wall_follow_dir == "right":
-                        self._rotate_by(-90, speed=0.3)  # turn right toward wall
+                        self._rotate_by(-90, speed=0.3)
                     else:
-                        self._rotate_by(90, speed=0.3)  # turn left toward wall
+                        self._rotate_by(90, speed=0.3)
                     continue
-                elif wall_dist < target_wall_dist - wall_tolerance:
-                    # Too close to wall — strafe away (no turning)
-                    if self._wall_follow_dir == "right":
-                        vy = -0.05  # strafe left (away from right wall)
-                    else:
-                        vy = 0.05   # strafe right (away from left wall)
-                    _log.debug(f"Too close ({wall_dist}mm), strafing away")
-                elif wall_dist > target_wall_dist + wall_tolerance:
-                    # Too far from wall — strafe toward (no turning)
-                    if self._wall_follow_dir == "right":
-                        vy = 0.05   # strafe right (toward right wall)
-                    else:
-                        vy = -0.05  # strafe left (toward left wall)
-                    _log.debug(f"Too far ({wall_dist}mm), strafing toward")
+                else:
+                    # Proportional wall distance control
+                    error = wall_dist - target_wall_dist  # positive = too far, negative = too close
+                    abs_error = abs(error)
+
+                    if abs_error > wall_tolerance:
+                        # Significant error — strafe to correct
+                        strafe = min(0.12, max(0.03, abs_error / 800.0))
+
+                        if abs_error > target_wall_dist:
+                            # Very far off — stop forward, strafe only
+                            vx = 0
+                        elif abs_error > wall_tolerance * 2:
+                            # Moderately off — slow down forward
+                            vx *= 0.3
+                        else:
+                            vx *= 0.6
+
+                        if error > 0:
+                            # Too far — strafe toward wall
+                            if self._wall_follow_dir == "right":
+                                vy = strafe
+                            else:
+                                vy = -strafe
+                        else:
+                            # Too close — strafe away from wall
+                            if self._wall_follow_dir == "right":
+                                vy = -strafe
+                            else:
+                                vy = strafe
+                        _log.debug(f"Wall err={error}mm vy={vy:.2f} vx={vx:.2f}")
 
                 actual_vx, _, _ = self._move_filtered(vx, vy, vz)
                 if actual_vx == 0 and vx > 0:
