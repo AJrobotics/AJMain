@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Today's Trades - AJ Robotics</title>
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <!-- No external chart library — pure Canvas -->
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
@@ -176,7 +176,7 @@
 <script>
 // ── State ──
 let allTradeData = {};
-const chartInstances = {};
+const chartState = {}; // traderType -> { tradePositions, canvas, redraw }
 
 // ── Init ──
 document.addEventListener('DOMContentLoaded', () => {
@@ -229,12 +229,23 @@ async function loadTrades(url) {
 
         document.getElementById('loadingMsg').style.display = 'none';
 
-        renderSection('day', data.day_trades, 'daySection', 'dayCharts', 'daySummary');
-        renderSection('smart', data.smart_trades, 'smartSection', 'smartCharts', 'smartSummary');
+        renderSection('day', data.day_trades, 'daySection', 'dayCharts', 'daySummary', data.date);
+        renderSection('smart', data.smart_trades, 'smartSection', 'smartCharts', 'smartSummary', data.date);
 
         // Show sections even if empty
         document.getElementById('daySection').style.display = 'block';
         document.getElementById('smartSection').style.display = 'block';
+
+        // Auto-save intraday bars after market close (1:05 PM PT = 16:05 ET)
+        const now = new Date();
+        const ptHour = now.getHours(); // Browser is PT
+        const isToday = !data.date || data.date === now.toISOString().split('T')[0];
+        if (isToday && ptHour >= 13 && (data.day_trades?.length || data.smart_trades?.length)) {
+            fetch('/api/trader/save-intraday', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' })
+                .then(r => r.json())
+                .then(d => { if (d.saved) console.log('Intraday bars cached:', d.saved, 'symbols'); })
+                .catch(() => {});
+        }
 
     } catch (err) {
         document.getElementById('loadingMsg').innerHTML =
@@ -243,7 +254,7 @@ async function loadTrades(url) {
 }
 
 // ── Render Section — single unified chart with all symbols ──
-function renderSection(traderType, trades, sectionId, chartsId, summaryId) {
+function renderSection(traderType, trades, sectionId, chartsId, summaryId, dateStr) {
     const chartsDiv = document.getElementById(chartsId);
     const summaryDiv = document.getElementById(summaryId);
 
@@ -333,7 +344,7 @@ function renderSection(traderType, trades, sectionId, chartsId, summaryId) {
     chartsDiv.appendChild(card);
 
     // Fetch all symbols and render unified chart
-    fetchUnifiedChart(traderType, symbols, trades);
+    fetchUnifiedChart(traderType, symbols, trades, dateStr);
 }
 
 // Consistent colors per symbol
@@ -344,358 +355,243 @@ function symbolColor(sym) {
     return SYMBOL_COLORS[Math.abs(hash) % SYMBOL_COLORS.length];
 }
 
-async function fetchUnifiedChart(traderType, symbols, trades) {
+// ── Pure Canvas Trade Timeline Chart with Price Lines ──
+async function fetchUnifiedChart(traderType, symbols, trades, dateStr) {
     const chartId = `chart_${traderType}_unified`;
     const chartEl = document.getElementById(chartId);
-    // IB returns naive ET times. Convert to PT for display.
-    // Lightweight Charts treats timestamps as UTC, so we need to shift.
-    // ET naive string → treat as ET → display as PT = subtract 3 hours
-    // But Date() parses naive strings as LOCAL time (PT on this browser).
-    // So "04:00:00" is parsed as 4AM PT already. No offset needed for bars.
-    // Trade times from logs are also PT. So NO offset.
-    const PT_OFFSET = 0;
-    // ET to PT shift for IB bars (IB sends ET, browser parses as PT, so shift -3h)
-    const ET_TO_PT = -3 * 3600;
+    if (!chartEl || !trades || trades.length === 0) return;
 
-    const chart = LightweightCharts.createChart(chartEl, {
-        width: chartEl.clientWidth,
-        height: 500,
-        layout: { background: { color: '#16213e' }, textColor: '#8892b0' },
-        grid: { vertLines: { color: '#1a2744' }, horzLines: { color: '#1a2744' } },
-        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-        timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#0f3460' },
-        rightPriceScale: { borderColor: '#0f3460' },
-    });
-    new ResizeObserver(() => chart.applyOptions({ width: chartEl.clientWidth })).observe(chartEl);
-
-    const allMarkers = [];
-
-    // Fetch and add each symbol as a separate line series
-    for (const symbol of symbols) {
+    // Fetch intraday bars for all symbols in parallel
+    const barData = {};
+    const dateParam = dateStr ? `?date=${dateStr}` : '';
+    await Promise.all(symbols.map(async (sym) => {
         try {
-            const resp = await fetch(`/api/trader/intraday/${symbol}`);
-            const rawData = await resp.json();
-            const bars = Array.isArray(rawData) ? rawData : (rawData.bars || []);
-            if (!bars || bars.length === 0) continue;
+            const r = await fetch(`/api/trader/intraday/${sym}${dateParam}`);
+            const d = await r.json();
+            const bars = Array.isArray(d) ? d : (d.bars || []);
+            if (bars.length > 0) barData[sym] = bars;
+        } catch(e) {}
+    }));
 
-            const color = symbolColor(symbol);
-            const lineSeries = chart.addSeries(LightweightCharts.LineSeries, {
-                color: color,
-                lineWidth: 2,
-                title: symbol,
-                priceScaleId: symbol,  // separate price scale per symbol
-            });
-
-            // Hide extra price scales (only show the first)
-            if (symbols.indexOf(symbol) > 0) {
-                chart.priceScale(symbol).applyOptions({ visible: false });
-            }
-
-            // IB bars are naive ET; browser parses as PT. Shift -3h to correct.
-            const lineData = bars.map(bar => ({
-                time: Math.floor(new Date(bar.time).getTime() / 1000) + ET_TO_PT,
-                value: bar.close,
-            }));
-            lineSeries.setData(lineData);
-
-            // Collect and plot trade markers as colored dots on the line
-            const symTrades = trades.filter(t => t.symbol === symbol);
-            const buyDots = [];
-            const sellDots = [];
-
-            symTrades.forEach((trade, idx) => {
-                let tradeTs = null;
-                if (trade.time && trade.time !== 'unknown') {
-                    let d = new Date(trade.time);
-                    if (isNaN(d.getTime())) {
-                        const today = new Date();
-                        d = new Date(today.toISOString().split('T')[0] + 'T' + trade.time);
-                    }
-                    // Trade times from log are already PT — no offset needed
-                    if (!isNaN(d.getTime())) tradeTs = Math.floor(d.getTime() / 1000);
-                }
-                if (!tradeTs) return;
-
-                // Snap to nearest bar and get price
-                let bestTime = lineData[0]?.time;
-                let bestPrice = lineData[0]?.value;
-                let bestDist = Infinity;
-                for (const pt of lineData) {
-                    const dist = Math.abs(pt.time - tradeTs);
-                    if (dist < bestDist) { bestDist = dist; bestTime = pt.time; bestPrice = pt.value; }
-                }
-
-                const isBuy = trade.side === 'BUY';
-                const dotEntry = { time: bestTime, value: bestPrice };
-                if (isBuy) buyDots.push(dotEntry);
-                else sellDots.push(dotEntry);
-
-                allMarkers.push({
-                    time: bestTime,
-                    price: bestPrice,
-                    symbol: symbol,
-                    _trade: trade,
-                });
-            });
-
-            // BUY dots — green circles on line
-            if (buyDots.length > 0) {
-                const buySeries = chart.addSeries(LightweightCharts.LineSeries, {
-                    color: 'rgba(0,0,0,0)',
-                    lineWidth: 0,
-                    pointMarkersVisible: true,
-                    pointMarkersRadius: 6,
-                    priceScaleId: symbol,
-                    lastValueVisible: false,
-                    priceLineVisible: false,
-                    crosshairMarkerVisible: false,
-                    title: '',
-                });
-                // Add invisible line with visible point markers
-                buySeries.setData(buyDots);
-                // Override marker appearance via CSS trick: use series markers
-                const buyMarkers = buyDots.map((d, i) => ({
-                    time: d.time,
-                    position: 'belowBar',
-                    color: '#00e676',
-                    shape: 'arrowUp',
-                    text: 'B',
-                    size: 2,
-                }));
-                try {
-                    if (typeof LightweightCharts.createSeriesMarkers === 'function') {
-                        LightweightCharts.createSeriesMarkers(buySeries, buyMarkers);
-                    } else if (buySeries.setMarkers) {
-                        buySeries.setMarkers(buyMarkers);
-                    }
-                } catch(e) { console.warn('Marker API:', e); }
-            }
-
-            // SELL dots — red circles on line
-            if (sellDots.length > 0) {
-                const sellSeries = chart.addSeries(LightweightCharts.LineSeries, {
-                    color: 'rgba(0,0,0,0)',
-                    lineWidth: 0,
-                    pointMarkersVisible: true,
-                    pointMarkersRadius: 6,
-                    priceScaleId: symbol,
-                    lastValueVisible: false,
-                    priceLineVisible: false,
-                    crosshairMarkerVisible: false,
-                    title: '',
-                });
-                sellSeries.setData(sellDots);
-                const sellMarkers = sellDots.map((d, i) => ({
-                    time: d.time,
-                    position: 'aboveBar',
-                    color: '#e94560',
-                    shape: 'arrowDown',
-                    text: 'S',
-                    size: 2,
-                }));
-                try {
-                    if (typeof LightweightCharts.createSeriesMarkers === 'function') {
-                        LightweightCharts.createSeriesMarkers(sellSeries, sellMarkers);
-                    } else if (sellSeries.setMarkers) {
-                        sellSeries.setMarkers(sellMarkers);
-                    }
-                } catch(e) { console.warn('Marker API:', e); }
-            }
-        } catch (err) {
-            console.error(`Failed to load ${symbol}:`, err);
-        }
-    }
-
-    // Click handler
-    chart.subscribeClick((param) => {
-        if (!param.time) return;
-        const clicked = allMarkers.filter(m => m.time === param.time);
-        if (clicked.length > 0 && clicked[0]._trade) {
-            showPopup(clicked[0]._trade, param.point);
-        }
-    });
-
-    chart.timeScale().fitContent();
+    drawChart(chartEl, chartId, traderType, trades, symbols, barData);
 }
 
-// ── (Legacy) Fetch & Render individual chart — kept for reference ──
-async function fetchAndRenderChart(traderType, symbol, trades) {
-    const chartId = `chart_${traderType}_${symbol}`;
-    const chartEl = document.getElementById(chartId);
+function drawChart(chartEl, chartId, traderType, trades, symbols, barData) {
+    const canvas = document.createElement('canvas');
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    chartEl.innerHTML = '';
+    chartEl.appendChild(canvas);
 
-    try {
-        const resp = await fetch(`/api/trader/intraday/${symbol}`);
-        const rawData = await resp.json();
+    const dpr = window.devicePixelRatio || 1;
+    const W = chartEl.clientWidth;
+    const H = chartEl.clientHeight || 500;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
 
-        // Handle error responses or empty arrays
-        const bars = Array.isArray(rawData) ? rawData : (rawData.bars || []);
-        if (!bars || bars.length === 0) {
-            const errMsg = rawData.error ? `IB error: ${rawData.error}` : 'No intraday data available from IB';
-            chartEl.innerHTML = `<div class="no-trades">${errMsg}</div>`;
-            return;
+    function timeToMin(tStr) {
+        const p = tStr.split(':');
+        return parseInt(p[0]) * 60 + parseInt(p[1]) + (parseInt(p[2] || 0) / 60);
+    }
+    function barTimeToMin(tStr) {
+        const d = new Date(tStr);
+        if (isNaN(d.getTime())) return null;
+        return (d.getHours() - 3) * 60 + d.getMinutes() + d.getSeconds() / 60;
+    }
+
+    const sorted = [...trades].filter(t => t.time && t.time !== 'unknown').sort((a, b) => a.time.localeCompare(b.time));
+    if (sorted.length === 0) { chartEl.innerHTML = '<div class="no-trades">No trades with valid timestamps</div>'; return; }
+
+    const minTime = Math.max(timeToMin('06:00'), timeToMin(sorted[0].time) - 15);
+    const maxTime = Math.min(timeToMin('16:30'), timeToMin(sorted[sorted.length - 1].time) + 15);
+
+    const pad = { top: 30, bottom: 40, left: 55, right: 70 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    function xPos(tMin) { return pad.left + (tMin - minTime) / (maxTime - minTime) * plotW; }
+
+    // Pre-compute normalized data for all symbols
+    const symData = {}; // sym -> { pts: [{min, pct}], firstClose, lastClose, lastPct }
+    let globalPctMin = 0, globalPctMax = 0;
+    symbols.forEach(sym => {
+        const bars = barData[sym];
+        if (!bars || bars.length === 0) return;
+        const pts = [];
+        for (const bar of bars) {
+            const m = barTimeToMin(bar.time);
+            if (m !== null && m >= minTime && m <= maxTime) pts.push({ min: m, close: bar.close });
         }
-
-        // Create lightweight chart
-        const chart = LightweightCharts.createChart(chartEl, {
-            width: chartEl.clientWidth,
-            height: 350,
-            layout: {
-                background: { color: '#16213e' },
-                textColor: '#8892b0',
-            },
-            grid: {
-                vertLines: { color: '#1a2744' },
-                horzLines: { color: '#1a2744' },
-            },
-            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-            timeScale: {
-                timeVisible: true,
-                secondsVisible: false,
-                borderColor: '#0f3460',
-            },
-            rightPriceScale: { borderColor: '#0f3460' },
+        if (pts.length < 2) return;
+        const firstClose = pts[0].close;
+        const normalized = pts.map(p => ({ min: p.min, pct: (p.close / firstClose - 1) * 100, close: p.close }));
+        const lastPct = normalized[normalized.length - 1].pct;
+        symData[sym] = { pts: normalized, firstClose, lastClose: pts[pts.length - 1].close, lastPct };
+        normalized.forEach(p => {
+            if (p.pct < globalPctMin) globalPctMin = p.pct;
+            if (p.pct > globalPctMax) globalPctMax = p.pct;
         });
+    });
 
-        // Responsive resize
-        const resizeObserver = new ResizeObserver(() => {
-            chart.applyOptions({ width: chartEl.clientWidth });
-        });
-        resizeObserver.observe(chartEl);
+    // Add some padding to the % range
+    const pctPad = Math.max((globalPctMax - globalPctMin) * 0.1, 0.2);
+    globalPctMin -= pctPad;
+    globalPctMax += pctPad;
+    const globalPctRange = globalPctMax - globalPctMin || 1;
 
-        // Candlestick series (v5 API)
-        const candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
-            upColor: '#00e676',
-            downColor: '#e94560',
-            borderUpColor: '#00e676',
-            borderDownColor: '#e94560',
-            wickUpColor: '#00e676',
-            wickDownColor: '#e94560',
-        });
+    function yPos(pct) { return pad.top + plotH - (pct - globalPctMin) / globalPctRange * plotH; }
 
-        // Convert bar times to Pacific Time for display
-        // Lightweight Charts treats timestamps as UTC, so we shift to PT
-        // IB returns naive ET times. Convert to PT for display.
-    // Lightweight Charts treats timestamps as UTC, so we need to shift.
-    // ET naive string → treat as ET → display as PT = subtract 3 hours
-    // But Date() parses naive strings as LOCAL time (PT on this browser).
-    // So "04:00:00" is parsed as 4AM PT already. No offset needed for bars.
-    // Trade times from logs are also PT. So NO offset.
-    const PT_OFFSET = 0;
-    // ET to PT shift for IB bars (IB sends ET, browser parses as PT, so shift -3h)
-    const ET_TO_PT = -3 * 3600; // PDT (UTC-7)
-        const chartData = bars.map(bar => {
-            const d = new Date(bar.time);
-            const utcSec = Math.floor(d.getTime() / 1000);
-            return {
-                time: utcSec + ET_TO_PT,
-                open: bar.open,
-                high: bar.high,
-                low: bar.low,
-                close: bar.close,
-            };
-        });
+    // Background
+    ctx.fillStyle = '#16213e';
+    ctx.fillRect(0, 0, W, H);
 
-        candleSeries.setData(chartData);
+    // Hour grid lines
+    ctx.strokeStyle = '#1a2744';
+    ctx.lineWidth = 1;
+    ctx.fillStyle = '#8892b0';
+    ctx.font = '11px Segoe UI, sans-serif';
+    ctx.textAlign = 'center';
+    for (let hr = Math.ceil(minTime / 60); hr * 60 <= maxTime; hr++) {
+        const x = xPos(hr * 60);
+        ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top + plotH); ctx.stroke();
+        ctx.fillText((hr > 12 ? hr - 12 : hr) + ':00' + (hr >= 12 ? ' PM' : ' AM'), x, pad.top + plotH + 18);
+    }
 
-        // Volume series (v5 API)
-        const volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
-            priceFormat: { type: 'volume' },
-            priceScaleId: 'vol',
-        });
-        chart.priceScale('vol').applyOptions({
-            scaleMargins: { top: 0.85, bottom: 0 },
-        });
-        const volumeData = bars.map(bar => {
-            const d = new Date(bar.time);
-            return {
-                time: Math.floor(d.getTime() / 1000) + ET_TO_PT,
-                value: bar.volume,
-                color: bar.close >= bar.open ? '#00e67644' : '#e9456044',
-            };
-        });
-        volumeSeries.setData(volumeData);
+    // % grid lines
+    ctx.textAlign = 'right';
+    ctx.font = '10px Consolas, monospace';
+    const pctStep = globalPctRange > 8 ? 2 : globalPctRange > 3 ? 1 : 0.5;
+    for (let p = Math.ceil(globalPctMin / pctStep) * pctStep; p <= globalPctMax; p += pctStep) {
+        const y = yPos(p);
+        ctx.strokeStyle = '#1a2744';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + plotW, y); ctx.stroke();
+        ctx.fillStyle = '#8892b0';
+        ctx.fillText((p >= 0 ? '+' : '') + p.toFixed(1) + '%', pad.left - 6, y + 3);
+    }
 
-        // Add trade markers
-        const markers = [];
-        trades.forEach((trade, idx) => {
-            // Parse trade time
-            let tradeTs = null;
-            if (trade.time && trade.time !== 'unknown') {
-                // Try full datetime
-                let d = new Date(trade.time);
-                if (isNaN(d.getTime())) {
-                    // Try just time (HH:MM:SS) with today's date
-                    const today = new Date();
-                    d = new Date(today.toISOString().split('T')[0] + 'T' + trade.time);
-                }
-                if (!isNaN(d.getTime())) {
-                    tradeTs = Math.floor(d.getTime() / 1000);
-                }
+    // 0% baseline (prominent)
+    const zeroY = yPos(0);
+    ctx.strokeStyle = '#8892b044';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 3]);
+    ctx.beginPath(); ctx.moveTo(pad.left, zeroY); ctx.lineTo(pad.left + plotW, zeroY); ctx.stroke();
+    ctx.setLineDash([]);
+
+    const tradePositions = [];
+
+    // Draw all symbol lines on the shared axis
+    symbols.forEach(sym => {
+        const sd = symData[sym];
+        if (!sd) return;
+
+        // Draw line
+        ctx.strokeStyle = symbolColor(sym);
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.8;
+        ctx.beginPath();
+        sd.pts.forEach((pt, j) => {
+            const x = xPos(pt.min);
+            const y = yPos(pt.pct);
+            if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+
+        // Label on right: symbol + % change
+        const ly = yPos(sd.lastPct);
+        const pctColor = sd.lastPct >= 0 ? '#00e676' : '#e94560';
+        ctx.fillStyle = symbolColor(sym);
+        ctx.font = 'bold 10px Consolas, monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(sym, pad.left + plotW + 4, ly - 2);
+        ctx.fillStyle = pctColor;
+        ctx.font = '10px Consolas, monospace';
+        ctx.fillText((sd.lastPct >= 0 ? '+' : '') + sd.lastPct.toFixed(2) + '%', pad.left + plotW + 4, ly + 10);
+
+        // Trade markers
+        const symTrades = sorted.filter(t => t.symbol === sym);
+        symTrades.forEach(t => {
+            const tMin = timeToMin(t.time);
+            const x = xPos(tMin);
+            let bestPct = sd.lastPct;
+            let bestDist = Infinity;
+            for (const pt of sd.pts) {
+                const d = Math.abs(pt.min - tMin);
+                if (d < bestDist) { bestDist = d; bestPct = pt.pct; }
             }
+            const y = yPos(bestPct);
+            const isBuy = t.side === 'BUY';
+            ctx.fillStyle = isBuy ? '#00e676' : '#e94560';
+            if (isBuy) {
+                ctx.beginPath(); ctx.moveTo(x, y - 10); ctx.lineTo(x - 5, y - 2); ctx.lineTo(x + 5, y - 2); ctx.closePath(); ctx.fill();
+            } else {
+                ctx.beginPath(); ctx.moveTo(x, y + 10); ctx.lineTo(x - 5, y + 2); ctx.lineTo(x + 5, y + 2); ctx.closePath(); ctx.fill();
+            }
+            tradePositions.push({ x, y, trade: t, radius: 12 });
+        });
+    });
 
-            if (!tradeTs) {
-                // If we can't parse time, skip marker
+    // Fallback: symbols with no bar data — markers at 0% line
+    symbols.forEach(sym => {
+        if (symData[sym]) return;
+        const symTrades = sorted.filter(t => t.symbol === sym);
+        symTrades.forEach(t => {
+            const tMin = timeToMin(t.time);
+            const x = xPos(tMin);
+            const y = zeroY;
+            const isBuy = t.side === 'BUY';
+            ctx.fillStyle = isBuy ? '#00e676' : '#e94560';
+            if (isBuy) {
+                ctx.beginPath(); ctx.moveTo(x, y - 10); ctx.lineTo(x - 5, y - 2); ctx.lineTo(x + 5, y - 2); ctx.closePath(); ctx.fill();
+            } else {
+                ctx.beginPath(); ctx.moveTo(x, y + 10); ctx.lineTo(x - 5, y + 2); ctx.lineTo(x + 5, y + 2); ctx.closePath(); ctx.fill();
+            }
+            tradePositions.push({ x, y, trade: t, radius: 12 });
+        });
+    });
+
+    // Click handler
+    canvas.addEventListener('click', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        for (const tp of tradePositions) {
+            if (Math.abs(mx - tp.x) < tp.radius && Math.abs(my - tp.y) < tp.radius) {
+                showPopup(tp.trade, { x: e.clientX, y: e.clientY });
                 return;
             }
-
-            // Snap to nearest bar time
-            let bestBarTime = chartData[0]?.time;
-            let bestDist = Infinity;
-            for (const bar of chartData) {
-                const dist = Math.abs(bar.time - tradeTs);
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    bestBarTime = bar.time;
-                }
-            }
-
-            const isBuy = trade.side === 'BUY';
-            markers.push({
-                time: bestBarTime,
-                position: isBuy ? 'belowBar' : 'aboveBar',
-                color: isBuy ? '#00e676' : '#e94560',
-                shape: isBuy ? 'arrowUp' : 'arrowDown',
-                text: `${trade.side} x${trade.quantity}`,
-                id: `${traderType}_${symbol}_${idx}`,
-            });
-        });
-
-        // Sort markers by time
-        markers.sort((a, b) => a.time - b.time);
-        // v5 API: createSeriesMarkers instead of setMarkers
-        if (typeof LightweightCharts.createSeriesMarkers === 'function') {
-            LightweightCharts.createSeriesMarkers(candleSeries, markers);
-        } else {
-            candleSeries.setMarkers(markers);
         }
+    });
 
-        // Store reference for click handling
-        chartInstances[chartId] = { chart, candleSeries, trades, markers };
+    // Cursor on hover
+    canvas.style.cursor = 'default';
+    canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        let hit = false;
+        for (const tp of tradePositions) {
+            if (Math.abs(mx - tp.x) < tp.radius && Math.abs(my - tp.y) < tp.radius) { hit = true; break; }
+        }
+        canvas.style.cursor = hit ? 'pointer' : 'default';
+    });
 
-        // Click handler for markers
-        chart.subscribeClick((param) => {
-            if (!param.time) return;
+    // Store state for highlight
+    chartState[traderType] = {
+        tradePositions,
+        canvas,
+        redraw: () => drawChart(chartEl, chartId, traderType, trades, symbols, barData),
+        drawCtx: ctx, dpr, W, H,
+    };
 
-            // Find marker at this time
-            const clickedMarkers = markers.filter(m => m.time === param.time);
-            if (clickedMarkers.length === 0) return;
-
-            // Get the trade data
-            const marker = clickedMarkers[0];
-            const tradeIdx = parseInt(marker.id.split('_').pop());
-            const trade = trades[tradeIdx];
-
-            if (trade) {
-                showPopup(trade, param.point);
-            }
-        });
-
-        chart.timeScale().fitContent();
-
-    } catch (err) {
-        chartEl.innerHTML =
-            `<div class="no-trades">Error loading chart: ${err.message}</div>`;
-    }
+    // Resize
+    new ResizeObserver(() => {
+        const newW = chartEl.clientWidth;
+        if (Math.abs(newW - W) > 10) drawChart(chartEl, chartId, traderType, trades, symbols, barData);
+    }).observe(chartEl);
 }
 
 // ── Popup ──
@@ -768,72 +664,73 @@ function closePopup() {
 }
 
 // ── Highlight trade on chart when table row clicked ──
-let highlightOverlay = null;
+let _highlightTimer = null;
 function highlightTrade(traderType, symbol, tradeTime, idx) {
-    const chartId = `chart_${traderType}_unified`;
-    const chartEl = document.getElementById(chartId);
-    if (!chartEl) return;
-
-    // Remove previous highlight
-    if (highlightOverlay) {
-        highlightOverlay.remove();
-        highlightOverlay = null;
-    }
-
-    // Find the marker data for this trade
-    const marker = allMarkers.find(m => m.symbol === symbol && m._trade && m._trade.time === tradeTime);
-    if (!marker) return;
-
-    // Create pulsing circle overlay
-    const circle = document.createElement('div');
-    circle.className = 'highlight-circle';
-    circle.innerHTML = `<div class="hc-label">${marker._trade.side} ${symbol}</div>`;
-    chartEl.style.position = 'relative';
-    chartEl.appendChild(circle);
-    highlightOverlay = circle;
-
-    // Scroll chart to that time
-    const inst = chartInstances[chartId];
-    if (inst && inst.chart) {
-        inst.chart.timeScale().scrollToPosition(-2, true);
-    }
-
-    // Pulse animation then remove after 3 seconds
-    setTimeout(() => {
-        if (highlightOverlay === circle) {
-            circle.remove();
-            highlightOverlay = null;
-        }
-    }, 4000);
-
     // Highlight table row
     document.querySelectorAll(`#tradeTable_${traderType} tr`).forEach(r => r.style.background = '');
     const row = document.querySelector(`#tradeTable_${traderType} tr[data-trade-idx="${idx}"]`);
     if (row) row.style.background = '#1a3a5c';
 
     // Scroll chart into view
-    chartEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const chartEl = document.getElementById(`chart_${traderType}_unified`);
+    if (chartEl) chartEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Draw pulsing highlight on canvas
+    const state = chartState[traderType];
+    if (!state) return;
+    const tp = state.tradePositions.find(p => p.trade.symbol === symbol && p.trade.time === tradeTime);
+    if (!tp) return;
+
+    // Cancel previous animation
+    if (_highlightTimer) { cancelAnimationFrame(_highlightTimer); _highlightTimer = null; }
+
+    // Create overlay canvas for the highlight animation
+    let overlay = chartEl.querySelector('.highlight-overlay');
+    if (!overlay) {
+        overlay = document.createElement('canvas');
+        overlay.className = 'highlight-overlay';
+        overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;';
+        chartEl.style.position = 'relative';
+        chartEl.appendChild(overlay);
+    }
+    overlay.width = state.canvas.width;
+    overlay.height = state.canvas.height;
+    const octx = overlay.getContext('2d');
+    octx.scale(state.dpr, state.dpr);
+
+    const startTime = performance.now();
+    const duration = 2500;
+    const isBuy = tp.trade.side === 'BUY';
+    const color = isBuy ? '0, 230, 118' : '233, 69, 96';
+
+    function animate(now) {
+        const elapsed = now - startTime;
+        if (elapsed > duration) { octx.clearRect(0, 0, state.W, state.H); overlay.remove(); _highlightTimer = null; return; }
+        octx.clearRect(0, 0, state.W, state.H);
+        const phase = (elapsed % 800) / 800;
+        const radius = 8 + phase * 20;
+        const alpha = 0.7 * (1 - phase);
+
+        // Pulsing ring
+        octx.strokeStyle = `rgba(${color}, ${alpha})`;
+        octx.lineWidth = 3;
+        octx.beginPath(); octx.arc(tp.x, tp.y, radius, 0, Math.PI * 2); octx.stroke();
+
+        // Solid inner circle
+        octx.fillStyle = `rgba(${color}, 0.5)`;
+        octx.beginPath(); octx.arc(tp.x, tp.y, 8, 0, Math.PI * 2); octx.fill();
+
+        // Label
+        const label = `${tp.trade.side} ${symbol} x${tp.trade.quantity}`;
+        octx.font = 'bold 11px Consolas, monospace';
+        octx.textAlign = 'center';
+        octx.fillStyle = `rgba(${color}, 0.9)`;
+        octx.fillText(label, tp.x, tp.y - 18);
+
+        _highlightTimer = requestAnimationFrame(animate);
+    }
+    _highlightTimer = requestAnimationFrame(animate);
 }
 </script>
-<style>
-.highlight-circle {
-    position: absolute; top: 50%; left: 50%;
-    width: 40px; height: 40px; border-radius: 50%;
-    border: 3px solid #00e5ff; background: rgba(0, 229, 255, 0.15);
-    transform: translate(-50%, -50%);
-    animation: pulse-ring 1s ease-out infinite;
-    pointer-events: none; z-index: 10;
-}
-.highlight-circle .hc-label {
-    position: absolute; top: -24px; left: 50%; transform: translateX(-50%);
-    white-space: nowrap; font-size: 11px; color: #00e5ff; font-weight: bold;
-    background: #0d2137; padding: 2px 8px; border-radius: 4px;
-}
-@keyframes pulse-ring {
-    0% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.4); }
-    70% { box-shadow: 0 0 0 20px rgba(0, 229, 255, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0); }
-}
-</style>
 </body>
 </html>

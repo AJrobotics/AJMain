@@ -1073,52 +1073,178 @@
             <!-- CashCow: Smart Trader (left) | Day Trader (right) -->
             <div id="trader-section" style="display:none;">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
-                    <!-- Left: Smart Trader -->
-                    <div class="card trader-card" style="align-self:start;">
-                        <h3>
-                            <span style="color:#00e676;">&#128202; Smart Trader</span>
-                            <span class="trader-badge stopped" id="trader-badge" style="margin-left:auto;font-size:10px;padding:3px 10px;border-radius:10px;background:#55555533;color:#888;">Checking...</span>
-                        </h3>
-                        <div class="info-row"><span class="label">Status</span><span class="value" id="trader-process">--</span></div>
-                        <div class="info-row"><span class="label">Mode</span><span class="value" id="trader-mode">--</span></div>
-                        <div class="info-row"><span class="label">PID</span><span class="value" id="trader-pid">--</span></div>
-                        <div class="info-row"><span class="label">Strategy</span><span class="value" style="font-size:10px;">MA + RSI + ATR + Vol + Signal</span></div>
-                        <div class="info-row"><span class="label">Market</span><span class="value" id="trader-market-time">--</span></div>
-                        <div class="info-row">
-                            <span class="label">IB Gateway</span>
-                            <span class="value" id="ib-gw-status" style="display:flex;align-items:center;gap:6px;">
-                                <span id="ib-gw-dot" style="width:8px;height:8px;border-radius:50%;background:#555;display:inline-block;"></span>
-                                <span id="ib-gw-text">Checking...</span>
-                            </span>
-                        </div>
-                        <!-- Hidden fields to preserve existing JS references -->
-                        <span id="ib-gw-port" style="display:none;">--</span>
-                        <span id="ib-gw-time" style="display:none;">--</span>
-                        <span id="trader-port" style="display:none;">--</span>
-                        <div id="ib-sms-row" style="display:none;"><span id="ib-sms-info">--</span></div>
+                    <!-- Left column: Smart Trader + Watchlist -->
+                    <div style="display:flex;flex-direction:column;gap:16px;">
+                        <div class="card trader-card">
+                            <h3>
+                                <span style="color:#00e676;">&#128202; Smart Trader</span>
+                                <span class="trader-badge stopped" id="trader-badge" style="margin-left:auto;font-size:10px;padding:3px 10px;border-radius:10px;background:#55555533;color:#888;">Checking...</span>
+                            </h3>
+                            <div class="info-row"><span class="label">Status</span><span class="value" id="trader-process">--</span></div>
+                            <div class="info-row"><span class="label">Mode</span><span class="value" id="trader-mode">--</span></div>
+                            <div class="info-row"><span class="label">PID</span><span class="value" id="trader-pid">--</span></div>
+                            <div class="info-row"><span class="label">Strategy</span><span class="value" style="font-size:10px;">MA + RSI + ATR + Vol + Signal</span></div>
+                            <div class="info-row"><span class="label">Market</span><span class="value" id="trader-market-time">--</span></div>
+                            <div class="info-row">
+                                <span class="label">IB Gateway</span>
+                                <span class="value" id="ib-gw-status" style="display:flex;align-items:center;gap:6px;">
+                                    <span id="ib-gw-dot" style="width:8px;height:8px;border-radius:50%;background:#555;display:inline-block;"></span>
+                                    <span id="ib-gw-text">Checking...</span>
+                                </span>
+                            </div>
+                            <span id="ib-gw-port" style="display:none;">--</span>
+                            <span id="ib-gw-time" style="display:none;">--</span>
+                            <span id="trader-port" style="display:none;">--</span>
+                            <div id="ib-sms-row" style="display:none;"><span id="ib-sms-info">--</span></div>
 
-                        <div style="margin-top:12px;">
-                            <h3 style="font-size:12px;color:#00e676;margin-bottom:6px;">Smart Trader Log (Recent)</h3>
-                            <div class="log-box" id="trader-log-box" style="max-height:250px;">Loading trading logs...</div>
+                            <!-- Smart Trader Trading Limits -->
+                            <div style="margin-top:12px;padding-top:10px;border-top:1px solid #1a3a5c;">
+                                <h3 style="font-size:12px;color:#00e676;margin-bottom:8px;">Trading Limits</h3>
+                                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:6px 8px;background:#0d2137;border:1px solid #1a3a5c;border-radius:6px;">
+                                    <span style="font-size:12px;color:#00e676;font-weight:600;">Aggressiveness</span>
+                                    <div style="display:flex;align-items:center;gap:8px;">
+                                        <span style="font-size:10px;color:#555;">Conservative</span>
+                                        <input type="range" id="smart-aggressiveness" min="1" max="10" step="1" value="5"
+                                               oninput="document.getElementById('smart-aggr-val').textContent=this.value;applyAggressiveness('smart')"
+                                               style="width:120px;accent-color:#00e676;">
+                                        <span style="font-size:10px;color:#555;">Aggressive</span>
+                                        <span id="smart-aggr-val" style="font-size:14px;font-weight:700;color:#00e676;min-width:20px;text-align:center;">5</span>
+                                    </div>
+                                </div>
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span style="font-size:11px;color:#888;">Max Trades/Day</span>
+                                        <input type="number" id="smart-max-trades-day" min="0" max="100" value="10"
+                                               style="width:60px;background:#0a192f;border:1px solid #1a3a5c;border-radius:4px;padding:3px 6px;color:#e0e0e0;font-size:11px;text-align:right;font-family:'Consolas',monospace;">
+                                    </div>
+                                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span style="font-size:11px;color:#888;">Max Position Size</span>
+                                        <input type="number" id="smart-max-position-size" min="1" max="1000" value="100"
+                                               style="width:60px;background:#0a192f;border:1px solid #1a3a5c;border-radius:4px;padding:3px 6px;color:#e0e0e0;font-size:11px;text-align:right;font-family:'Consolas',monospace;">
+                                    </div>
+                                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span style="font-size:11px;color:#888;">Default Qty</span>
+                                        <input type="number" id="smart-default-qty" min="1" max="500" value="10"
+                                               style="width:60px;background:#0a192f;border:1px solid #1a3a5c;border-radius:4px;padding:3px 6px;color:#e0e0e0;font-size:11px;text-align:right;font-family:'Consolas',monospace;">
+                                    </div>
+                                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span style="font-size:11px;color:#888;">Daily Loss Limit %</span>
+                                        <input type="number" id="smart-daily-loss-pct" min="-50" max="0" step="0.5" value="-3.0"
+                                               style="width:60px;background:#0a192f;border:1px solid #1a3a5c;border-radius:4px;padding:3px 6px;color:#e0e0e0;font-size:11px;text-align:right;font-family:'Consolas',monospace;">
+                                    </div>
+                                </div>
+                                <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+                                    <button class="btn" onclick="saveTradingLimits('smart')" style="font-size:10px;padding:3px 12px;border-color:#00e676;color:#00e676;">Save</button>
+                                    <span id="smart-limits-status" style="font-size:10px;color:#555;"></span>
+                                </div>
+                            </div>
+
+                            <div style="margin-top:12px;">
+                                <h3 style="font-size:12px;color:#00e676;margin-bottom:6px;">Smart Trader Log (Recent)</h3>
+                                <div class="log-box" id="trader-log-box" style="max-height:250px;">Loading trading logs...</div>
+                            </div>
+                        </div>
+
+                        <!-- Smart Trader Watchlist -->
+                        <div class="card trader-card">
+                            <h3 style="font-size:13px;color:#00e676;margin-bottom:8px;">Smart Trader Watchlist <span id="smart-picks-count" style="color:#888;font-size:11px;font-weight:normal;"></span></h3>
+                            <div style="max-height:320px;overflow-y:auto;">
+                                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                                    <thead>
+                                        <tr style="border-bottom:1px solid #1a3a5c;color:#888;position:sticky;top:0;background:#0a192f;">
+                                            <th style="text-align:left;padding:4px 6px;width:30px;">#</th>
+                                            <th style="text-align:left;padding:4px 6px;">Symbol</th>
+                                            <th style="text-align:right;padding:4px 6px;">Score</th>
+                                            <th style="text-align:right;padding:4px 6px;">Signal</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="picks-body">
+                                        <tr><td colspan="4" style="text-align:center;color:#555;padding:12px;">Loading picks...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Right: Day Trader -->
-                    <div class="card trader-card" style="align-self:start;">
-                        <h3>
-                            <span style="color:#ffab40;">&#9889; Day Trader</span>
-                            <span class="status-badge" id="day-badge" style="margin-left:auto;font-size:10px;padding:3px 10px;border-radius:10px;background:#55555533;color:#888;">Checking...</span>
-                        </h3>
-                        <div class="info-row"><span class="label">Status</span><span class="value" id="day-status">--</span></div>
-                        <div class="info-row"><span class="label">Mode</span><span class="value" id="day-mode">--</span></div>
-                        <div class="info-row"><span class="label">PID</span><span class="value" id="day-pid">--</span></div>
-                        <div class="info-row"><span class="label">Strategy</span><span class="value" style="font-size:10px;">VWAP + EMA + Vol + RSI/MACD</span></div>
-                        <div class="info-row"><span class="label">Last Signal</span><span class="value" id="day-last-signal">--</span></div>
-                        <div class="info-row"><span class="label">Watchlist</span><span class="value" id="day-watchlist">--</span></div>
+                    <!-- Right column: Day Trader + Watchlist -->
+                    <div style="display:flex;flex-direction:column;gap:16px;">
+                        <div class="card trader-card">
+                            <h3>
+                                <span style="color:#ffab40;">&#9889; Day Trader</span>
+                                <span class="status-badge" id="day-badge" style="margin-left:auto;font-size:10px;padding:3px 10px;border-radius:10px;background:#55555533;color:#888;">Checking...</span>
+                            </h3>
+                            <div class="info-row"><span class="label">Status</span><span class="value" id="day-status">--</span></div>
+                            <div class="info-row"><span class="label">Mode</span><span class="value" id="day-mode">--</span></div>
+                            <div class="info-row"><span class="label">PID</span><span class="value" id="day-pid">--</span></div>
+                            <div class="info-row"><span class="label">Strategy</span><span class="value" style="font-size:10px;">VWAP + EMA + Vol + RSI/MACD</span></div>
+                            <div class="info-row"><span class="label">Last Signal</span><span class="value" id="day-last-signal">--</span></div>
+                            <div class="info-row"><span class="label">Watchlist</span><span class="value" id="day-watchlist">--</span></div>
 
-                        <div style="margin-top:12px;">
-                            <h3 style="font-size:12px;color:#ffab40;margin-bottom:6px;">Day Trader Log (Recent)</h3>
-                            <div class="log-box" id="day-log-box" style="max-height:250px;">No day trader log</div>
+                            <!-- Day Trader Trading Limits -->
+                            <div style="margin-top:12px;padding-top:10px;border-top:1px solid #1a3a5c;">
+                                <h3 style="font-size:12px;color:#ffab40;margin-bottom:8px;">Trading Limits</h3>
+                                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:6px 8px;background:#0d2137;border:1px solid #1a3a5c;border-radius:6px;">
+                                    <span style="font-size:12px;color:#ffab40;font-weight:600;">Aggressiveness</span>
+                                    <div style="display:flex;align-items:center;gap:8px;">
+                                        <span style="font-size:10px;color:#555;">Conservative</span>
+                                        <input type="range" id="day-aggressiveness" min="1" max="10" step="1" value="5"
+                                               oninput="document.getElementById('day-aggr-val').textContent=this.value;applyAggressiveness('day')"
+                                               style="width:120px;accent-color:#ffab40;">
+                                        <span style="font-size:10px;color:#555;">Aggressive</span>
+                                        <span id="day-aggr-val" style="font-size:14px;font-weight:700;color:#ffab40;min-width:20px;text-align:center;">5</span>
+                                    </div>
+                                </div>
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span style="font-size:11px;color:#888;">Max Trades/Day</span>
+                                        <input type="number" id="day-max-trades-day" min="0" max="200" value="20"
+                                               style="width:60px;background:#0a192f;border:1px solid #1a3a5c;border-radius:4px;padding:3px 6px;color:#e0e0e0;font-size:11px;text-align:right;font-family:'Consolas',monospace;">
+                                    </div>
+                                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span style="font-size:11px;color:#888;">Max Positions</span>
+                                        <input type="number" id="day-max-positions" min="1" max="50" value="5"
+                                               style="width:60px;background:#0a192f;border:1px solid #1a3a5c;border-radius:4px;padding:3px 6px;color:#e0e0e0;font-size:11px;text-align:right;font-family:'Consolas',monospace;">
+                                    </div>
+                                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span style="font-size:11px;color:#888;">Max Trades/Hour</span>
+                                        <input type="number" id="day-max-trades-hour" min="1" max="50" value="10"
+                                               style="width:60px;background:#0a192f;border:1px solid #1a3a5c;border-radius:4px;padding:3px 6px;color:#e0e0e0;font-size:11px;text-align:right;font-family:'Consolas',monospace;">
+                                    </div>
+                                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span style="font-size:11px;color:#888;">Daily Loss Limit $</span>
+                                        <input type="number" id="day-daily-loss-limit" min="-50000" max="0" step="100" value="-2000"
+                                               style="width:60px;background:#0a192f;border:1px solid #1a3a5c;border-radius:4px;padding:3px 6px;color:#e0e0e0;font-size:11px;text-align:right;font-family:'Consolas',monospace;">
+                                    </div>
+                                </div>
+                                <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+                                    <button class="btn" onclick="saveTradingLimits('day')" style="font-size:10px;padding:3px 12px;border-color:#ffab40;color:#ffab40;">Save</button>
+                                    <span id="day-limits-status" style="font-size:10px;color:#555;"></span>
+                                </div>
+                            </div>
+
+                            <div style="margin-top:12px;">
+                                <h3 style="font-size:12px;color:#ffab40;margin-bottom:6px;">Day Trader Log (Recent)</h3>
+                                <div class="log-box" id="day-log-box" style="max-height:250px;">No day trader log</div>
+                            </div>
+                        </div>
+
+                        <!-- Day Trader Watchlist -->
+                        <div class="card trader-card">
+                            <h3 style="font-size:13px;color:#ffab40;margin-bottom:8px;">Day Trader Watchlist <span id="day-picks-count" style="color:#888;font-size:11px;font-weight:normal;"></span></h3>
+                            <div style="max-height:320px;overflow-y:auto;">
+                                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                                    <thead>
+                                        <tr style="border-bottom:1px solid #1a3a5c;color:#888;position:sticky;top:0;background:#0a192f;">
+                                            <th style="text-align:left;padding:4px 6px;width:30px;">#</th>
+                                            <th style="text-align:left;padding:4px 6px;">Symbol</th>
+                                            <th style="text-align:right;padding:4px 6px;">Type</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="day-picks-body">
+                                        <tr><td colspan="3" style="text-align:center;color:#555;padding:12px;">Loading watchlist...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1741,6 +1867,8 @@
                         }
                         if (picksArr && Array.isArray(picksArr) && picksArr.length > 0) {
                             updatePicksTable(picksBody, picksArr);
+                            const countEl = document.getElementById('smart-picks-count');
+                            if (countEl) countEl.textContent = '(' + picksArr.length + ')';
                         } else {
                             setPlaceholderRow(picksBody, 4, 'No picks available');
                         }
@@ -1852,6 +1980,91 @@
             if (tbody.children.length === 1 && tbody.children[0].children.length === 1 &&
                 tbody.children[0].children[0].getAttribute('colspan')) return; // Already placeholder
             tbody.innerHTML = '<tr><td colspan="' + colspan + '" style="color:#555">' + msg + '</td></tr>';
+        }
+
+        // ── Aggressiveness → auto-fill Trading Limits fields ──
+        function applyAggressiveness(traderType) {
+            function _scale(lv, lo, hi) { return lo + (hi - lo) * (lv - 1) / 9; }
+            var lv = parseInt(document.getElementById(traderType + '-aggressiveness').value) || 5;
+            if (traderType === 'smart') {
+                document.getElementById('smart-default-qty').value = Math.max(1, Math.round(_scale(lv, 3, 30)));
+                document.getElementById('smart-max-position-size').value = Math.max(1, Math.round(_scale(lv, 30, 300)));
+                document.getElementById('smart-max-trades-day').value = Math.max(1, Math.round(_scale(lv, 3, 30)));
+                document.getElementById('smart-daily-loss-pct').value = Math.round(_scale(lv, -1.0, -10.0) * 10) / 10;
+            } else {
+                document.getElementById('day-max-trades-day').value = Math.max(1, Math.round(_scale(lv, 5, 50)));
+                document.getElementById('day-max-positions').value = Math.max(1, Math.round(_scale(lv, 2, 10)));
+                document.getElementById('day-max-trades-hour').value = Math.max(1, Math.round(_scale(lv, 3, 25)));
+                document.getElementById('day-daily-loss-limit').value = Math.round(_scale(lv, -500, -5000));
+            }
+        }
+
+        // ── Trading Limits: Load & Save ──
+        function loadTradingLimits() {
+            fetch('/api/trader/trading-limits')
+                .then(r => r.json())
+                .then(d => {
+                    // Smart Trader limits
+                    const s = d.smart || {};
+                    if (s.aggressiveness !== undefined) { document.getElementById('smart-aggressiveness').value = s.aggressiveness; document.getElementById('smart-aggr-val').textContent = s.aggressiveness; }
+                    if (s.max_trades_per_day !== undefined) document.getElementById('smart-max-trades-day').value = s.max_trades_per_day;
+                    if (s.max_position_size !== undefined) document.getElementById('smart-max-position-size').value = s.max_position_size;
+                    if (s.default_quantity !== undefined) document.getElementById('smart-default-qty').value = s.default_quantity;
+                    if (s.daily_loss_limit_pct !== undefined) document.getElementById('smart-daily-loss-pct').value = s.daily_loss_limit_pct;
+                    // Day Trader limits
+                    const dt = d.day || {};
+                    if (dt.aggressiveness !== undefined) { document.getElementById('day-aggressiveness').value = dt.aggressiveness; document.getElementById('day-aggr-val').textContent = dt.aggressiveness; }
+                    if (dt.max_trades_per_day !== undefined) document.getElementById('day-max-trades-day').value = dt.max_trades_per_day;
+                    if (dt.max_positions !== undefined) document.getElementById('day-max-positions').value = dt.max_positions;
+                    if (dt.max_trades_per_hour !== undefined) document.getElementById('day-max-trades-hour').value = dt.max_trades_per_hour;
+                    if (dt.daily_loss_hard_limit !== undefined) document.getElementById('day-daily-loss-limit').value = dt.daily_loss_hard_limit;
+                })
+                .catch(err => console.error('Failed to load trading limits:', err));
+        }
+
+        function saveTradingLimits(traderType) {
+            let limits = {};
+            const statusEl = document.getElementById(traderType + '-limits-status');
+            if (traderType === 'smart') {
+                limits = {
+                    aggressiveness: parseInt(document.getElementById('smart-aggressiveness').value) || 5,
+                    max_trades_per_day: parseInt(document.getElementById('smart-max-trades-day').value) || 10,
+                    max_position_size: parseInt(document.getElementById('smart-max-position-size').value) || 100,
+                    default_quantity: parseInt(document.getElementById('smart-default-qty').value) || 10,
+                    daily_loss_limit_pct: parseFloat(document.getElementById('smart-daily-loss-pct').value) || -3.0,
+                };
+            } else {
+                limits = {
+                    aggressiveness: parseInt(document.getElementById('day-aggressiveness').value) || 5,
+                    max_trades_per_day: parseInt(document.getElementById('day-max-trades-day').value) || 20,
+                    max_positions: parseInt(document.getElementById('day-max-positions').value) || 5,
+                    max_trades_per_hour: parseInt(document.getElementById('day-max-trades-hour').value) || 10,
+                    daily_loss_hard_limit: parseFloat(document.getElementById('day-daily-loss-limit').value) || -2000,
+                };
+            }
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = '#ffc107';
+            fetch('/api/trader/trading-limits', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({trader_type: traderType, limits: limits})
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    statusEl.textContent = 'Saved';
+                    statusEl.style.color = '#00e676';
+                } else {
+                    statusEl.textContent = 'Error: ' + (d.error || 'unknown');
+                    statusEl.style.color = '#e94560';
+                }
+                setTimeout(() => { statusEl.textContent = ''; }, 3000);
+            })
+            .catch(err => {
+                statusEl.textContent = 'Failed';
+                statusEl.style.color = '#e94560';
+                setTimeout(() => { statusEl.textContent = ''; }, 3000);
+            });
         }
 
         function deployTrader(action) {
@@ -2356,10 +2569,30 @@
                             const m = sigLine.match(/(\w+)\s*\|\s*.*?(HOLD|BUY|SELL)/);
                             setText('day-last-signal', m ? m[1] + ' → ' + m[2] : '--');
                         }
-                        const wlLine = [...lines].reverse().find(l => l.includes('워치리스트'));
+                        // Parse watchlist (Korean or English)
+                        const wlLine = [...lines].reverse().find(l => l.includes('Watchlist:') || l.includes('워치리스트'));
                         if (wlLine) {
-                            const wm = wlLine.match(/(\d+)개/);
+                            const wm = wlLine.match(/(\d+)\s*(stocks|개)/);
                             setText('day-watchlist', wm ? wm[1] + ' stocks' : '--');
+                        }
+                        // Populate Day Trader watchlist table from API field
+                        const dayPicksBody = document.getElementById('day-picks-body');
+                        if (d.day_watchlist && d.day_watchlist.length > 0 && dayPicksBody) {
+                            const coreList = ['NVDA','AAPL','TSLA','AMD','META','AMZN','GOOGL','MSFT','QQQ','SPY'];
+                            const symbols = d.day_watchlist;
+                            const countEl = document.getElementById('day-picks-count');
+                            if (countEl) countEl.textContent = '(' + symbols.length + ')';
+                            const key = symbols.join(',');
+                            if (dayPicksBody.dataset.lastKey !== key) {
+                                dayPicksBody.dataset.lastKey = key;
+                                dayPicksBody.innerHTML = symbols.map((sym, i) => {
+                                    const type = coreList.includes(sym) ? '<span style="color:#888;">Core</span>' : '<span style="color:#ffab40;">Scanner</span>';
+                                    return '<tr style="border-bottom:1px solid #0f346033;">' +
+                                        '<td style="padding:3px 6px;color:#888;">' + (i+1) + '</td>' +
+                                        '<td style="padding:3px 6px;color:#fff;font-weight:600;">' + sym + '</td>' +
+                                        '<td style="padding:3px 6px;text-align:right;font-size:11px;">' + type + '</td></tr>';
+                                }).join('');
+                            }
                         }
                     }
                 })
@@ -2985,6 +3218,7 @@
             loadTraderStatus();
             loadIBGatewayStatus();
             loadDayTraderPanel();
+            loadTradingLimits();
             setInterval(loadPortfolio, 30000);
             setInterval(loadTraderStatus, 30000);
             setInterval(loadIBGatewayStatus, 30000);

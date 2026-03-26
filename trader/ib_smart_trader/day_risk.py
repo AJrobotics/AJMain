@@ -130,6 +130,29 @@ class DayRiskManager:
         self.trade_timestamps: list[datetime] = []
         self.loss_cooldowns: dict[str, datetime] = {}  # {symbol: cooldown_until}
         self._day_trades_5d: list[str] = []  # Day trade dates in last 5 days
+        self._last_aggressiveness: int = None
+
+    def apply_aggressiveness(self, level: int):
+        """Scale risk parameters based on aggressiveness level (1-10).
+        Called by DayTrader every cycle for hot-reload from dashboard."""
+        level = max(1, min(10, level))
+        if level == self._last_aggressiveness:
+            return  # No change
+
+        def _scale(lv, lo, hi):
+            return lo + (hi - lo) * (lv - 1) / 9
+
+        self.config.risk_per_trade_pct = round(_scale(level, 0.3, 3.0), 2)
+        self.config.max_positions = max(1, int(_scale(level, 2, 10)))
+        self.config.max_trades_per_hour = max(1, int(_scale(level, 3, 25)))
+
+        logger.info(
+            f"  🎚️ Day Aggressiveness: {level}/10 → "
+            f"risk={self.config.risk_per_trade_pct}%, "
+            f"max_pos={self.config.max_positions}, "
+            f"trades/hr={self.config.max_trades_per_hour}"
+        )
+        self._last_aggressiveness = level
 
     def reset_daily(self):
         """Daily reset (called at market open each day)"""

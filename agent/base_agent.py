@@ -202,6 +202,7 @@ def get_system_info() -> dict:
     uptime_sec = int(time.time() - psutil.boot_time())
 
     return {
+        "online": True,
         "hostname": _HOSTNAME,
         "platform": platform.system(),
         "platform_version": platform.version(),

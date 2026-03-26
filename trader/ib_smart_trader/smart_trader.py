@@ -253,6 +253,7 @@ class SmartTrader:
         self.positions: dict = {}
         self.watchlist: list[Stock] = []
         self.running = False
+        self._last_aggressiveness = None  # Track for change logging
 
         # v2.0: Initialize ensemble engine
         self.ensemble = None
@@ -968,6 +969,39 @@ class SmartTrader:
 
         print("╚" + "═" * 68 + "╝")
 
+    # ── Aggressiveness ────────────────────────────────────────
+
+    def _apply_aggressiveness(self):
+        """Read aggressiveness from trading_limits.json and scale config params.
+        Called every cycle so dashboard changes take effect immediately."""
+        try:
+            limits_path = os.path.join(os.path.dirname(__file__), "trading_limits.json")
+            if not os.path.exists(limits_path):
+                return
+            with open(limits_path, "r") as f:
+                data = json.load(f)
+            level = int(data.get("smart", {}).get("aggressiveness", 5))
+            level = max(1, min(10, level))
+        except Exception:
+            return
+
+        if level == self._last_aggressiveness:
+            return  # No change
+
+        # Linear interpolation: scale(level, min_at_1, max_at_10)
+        def _scale(lv, lo, hi):
+            return lo + (hi - lo) * (lv - 1) / 9
+
+        self.config.default_quantity = max(1, int(_scale(level, 3, 30)))
+        self.config.max_position_size = max(1, int(_scale(level, 30, 300)))
+
+        self.logger.info(
+            f"  🎚️ Aggressiveness: {level}/10 → "
+            f"qty={self.config.default_quantity}, "
+            f"max_pos={self.config.max_position_size}"
+        )
+        self._last_aggressiveness = level
+
     # ── Main Loop ─────────────────────────────────────────────
 
     def run(self, symbols: list[str] = None):
@@ -1005,6 +1039,9 @@ class SmartTrader:
         cycle = 0
         try:
             while self.running:
+                # Apply aggressiveness from dashboard (hot-reload)
+                self._apply_aggressiveness()
+
                 cycle += 1
                 self.logger.info(f"\n{'─' * 50}")
                 self.logger.info(f"🔄 Cycle #{cycle} started [{datetime.now():%H:%M:%S}]")

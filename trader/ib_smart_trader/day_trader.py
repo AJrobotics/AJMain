@@ -560,6 +560,24 @@ class DayTrader:
 
         self.logger.warning("  🔴🔴🔴 All positions liquidated")
 
+    # ── Aggressiveness ────────────────────────────────────────
+
+    def _apply_aggressiveness(self):
+        """Read aggressiveness from trading_limits.json and apply to risk manager.
+        Called every cycle so dashboard changes take effect immediately."""
+        if not self.risk_manager:
+            return
+        try:
+            limits_path = os.path.join(os.path.dirname(__file__), "trading_limits.json")
+            if not os.path.exists(limits_path):
+                return
+            with open(limits_path, "r") as f:
+                data = json.load(f)
+            level = int(data.get("day", {}).get("aggressiveness", 5))
+            self.risk_manager.apply_aggressiveness(level)
+        except Exception:
+            pass
+
     # ── Main Loop ─────────────────────────────────────────────
 
     def run(self, symbols: list[str] = None):
@@ -590,6 +608,9 @@ class DayTrader:
 
         try:
             while self.running:
+                # Apply aggressiveness from dashboard (hot-reload)
+                self._apply_aggressiveness()
+
                 # Check market status
                 if not self._is_market_open():
                     self.logger.info("  💤 Market closed — waiting...")

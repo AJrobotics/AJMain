@@ -254,6 +254,23 @@ class TraderModule:
                     pass
         return []
 
+    def _get_day_watchlist(self) -> list[str]:
+        """Extract Day Trader watchlist symbols from log file."""
+        for name in ["day_trader_stdout.log", "day_trader.log"]:
+            path = os.path.join(TRADER_LOG_DIR, name)
+            if os.path.isfile(path):
+                try:
+                    with open(path, "r", errors="replace") as f:
+                        for line in f:
+                            if "Watchlist: [" in line or "워치리스트: [" in line:
+                                import re
+                                m = re.search(r"\[([^\]]+)\]", line)
+                                if m:
+                                    return [s.strip().strip("'\"") for s in m.group(1).split(",") if s.strip()]
+                except Exception:
+                    continue
+        return []
+
     def register(self, app):
         bp = Blueprint("trader", __name__)
 
@@ -266,6 +283,7 @@ class TraderModule:
             politician_log_lines = self._tail_log(30, "politician")
             picks = self._read_json(DAILY_PICKS_PATH)
             config = self._read_json(CONFIG_PATH)
+            day_watchlist = self._get_day_watchlist()
             return jsonify({
                 **proc,
                 **market,
@@ -274,6 +292,7 @@ class TraderModule:
                 "politician_log_lines": politician_log_lines,
                 "daily_picks": picks,
                 "config": config,
+                "day_watchlist": day_watchlist,
             })
 
         @bp.route("/api/trader/portfolio")
@@ -375,6 +394,51 @@ class TraderModule:
             logger.info("Day trader config updated: %s", cfg)
             return jsonify({"success": True, "config": cfg})
 
+        @bp.route("/api/trader/trading-limits", methods=["GET", "POST"])
+        def trading_limits():
+            limits_file = os.path.join(TRADER_BASE, "trading_limits.json")
+            defaults = {
+                "smart": {
+                    "aggressiveness": 5,
+                    "max_trades_per_day": 10,
+                    "max_position_size": 100,
+                    "default_quantity": 10,
+                    "daily_loss_limit_pct": -3.0,
+                },
+                "day": {
+                    "aggressiveness": 5,
+                    "max_trades_per_day": 20,
+                    "max_positions": 5,
+                    "max_trades_per_hour": 10,
+                    "daily_loss_hard_limit": -2000,
+                },
+            }
+            if request.method == "GET":
+                saved = self._read_json(limits_file)
+                if saved:
+                    # Merge defaults with saved (so new fields get defaults)
+                    for trader in defaults:
+                        if trader not in saved:
+                            saved[trader] = defaults[trader]
+                        else:
+                            for k, v in defaults[trader].items():
+                                saved[trader].setdefault(k, v)
+                    return jsonify(saved)
+                return jsonify(defaults)
+            data = request.json or {}
+            trader_type = data.get("trader_type")
+            if trader_type not in ("smart", "day"):
+                return jsonify({"error": "Invalid trader_type"}), 400
+            limits = self._read_json(limits_file) or defaults
+            limits[trader_type].update({
+                k: v for k, v in data.get("limits", {}).items()
+                if k in defaults.get(trader_type, {})
+            })
+            with open(limits_file, "w") as f:
+                json.dump(limits, f, indent=2)
+            logger.info("Trading limits updated [%s]: %s", trader_type, limits[trader_type])
+            return jsonify({"success": True, "limits": limits})
+
         @bp.route("/api/trader/logs")
         def trader_logs():
             lines = request.args.get("lines", 50, type=int)
@@ -423,10 +487,40 @@ class TraderModule:
 
         @bp.route("/api/trader/intraday/<symbol>")
         def trader_intraday(symbol):
-            """Fetch today's 5-min bars for a symbol from IB Gateway."""
+            """Fetch bars for a symbol — from cache if available, otherwise live IB."""
+            date_str = request.args.get("date", _dt.now().strftime("%Y-%m-%d"))
+            # Try cache first
+            cached = self._load_intraday_cache(date_str)
+            if cached and symbol in cached:
+                return jsonify(cached[symbol])
+            # Live fetch (only for today)
             port = request.args.get("port", IB_PAPER_PORT, type=int)
             bars = self._fetch_intraday_bars(symbol, port)
             return jsonify(bars)
+
+        @bp.route("/api/trader/save-intraday", methods=["POST"])
+        def save_intraday():
+            """Fetch 10-min bars for all today's traded symbols and cache to disk."""
+            today_str = _dt.now().strftime("%Y-%m-%d")
+            # Get symbols from today's trades
+            day_trades = self._parse_trades_from_log("day", today_str)
+            smart_trades = self._parse_trades_from_log("smart", today_str)
+            symbols = list(set(
+                [t["symbol"] for t in day_trades] +
+                [t["symbol"] for t in smart_trades]
+            ))
+            if not symbols:
+                return jsonify({"error": "No trades today", "saved": 0})
+            port = IB_PAPER_PORT
+            if request.is_json and request.json:
+                port = request.json.get("port", IB_PAPER_PORT)
+            symbol_bars = {}
+            for sym in symbols:
+                bars = self._fetch_intraday_bars(sym, port, bar_size="10 mins")
+                if bars:
+                    symbol_bars[sym] = bars
+            self._save_intraday_cache(today_str, symbol_bars)
+            return jsonify({"success": True, "date": today_str, "saved": len(symbol_bars), "symbols": list(symbol_bars.keys())})
 
         @bp.route("/api/trader/politician/disclosures")
         def politician_disclosures():
@@ -532,16 +626,16 @@ class TraderModule:
         # We scan all lines looking for order execution lines, then look
         # backwards for the strategy signals and ensemble decision.
 
-        # Patterns for executed orders
+        # Patterns for executed orders (English log format)
         if trader_type == "day":
-            # ✅ BUY 주문 전송! SYMBOL x{shares} | 주문ID: {id} | 상태: {status}
+            # ✅ BUY order sent! SYMBOL x{shares} | OrderID: {id} | Status: {status}
             order_re = re.compile(
-                r"✅\s+(BUY|SELL)\s+주문\s+전송!\s+(\w+)\s+x(\d+)\s*\|\s*주문ID:\s*(\d+)"
+                r"✅\s+(BUY|SELL)\s+order\s+sent!\s+(\w+)\s+x(\d+)\s*\|\s*OrderID:\s*(\d+)"
             )
         else:
-            # ✅ 주문 전송! BUY/SELL SYMBOL x{qty} | 주문 ID: {id} | 상태: {status}
+            # ✅ Order submitted! BUY SYMBOL x{qty} | Order ID: {id} | Status: {status}
             order_re = re.compile(
-                r"✅\s+주문\s+전송!\s+(BUY|SELL)\s+(\w+)\s+x(\d+)\s*\|\s*주문\s*ID:\s*(\d+)"
+                r"✅\s+Order\s+submitted!\s+(BUY|SELL)\s+(\w+)\s+x(\d+)\s*\|\s*Order\s*ID:\s*(\d+)"
             )
 
         # Also capture ALERT mode signals (no actual order placed)
@@ -552,9 +646,9 @@ class TraderModule:
         else:
             alert_re = None
 
-        # Ensemble decision line
+        # Ensemble decision line (English: "Consensus:")
         ensemble_re = re.compile(
-            r"🎯\s+(\w+).*합의:\s+([+-]?[0-9.]+)\s*\|\s*BUY:(\d+)\s+SELL:(\d+)"
+            r"🎯\s+(\w+).*Consensus:\s+([+-]?[0-9.]+)\s*\|\s*BUY:(\d+)\s+SELL:(\d+)"
         )
         # Individual strategy signal line
         signal_re = re.compile(
@@ -629,13 +723,13 @@ class TraderModule:
             trade_price = None
             for j in range(i, max(0, i - 10), -1):
                 pline = all_lines[j]
-                # "📏 사이징: 39주 × $380.16 = $14,826.24"
-                if '사이징' in pline:
+                # "📏 Sizing: 25 shares × $598.08 = $14,952.00"
+                if 'Sizing' in pline or 'sizing' in pline:
                     pm = re.search(r'[×x]\s*\$([0-9.]+)', pline)
                     if pm:
                         trade_price = float(pm.group(1))
                         break
-                # "VWAP $380.62 저항" or "VWAP $380.62 지지"
+                # "VWAP $380.62 support" or "VWAP $380.62 resistance"
                 if 'VWAP' in pline and '$' in pline:
                     pm = re.search(r'VWAP\s+\$([0-9.]+)', pline)
                     if pm:
@@ -689,8 +783,8 @@ class TraderModule:
 
     # ── Intraday Bars from IB ──────────────────────────────────
 
-    def _fetch_intraday_bars(self, symbol: str, port: int = IB_PAPER_PORT) -> list:
-        """Connect to IB and fetch today's 5-min bars for a symbol."""
+    def _fetch_intraday_bars(self, symbol: str, port: int = IB_PAPER_PORT, bar_size: str = "5 mins") -> list:
+        """Connect to IB and fetch today's bars for a symbol."""
         try:
             import asyncio
             try:
@@ -709,7 +803,7 @@ class TraderModule:
                 contract,
                 endDateTime="",
                 durationStr="1 D",
-                barSizeSetting="5 mins",
+                barSizeSetting=bar_size,
                 whatToShow="TRADES",
                 useRTH=False,
                 formatDate=1,
@@ -735,3 +829,25 @@ class TraderModule:
         except Exception as e:
             logger.warning("IB intraday fetch failed for %s: %s", symbol, e)
             return []
+
+    # ── Intraday Bar Cache ─────────────────────────────────────
+
+    def _intraday_cache_path(self, date_str: str) -> str:
+        return os.path.join(TRADER_LOG_DIR, "intraday_cache", f"{date_str}.json")
+
+    def _save_intraday_cache(self, date_str: str, symbol_bars: dict):
+        cache_dir = os.path.join(TRADER_LOG_DIR, "intraday_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(self._intraday_cache_path(date_str), "w") as f:
+            json.dump(symbol_bars, f)
+        logger.info("Saved intraday cache for %s (%d symbols)", date_str, len(symbol_bars))
+
+    def _load_intraday_cache(self, date_str: str) -> dict | None:
+        path = self._intraday_cache_path(date_str)
+        if os.path.isfile(path):
+            try:
+                with open(path, "r") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return None
