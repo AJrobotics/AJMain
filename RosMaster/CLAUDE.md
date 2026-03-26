@@ -282,3 +282,34 @@ jetson/
 ## SMS Boot Notification
 - Sends to 6616180571 (Verizon) via `dreamittogether@gmail.com`
 - Gmail app password at `/home/jetson/.rosmaster_smtp`
+
+## Session Notes (March 25, 2026)
+
+### What was accomplished
+1. **LiDAR revolution detection**: switched from angle-wrap to hardware `start_flag` — reliable, no CPU dependency
+2. **Multiprocessing architecture**: LiDAR + depth camera in separate processes, shared memory for collision (~38μs reads)
+3. **IMU heading fix**: `atan2(sin,cos)` for all angle math — eliminates ±180° wrapping bug that caused heading jumps
+4. **Heading is 100% IMU**: ICP rotation disabled (proved unreliable). ICP translation re-enabled with 50mm cap for position tracking
+5. **Sensor debug tool**: LiDAR tab (revolution timeline, angle coverage, scan plot) + IMU tab (heading sweep, compass)
+6. **Mapping debug tool**: Live/Offline mode, recording playback with LiDAR overlay, landmark display, cell inspector
+7. **Exploration recording**: H.264 video (RGB+depth) + JSON log with LiDAR scan, IMU yaw, landmarks per frame
+8. **Wall-follow with mecanum strafe**: proportional distance control, initial wall approach, corner handling
+9. **Configurable parameters from dashboard**: collision thresholds, ICP cap/quality, wall distance, speed
+10. **Jump detection**: detects IMU glitches >28°/frame, pauses grid updates for 10 scans, shows on timing bar
+11. **Scan test mode**: 2×CW + 2×CCW full rotations using IMU-tracked cumulative angle (not timer)
+
+### Remaining issues to fix
+- **ICP translation drift**: ~1mm/s even when stationary. Accumulates ~600mm over 10 minutes. Root cause: ICP finds small false translations in consecutive scans. Landmark-based correction was attempted but landmarks drift with the pose
+- **Landmark-based localization**: algorithm detects corners and flat walls, but landmarks are computed from the drifting pose so they move with it. Need to anchor landmarks to first detection and correct pose against them, not the other way around. **Future approach**: detect wall features (corners, edges) as fixed anchoring points, re-localize against them each scan
+- **Wall-follow hallway navigation**: robot maintains wall distance via sector measurements but at high speed (0.15 m/s) the strafe correction can't keep up in narrow hallways. Proportional control helps but needs further tuning
+- **Floor plan output**: occupancy grid exists but wall lines are noisy. Need: morphological cleanup → Hough/RANSAC wall extraction → angle snapping → parallel line collapse → room segmentation (ROSE2) → vectorize to SVG/DXF
+- **SLAM Toolbox integration**: ROS2 SLAM Toolbox is the recommended production solution (loop closure, correlative scan matching, lifelong mapping). Keep custom SLAM for real-time control, use SLAM Toolbox for final map output
+
+### Key learnings
+- **IMU is the only reliable heading source** on this hardware. ICP heading oscillates ±30° even with quality=0.99. The Rosmaster IMU (gyro+accel) provides stable heading but has occasional glitches at the ±180° boundary
+- **`(x + π) % (2π) - π` has edge cases** — use `atan2(sin(x), cos(x))` for angle normalization
+- **Python GIL kills sensor timing**: LiDAR dt varied 80-750ms with threading, stable at 100ms ±0.7ms with multiprocessing
+- **Shared memory is fast**: collision reads 8 floats in ~38μs vs ~5ms via queues
+- **Don't reset SLAM during exploration**: any code path that calls `slam.reset()` (including UI buttons, mapping method changes) destroys heading calibration
+- **Mecanum wheels can't provide odometry**: wheel slip during lateral movement makes encoder-based position tracking unreliable
+- **Battery voltage affects LiDAR**: low voltage → motor speed fluctuations → inconsistent scan data. Charge when <9V
