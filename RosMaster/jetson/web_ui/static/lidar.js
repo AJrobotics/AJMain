@@ -658,6 +658,17 @@ function connectDebugWS() {
 
             document.getElementById('tb-sectors').textContent =
                 msg.collision_sectors.map(d => d >= 9999 ? '-' : Math.round(d)).join(' | ');
+
+            // Jump indicator
+            const jumpEl = document.getElementById('tb-jump');
+            if (jumpEl && msg.heading) {
+                if (msg.heading.jump_active || msg.heading.jump_cooldown > 0) {
+                    jumpEl.style.display = '';
+                    jumpEl.textContent = 'JUMP #' + msg.heading.jump_count;
+                } else {
+                    jumpEl.style.display = 'none';
+                }
+            }
         }
     };
 
@@ -726,10 +737,23 @@ function connectSlamWS() {
 }
 
 function explorerCmd(action) {
+    const payload = {action: action};
+    // Handle wall_follow_left as wall_follow with direction
+    if (action === 'wall_follow_left') {
+        payload.action = 'wall_follow';
+        payload.direction = 'left';
+    }
+    // Pass time limit and wall distance to all exploration modes
+    if (['start', 'floor_plan', 'wall_follow', 'spiral'].includes(payload.action)) {
+        const timeEl = document.getElementById('explore-time');
+        if (timeEl) payload.time_limit = parseInt(timeEl.value) || 300;
+        const wallEl = document.getElementById('wall-dist');
+        if (wallEl) payload.wall_dist = parseInt(wallEl.value) || 500;
+    }
     fetch('/api/explorer', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({action: action}),
+        body: JSON.stringify(payload),
     }).then(r => r.json()).then(d => {
         if (d.error) {
             document.getElementById('explorer-state').textContent = d.error;
@@ -773,6 +797,73 @@ function setSlamMethod(method) {
     });
 }
 window.setSlamMethod = setSlamMethod;
+
+// --- SLAM params ---
+function setSlamParams() {
+    const cap = parseInt(document.getElementById('icp-cap').value) || 50;
+    const qual = parseFloat(document.getElementById('icp-qual').value) || 0.3;
+    fetch('/api/slam_params', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({icp_trans_cap: cap, icp_min_quality: qual}),
+    });
+}
+window.setSlamParams = setSlamParams;
+
+// Load current SLAM params on startup
+fetch('/api/slam_params').then(r => r.json()).then(d => {
+    if (d.icp_trans_cap !== undefined) document.getElementById('icp-cap').value = d.icp_trans_cap;
+    if (d.icp_min_quality !== undefined) document.getElementById('icp-qual').value = d.icp_min_quality;
+}).catch(() => {});
+
+// --- Landmark toggle ---
+function toggleLandmarks(enabled) {
+    fetch('/api/landmarks', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled: enabled}),
+    }).then(r => r.json()).then(d => {
+        const el = document.getElementById('landmark-count');
+        if (el) el.textContent = d.use_landmarks ? `(${d.count})` : '';
+    });
+}
+window.toggleLandmarks = toggleLandmarks;
+
+// --- Collision thresholds ---
+function setCollision() {
+    const stop = parseInt(document.getElementById('col-stop').value) || 300;
+    const slow = parseInt(document.getElementById('col-slow').value) || 500;
+    const caution = parseInt(document.getElementById('col-caution').value) || 800;
+    const ignore = parseInt(document.getElementById('ignore-angle-input').value) || 140;
+    fetch('/api/collision', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({stop, slow, caution, ignore_angle: ignore}),
+    });
+}
+window.setCollision = setCollision;
+
+// Load current collision values on startup
+fetch('/api/collision').then(r => r.json()).then(d => {
+    if (d.stop) document.getElementById('col-stop').value = d.stop;
+    if (d.slow) document.getElementById('col-slow').value = d.slow;
+    if (d.caution) document.getElementById('col-caution').value = d.caution;
+    if (d.ignore_angle) document.getElementById('ignore-angle-input').value = d.ignore_angle;
+}).catch(() => {});
+
+// --- Shutdown ---
+function shutdownRobot() {
+    if (!confirm('Shutdown the robot? This will power off the Jetson.')) return;
+    fetch('/api/shutdown', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: '{}',
+    }).then(() => {
+        document.title = 'Shutdown...';
+        document.body.style.opacity = '0.3';
+    });
+}
+window.shutdownRobot = shutdownRobot;
 
 // --- Calibration functions ---
 

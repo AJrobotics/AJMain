@@ -65,8 +65,8 @@ class SLAMEngine:
         # Loop closure: store (pose, scan_points) at intervals
         self._scan_store = []  # list of (scan_idx, pose, points)
         self._loop_closure_count = 0
-        # IMU-only heading: offset aligns IMU reference to SLAM coordinate system
-        self._imu_yaw_offset = None   # set on first scan with IMU data
+        # IMU heading: track cumulative rotation via deltas (avoids wrapping bugs)
+        self._prev_imu_yaw = None     # previous raw IMU yaw (rad)
         # Debug: heading sources
         self._debug_icp_theta = 0.0   # last ICP heading change (rad)
         self._debug_imu_yaw = 0.0     # last raw IMU yaw (rad)
@@ -75,6 +75,20 @@ class SLAMEngine:
         # Wall lines cache
         self._wall_lines = []
         self._wall_lines_scan = -1  # scan_count when last computed
+        # Configurable ICP parameters (can be changed at runtime via API)
+        self.icp_trans_cap = 50     # mm max translation per scan
+        self.icp_min_quality = 0.3  # minimum quality to accept ICP result
+        # Jump detection
+        self._jump_count = 0        # total jumps detected
+        self._jump_cooldown = 0     # scans remaining to skip grid updates after jump
+        self._jump_cooldown_scans = 10  # skip this many scans after a jump
+        self._debug_jump_active = False
+        # Landmark-based localization
+        self.use_landmarks = False  # toggle from dashboard
+        self._landmarks = []  # list of (world_x, world_y, type, scan_angle, scan_dist)
+        self._landmark_update_interval = 50  # update landmarks every N scans
+        self._debug_landmark_count = 0
+        self._debug_landmark_correction = (0, 0)  # last correction (dx, dy)
 
     def _filter_scan(self, scan):
         """Filter scan: remove rear ignore zone, convert to cartesian."""
@@ -364,67 +378,89 @@ class SLAMEngine:
         depth_lookup = self._build_depth_lookup(depth_line)
 
         with self.lock:
-            # Scan matching: ICP with quality check
+            # --- ICP translation: re-enabled with tight cap ---
+            # Heading: 100% IMU (ICP heading disabled — proved unreliable)
+            # Translation: ICP with 50mm cap, quality > 0.3
+            # Drift: ~1mm/s stationary — acceptable tradeoff for tracking movement
             if self.prev_points is not None and len(self.prev_points) > 20:
                 T, quality = self._icp_with_quality(local_points, self.prev_points)
                 dx = T[0, 2]
                 dy = T[1, 2]
                 dtheta = math.atan2(T[1, 0], T[0, 0])
-
-                trans = math.hypot(dx, dy)
                 self._debug_icp_quality = quality
                 self._debug_icp_theta = dtheta
 
-                # --- Translation: ICP with reasonable cap ---
-                # Max 50mm per scan (robot at 0.15m/s max, 5Hz = 30mm, plus margin)
-                # Reject if quality too low or translation too large
-                if quality < 0.2 or trans > 50:
-                    dx, dy = 0, 0
+                trans = math.hypot(dx, dy)
+                # Apply translation if quality good and within cap
+                if quality >= self.icp_min_quality and trans <= self.icp_trans_cap:
+                    cos_t = math.cos(self.pose[2])
+                    sin_t = math.sin(self.pose[2])
+                    self.pose[0] += cos_t * dx - sin_t * dy
+                    self.pose[1] += sin_t * dx + cos_t * dy
+                # ICP rotation is NOT applied — heading is 100% IMU
 
-                # Update position from ICP translation (rotated into world frame)
-                cos_t = math.cos(self.pose[2])
-                sin_t = math.sin(self.pose[2])
-                self.pose[0] += cos_t * dx - sin_t * dy
-                self.pose[1] += sin_t * dx + cos_t * dy
+            # --- Heading: 100% IMU yaw via cumulative delta ---
+            # Track heading by accumulating small IMU deltas.
+            # This avoids ALL wrapping issues — we never subtract an offset
+            # from an absolute angle. Instead we just add the change.
+            if imu_yaw is not None:
+                self._debug_imu_yaw = imu_yaw
+                imu_neg = -imu_yaw  # negate: IMU convention → math convention
 
-                # --- Heading: IMU primary + small ICP correction ---
-                # Negate IMU yaw: IMU convention → math convention
-                if imu_yaw is not None:
-                    self._debug_imu_yaw = imu_yaw
-                    imu_corrected = -imu_yaw
+                if self._prev_imu_yaw is None:
+                    # First scan: just store, don't change heading
+                    self._prev_imu_yaw = imu_neg
+                else:
+                    # Compute delta with proper wrapping (always small)
+                    delta = math.atan2(math.sin(imu_neg - self._prev_imu_yaw),
+                                       math.cos(imu_neg - self._prev_imu_yaw))
 
-                    if self._imu_yaw_offset is None:
-                        self._imu_yaw_offset = imu_corrected - self.pose[2]
-
-                    # IMU heading (with offset)
-                    imu_heading = imu_corrected - self._imu_yaw_offset
-                    imu_heading = (imu_heading + math.pi) % (2 * math.pi) - math.pi
-
-                    # If ICP quality is good and rotation is small, blend in ICP rotation
-                    # 90% IMU + 10% ICP correction — IMU is primary, ICP just fine-tunes
-                    if quality >= 0.4 and abs(math.degrees(dtheta)) < 10:
-                        # Apply ICP rotation to current pose
-                        icp_heading = self.pose[2] + dtheta
-                        icp_heading = (icp_heading + math.pi) % (2 * math.pi) - math.pi
-                        # Blend: 90% IMU, 10% ICP (via shortest angular path)
-                        diff = (icp_heading - imu_heading + math.pi) % (2 * math.pi) - math.pi
-                        self.pose[2] = imu_heading + 0.1 * diff
+                    if abs(delta) < 0.5:  # < 28° per scan = physically possible
+                        old_h = self.pose[2]
+                        self.pose[2] += delta
+                        # Normalize to [-pi, pi]
+                        self.pose[2] = math.atan2(math.sin(self.pose[2]),
+                                                   math.cos(self.pose[2]))
+                        self._debug_jump_active = False
                     else:
-                        # ICP unreliable — use IMU only
-                        self.pose[2] = imu_heading
+                        # IMU glitch detected — keep previous heading, pause grid
+                        self._jump_count += 1
+                        self._jump_cooldown = self._jump_cooldown_scans
+                        self._debug_jump_active = True
+                        print(f"IMU JUMP #{self._jump_count}: delta={math.degrees(delta):.1f}° "
+                              f"imu_yaw={math.degrees(imu_yaw):.1f}° "
+                              f"prev={math.degrees(self._prev_imu_yaw):.1f}° "
+                              f"— skipping {self._jump_cooldown_scans} scans", flush=True)
 
-                    self.pose[2] = (self.pose[2] + math.pi) % (2 * math.pi) - math.pi
+                    self._prev_imu_yaw = imu_neg
 
-                self._debug_fused_theta = self.pose[2]
+            self._debug_fused_theta = self.pose[2]
 
             self.prev_points = local_points.copy()
 
-            # Transform points to world and update grid with sensor fusion
-            world_pts = self._world_points(local_points, self.pose)
-            if depth_lookup:
-                self._update_grid_fused(scan, world_pts, self.pose, depth_lookup)
-            else:
-                self._update_grid(world_pts, self.pose)
+            # Decrement jump cooldown
+            if self._jump_cooldown > 0:
+                self._jump_cooldown -= 1
+
+            # Transform points to world and update grid — SKIP during jump cooldown
+            if self._jump_cooldown <= 0:
+                world_pts = self._world_points(local_points, self.pose)
+                if depth_lookup:
+                    self._update_grid_fused(scan, world_pts, self.pose, depth_lookup)
+                else:
+                    self._update_grid(world_pts, self.pose)
+
+            # Landmark-based localization (if enabled)
+            if self.use_landmarks:
+                # Detect and store landmarks periodically
+                if self.scan_count % self._landmark_update_interval == 0:
+                    new_lm = self._detect_landmarks_from_scan(scan, self.pose)
+                    self._update_landmarks(new_lm)
+                    self._debug_landmark_count = len(self._landmarks)
+
+                # Correct position from landmarks every scan
+                if len(self._landmarks) >= 3:
+                    self.pose = self._correct_pose_from_landmarks(scan, self.pose)
 
             # Store pose history (every 5th scan to save memory)
             self.scan_count += 1
@@ -584,6 +620,176 @@ class SLAMEngine:
             return None
 
         return points[ordered]
+
+    # --- Landmark-based Localization ---
+
+    def _detect_landmarks_from_scan(self, scan, pose):
+        """Detect wall features from a single LiDAR scan.
+
+        Landmarks are stable wall features that can be re-detected from
+        different positions. Currently detects:
+        - Wall corners: sharp angle changes in scan distance
+        - Flat wall midpoints: stable distance readings over wide angle range
+
+        Returns list of (world_x, world_y, type, confidence)
+        """
+        if len(scan) < 50:
+            return []
+
+        # Sort scan by angle
+        sorted_scan = sorted(scan, key=lambda p: p["angle"])
+        angles = [p["angle"] for p in sorted_scan]
+        dists = [p["dist"] for p in sorted_scan]
+
+        landmarks = []
+        cos_t = math.cos(pose[2])
+        sin_t = math.sin(pose[2])
+
+        # --- Detect wall corners: large distance jump between adjacent points ---
+        for i in range(1, len(sorted_scan) - 1):
+            if dists[i] < 100 or dists[i] > 8000:
+                continue
+            if dists[i-1] < 100 or dists[i+1] < 100:
+                continue
+
+            # Check for distance discontinuity (corner)
+            jump_left = abs(dists[i] - dists[i-1])
+            jump_right = abs(dists[i] - dists[i+1])
+
+            # Corner: one side is much closer/farther than the other
+            if jump_left > 500 and jump_right < 200:
+                # Corner at this point (left side jumps)
+                rad = math.radians(angles[i])
+                lx = dists[i] * math.cos(rad)
+                ly = dists[i] * math.sin(rad)
+                wx = pose[0] + cos_t * lx - sin_t * ly
+                wy = pose[1] + sin_t * lx + cos_t * ly
+                landmarks.append((wx, wy, "corner", 0.8))
+            elif jump_right > 500 and jump_left < 200:
+                rad = math.radians(angles[i])
+                lx = dists[i] * math.cos(rad)
+                ly = dists[i] * math.sin(rad)
+                wx = pose[0] + cos_t * lx - sin_t * ly
+                wy = pose[1] + sin_t * lx + cos_t * ly
+                landmarks.append((wx, wy, "corner", 0.8))
+
+        # --- Detect flat wall midpoints: stable distance over 10+ degree range ---
+        window = 10  # points to check for flatness
+        for i in range(window, len(sorted_scan) - window):
+            if dists[i] < 200 or dists[i] > 5000:
+                continue
+            # Check if distance is stable across window
+            segment = dists[i-window:i+window]
+            if all(d > 100 for d in segment):
+                std = np.std(segment)
+                mean = np.mean(segment)
+                if std < 50 and mean > 200:  # flat wall: low std deviation
+                    # Use midpoint of the flat segment
+                    mid_angle = angles[i]
+                    rad = math.radians(mid_angle)
+                    lx = mean * math.cos(rad)
+                    ly = mean * math.sin(rad)
+                    wx = pose[0] + cos_t * lx - sin_t * ly
+                    wy = pose[1] + sin_t * lx + cos_t * ly
+                    landmarks.append((wx, wy, "flat_wall", 0.6))
+
+        # Deduplicate: merge landmarks within 200mm
+        if len(landmarks) < 2:
+            return landmarks
+        deduped = [landmarks[0]]
+        for lm in landmarks[1:]:
+            too_close = False
+            for existing in deduped:
+                if math.hypot(lm[0] - existing[0], lm[1] - existing[1]) < 200:
+                    too_close = True
+                    break
+            if not too_close:
+                deduped.append(lm)
+
+        return deduped
+
+    def _update_landmarks(self, new_landmarks):
+        """Merge newly detected landmarks with stored landmarks.
+
+        If a new landmark is near an existing one (<300mm), update the existing
+        position with a weighted average (existing landmarks have more weight).
+        Otherwise, add as a new landmark.
+        """
+        for nx, ny, ntype, nconf in new_landmarks:
+            matched = False
+            for i, (ex, ey, etype, econf) in enumerate(self._landmarks):
+                dist = math.hypot(nx - ex, ny - ey)
+                if dist < 300 and ntype == etype:
+                    # Weighted average: existing landmark is more trusted
+                    weight = min(econf + 0.1, 0.95)  # grow confidence
+                    self._landmarks[i] = (
+                        ex * weight + nx * (1 - weight),
+                        ey * weight + ny * (1 - weight),
+                        etype,
+                        weight
+                    )
+                    matched = True
+                    break
+            if not matched and len(self._landmarks) < 200:
+                self._landmarks.append((nx, ny, ntype, nconf))
+
+    def _correct_pose_from_landmarks(self, scan, pose):
+        """Re-detect landmarks from current scan and correct pose.
+
+        For each detected landmark, find the closest stored landmark.
+        If multiple matches found, compute average correction vector.
+        Only apply if correction is small (<100mm) — large corrections
+        indicate a bad match.
+
+        Returns corrected pose.
+        """
+        if not self._landmarks or len(self._landmarks) < 3:
+            return pose
+
+        new_landmarks = self._detect_landmarks_from_scan(scan, pose)
+        if len(new_landmarks) < 2:
+            return pose
+
+        # Find matches between new and stored landmarks
+        corrections_x = []
+        corrections_y = []
+        for nx, ny, ntype, nconf in new_landmarks:
+            best_dist = 500  # max match distance
+            best_stored = None
+            for ex, ey, etype, econf in self._landmarks:
+                if etype != ntype:
+                    continue
+                if econf < 0.5:
+                    continue  # only use confident landmarks
+                dist = math.hypot(nx - ex, ny - ey)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_stored = (ex, ey)
+
+            if best_stored is not None:
+                # Correction: stored position - detected position
+                corrections_x.append(best_stored[0] - nx)
+                corrections_y.append(best_stored[1] - ny)
+
+        if len(corrections_x) < 2:
+            return pose  # need at least 2 matches for reliable correction
+
+        # Average correction
+        dx = np.median(corrections_x)
+        dy = np.median(corrections_y)
+        correction = math.hypot(dx, dy)
+
+        self._debug_landmark_correction = (round(dx), round(dy))
+
+        # Only apply small corrections (<100mm)
+        if correction < 100:
+            corrected = pose.copy()
+            corrected[0] += dx
+            corrected[1] += dy
+            self._debug_landmark_count = len(self._landmarks)
+            return corrected
+
+        return pose
 
     def _check_loop_closure(self, current_points):
         """Simple loop closure: when near a previously visited pose, correct drift.
@@ -920,6 +1126,12 @@ class SLAMEngine:
             "icp_quality": round(self._debug_icp_quality, 3),
             "fused_heading": round(math.degrees(self._debug_fused_theta), 1),
             "pose_heading": round(math.degrees(self.pose[2]), 1),
+            "landmarks": self._debug_landmark_count,
+            "landmark_correction": self._debug_landmark_correction,
+            "use_landmarks": self.use_landmarks,
+            "jump_count": self._jump_count,
+            "jump_active": self._debug_jump_active,
+            "jump_cooldown": self._jump_cooldown,
         }
 
     def get_pose(self):
@@ -943,6 +1155,7 @@ class SLAMEngine:
             self.scan_count = 0
             self._scan_store.clear()
             self._loop_closure_count = 0
-            self._imu_yaw_offset = None
+            self._prev_imu_yaw = None
+            self._imu_offset = 0.0
             self._wall_lines = []
             self._wall_lines_scan = -1

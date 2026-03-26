@@ -104,6 +104,7 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
             <label class="sp-check"><input type="checkbox" id="ov-traj" checked onchange="needsRedraw=true">Trajectory</label>
             <label class="sp-check"><input type="checkbox" id="ov-walls" checked onchange="needsRedraw=true">Wall Lines</label>
             <label class="sp-check"><input type="checkbox" id="ov-robot" checked onchange="needsRedraw=true">Robot Position</label>
+            <label class="sp-check"><input type="checkbox" id="ov-landmarks" checked onchange="needsRedraw=true"><span style="color:#f0f;">Landmarks</span></label>
         </div>
         <div class="sp-section">
             <div class="sp-title">Cell Inspector</div>
@@ -407,15 +408,19 @@ function draw() {
         drawWallLinesView();
     }
     if (appMode === 'offline' && selectedRecEntry) {
-        // Offline: show trajectory up to selected frame + that frame's scan only
+        // Offline: show trajectory up to selected frame + that frame's scan + landmarks
         if (document.getElementById('ov-traj').checked) drawOfflineTrajectory();
         drawRecScanOnMap(selectedRecEntry);
+        if (document.getElementById('ov-landmarks').checked) drawLandmarks(selectedRecEntry);
     } else {
         // Live: show everything
         if (document.getElementById('ov-traj').checked) drawTrajectory();
         if (document.getElementById('ov-walls').checked && viewMode === 'raw') drawWallLines();
         if (document.getElementById('ov-robot').checked) drawRobot();
-        if (selectedRecEntry) drawRecScanOnMap(selectedRecEntry);
+        if (selectedRecEntry) {
+            drawRecScanOnMap(selectedRecEntry);
+            if (document.getElementById('ov-landmarks').checked) drawLandmarks(selectedRecEntry);
+        }
     }
 
     ctx.restore();
@@ -615,6 +620,55 @@ function drawRecScanOnMap(entry) {
     ctx.font = (10 / zoom) + 'px monospace';
     ctx.textAlign = 'left';
     ctx.fillText('T+' + entry.t + 's  ' + entry.scan.length + 'pts', px + markerSize * 2, py - markerSize);
+}
+
+// ============================================================
+// Draw landmarks on map (for offline playback)
+// ============================================================
+function drawLandmarks(entry) {
+    if (!entry.landmarks || !entry.landmarks.landmarks) return;
+    const landmarks = entry.landmarks.landmarks;
+    if (landmarks.length === 0) return;
+
+    const markerSize = 6 / zoom;
+    for (const [wx, wy, type, conf] of landmarks) {
+        const gx = wx / CELL;
+        const gy = wy / CELL;
+
+        if (type === 'corner') {
+            // Draw diamond for corners
+            ctx.fillStyle = conf >= 0.8 ? 'rgba(255, 0, 255, 0.8)' : 'rgba(255, 0, 255, 0.4)';
+            ctx.beginPath();
+            ctx.moveTo(gx, gy - markerSize);
+            ctx.lineTo(gx + markerSize, gy);
+            ctx.lineTo(gx, gy + markerSize);
+            ctx.lineTo(gx - markerSize, gy);
+            ctx.closePath();
+            ctx.fill();
+        } else if (type === 'flat_wall') {
+            // Draw square for flat walls
+            ctx.fillStyle = conf >= 0.8 ? 'rgba(0, 255, 255, 0.8)' : 'rgba(0, 255, 255, 0.4)';
+            ctx.fillRect(gx - markerSize, gy - markerSize, markerSize * 2, markerSize * 2);
+        }
+
+        // Confidence label
+        if (zoom > 2) {
+            ctx.fillStyle = '#fff';
+            ctx.font = (8 / zoom) + 'px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(conf.toFixed(2), gx, gy - markerSize - 2/zoom);
+        }
+    }
+
+    // Show correction info
+    const corr = entry.landmarks.correction;
+    const count = entry.landmarks.count;
+    ctx.fillStyle = '#f0f';
+    ctx.font = (11 / zoom) + 'px monospace';
+    ctx.textAlign = 'left';
+    const px = entry.pose[0] / CELL;
+    const py = entry.pose[1] / CELL;
+    ctx.fillText('LM:' + count + ' corr:(' + corr[0] + ',' + corr[1] + ')', px + 15/zoom, py + 15/zoom);
 }
 
 // ============================================================
@@ -851,6 +905,13 @@ setInterval(() => {
         fetchWallLines();
     }
 }, 3000);
+
+// Auto-refresh grid every 10 seconds in live mode
+setInterval(() => {
+    if (appMode === 'live') {
+        fetchGrid();
+    }
+}, 10000);
 
 // ============================================================
 // Init

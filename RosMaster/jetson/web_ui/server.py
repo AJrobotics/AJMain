@@ -120,13 +120,29 @@ class ExploreRecorder:
             sectors = collision.get_sector_distances() if collision else [9999]*8
             scan_count = slam.scan_count
 
+            # Get landmark info
+            landmark_info = None
+            if slam.use_landmarks:
+                landmark_info = {
+                    "count": len(slam._landmarks),
+                    "correction": slam._debug_landmark_correction,
+                    "landmarks": [(round(x), round(y), t, round(c, 2))
+                                  for x, y, t, c in slam._landmarks[:30]],
+                }
+
+            # Get raw IMU yaw for debugging
+            imu_debug = slam.get_heading_debug()
+
             self.pose_log.append({
                 "t": round(elapsed, 1),
                 "pose": [round(pose[0]), round(pose[1]), round(math.degrees(pose[2]))],
+                "imu_yaw": imu_debug.get("imu_yaw", 0),
+                "icp_quality": imu_debug.get("icp_quality", 0),
                 "sectors": [round(s) for s in sectors],
                 "scan": scan_compact,  # full 360° LiDAR data
                 "scan_count": scan_count,
                 "frame": self.frame_idx,
+                "landmarks": landmark_info,
             })
             self.frame_idx += 1
         except Exception as e:
@@ -185,6 +201,15 @@ class IndexHandler(tornado.web.RequestHandler):
 
 
 class CollisionConfigHandler(tornado.web.RequestHandler):
+    def get(self):
+        self.write(json.dumps({
+            "stop": collision.stop_dist,
+            "slow": collision.slow_dist,
+            "caution": collision.caution_dist,
+            "ignore_angle": collision.ignore_angle,
+            "enabled": collision.enabled,
+        }))
+
     def post(self):
         try:
             data = json.loads(self.request.body)
@@ -193,7 +218,15 @@ class CollisionConfigHandler(tornado.web.RequestHandler):
                 collision.ignore_angle = val
             if "enabled" in data:
                 collision.enabled = bool(data["enabled"])
-            self.write(json.dumps({"ok": True, "ignore_angle": collision.ignore_angle, "enabled": collision.enabled}))
+            if "stop" in data:
+                collision.stop_dist = max(100, min(1000, int(data["stop"])))
+            if "slow" in data:
+                collision.slow_dist = max(200, min(1500, int(data["slow"])))
+            if "caution" in data:
+                collision.caution_dist = max(300, min(2000, int(data["caution"])))
+            self.write(json.dumps({"ok": True, "stop": collision.stop_dist,
+                                   "slow": collision.slow_dist, "caution": collision.caution_dist,
+                                   "ignore_angle": collision.ignore_angle, "enabled": collision.enabled}))
         except Exception as e:
             self.write(json.dumps({"ok": False, "error": str(e)}))
 
@@ -346,10 +379,25 @@ class ExplorerHandler(tornado.web.RequestHandler):
             data = json.loads(self.request.body)
             action = data.get("action", "")
             if action == "start":
-                result = explorer.start_exploration()
+                time_limit = int(data.get("time_limit", 300))
+                result = explorer.start_exploration(time_limit=time_limit)
                 _start_recording()
             elif action == "return_home":
                 result = explorer.return_home()
+            elif action == "floor_plan":
+                time_limit = int(data.get("time_limit", 300))
+                result = explorer.start_floor_plan(time_limit=time_limit)
+                _start_recording()
+            elif action == "wall_follow":
+                time_limit = int(data.get("time_limit", 300))
+                direction = data.get("direction", "right")
+                wall_dist = int(data.get("wall_dist", 500))
+                result = explorer.start_wall_follow(time_limit=time_limit, direction=direction, wall_dist=wall_dist)
+                _start_recording()
+            elif action == "spiral":
+                time_limit = int(data.get("time_limit", 300))
+                result = explorer.start_spiral(time_limit=time_limit)
+                _start_recording()
             elif action == "scan_test":
                 result = explorer.start_scan_test()
                 _start_recording()
@@ -369,6 +417,61 @@ class ExplorerHandler(tornado.web.RequestHandler):
             self.write(json.dumps(result))
         except Exception as e:
             self.write(json.dumps({"ok": False, "error": str(e)}))
+
+
+class SlamParamsHandler(tornado.web.RequestHandler):
+    def get(self):
+        self.write(json.dumps({
+            "icp_trans_cap": slam.icp_trans_cap,
+            "icp_min_quality": slam.icp_min_quality,
+        }))
+
+    def post(self):
+        data = json.loads(self.request.body)
+        if "icp_trans_cap" in data:
+            slam.icp_trans_cap = max(0, min(200, int(data["icp_trans_cap"])))
+        if "icp_min_quality" in data:
+            slam.icp_min_quality = max(0, min(1.0, float(data["icp_min_quality"])))
+        self.write(json.dumps({"ok": True, "icp_trans_cap": slam.icp_trans_cap,
+                               "icp_min_quality": slam.icp_min_quality}))
+
+
+class LandmarkHandler(tornado.web.RequestHandler):
+    def get(self):
+        """Get landmark status."""
+        self.write(json.dumps({
+            "use_landmarks": slam.use_landmarks,
+            "count": len(slam._landmarks),
+            "correction": slam._debug_landmark_correction,
+            "landmarks": [(round(x), round(y), t, round(c, 2))
+                          for x, y, t, c in slam._landmarks[:50]],
+        }))
+
+    def post(self):
+        """Toggle landmark localization."""
+        data = json.loads(self.request.body)
+        enabled = data.get("enabled", None)
+        if enabled is not None:
+            slam.use_landmarks = bool(enabled)
+            if enabled:
+                print(f"Landmark localization enabled ({len(slam._landmarks)} landmarks)", flush=True)
+            else:
+                print("Landmark localization disabled", flush=True)
+        if data.get("clear", False):
+            slam._landmarks.clear()
+            slam._debug_landmark_count = 0
+            print("Landmarks cleared", flush=True)
+        self.write(json.dumps({"ok": True, "use_landmarks": slam.use_landmarks,
+                               "count": len(slam._landmarks)}))
+
+
+class ShutdownHandler(tornado.web.RequestHandler):
+    def post(self):
+        """Shutdown the Jetson."""
+        import subprocess
+        self.write(json.dumps({"ok": True, "msg": "Shutting down..."}))
+        self.flush()
+        subprocess.Popen(["sudo", "shutdown", "-h", "now"])
 
 
 class SlamDataHandler(tornado.web.RequestHandler):
@@ -638,7 +741,7 @@ def _tick_recording():
     if _recorder:
         _recorder.add_frame()
         # Auto-stop recording when explorer/scan test finishes
-        if explorer.state in ("idle", "stopped") and _recorder.frame_idx > 5:
+        if explorer.state in ("idle", "stopped", "arrived") and _recorder.frame_idx > 5:
             _stop_recording()
 
 
@@ -916,6 +1019,9 @@ def make_app():
         (r"/api/calibration", CalibrationHandler),
         (r"/api/explorer", ExplorerHandler),
         (r"/api/slam_data", SlamDataHandler),
+        (r"/api/slam_params", SlamParamsHandler),
+        (r"/api/landmarks", LandmarkHandler),
+        (r"/api/shutdown", ShutdownHandler),
         (r"/ws/slam", SlamWSHandler),
         (r"/ws/status", StatusWSHandler),
         (r"/ws/debug", DebugWSHandler),

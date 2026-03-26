@@ -39,13 +39,15 @@ class Explorer:
         self.explore_speed = EXPLORE_SPEED  # can be changed live via API
         self.ignore_angle = ignore_angle
 
-        self.state = "idle"  # idle, exploring, returning, arrived, stopped
+        self.state = "idle"  # idle, exploring, scanning, returning, arrived, stopped
         self.target = None   # (x_mm, y_mm) current target
         self.path = []       # list of (x_mm, y_mm) waypoints
         self.frontiers = []  # frontier cells for UI display
         self._abort = False
         self._thread = None
         self.lock = threading.Lock()
+        self._blocked_zones = []  # list of (angle_rad, expire_time)
+        self.time_limit = 300     # seconds (default 5 minutes, 0 = no limit)
 
     def _move_filtered(self, vx, vy, vz):
         """Move with collision avoidance."""
@@ -181,7 +183,7 @@ class Explorer:
     def _navigate_to(self, target_x, target_y):
         """Navigate to a target position using simple heading control."""
         turn_steps = 0  # count consecutive turn steps to detect spinning
-        MAX_TURN_STEPS = 60  # ~12 seconds at 5 Hz — enough for full 180° turn
+        MAX_TURN_STEPS = 30  # ~6 seconds at 5 Hz
         while not self._abort:
             pose = self._get_pose()
             dx = target_x - pose[0]
@@ -219,8 +221,15 @@ class Explorer:
                 sectors = self.collision.get_sector_distances() if self.collision else [9999]*8
                 _log.debug(f"FWD vx={vx:.3f}→{actual_vx:.3f} dist={dist:.0f}mm min_sec={min(sectors):.0f}mm")
                 if actual_vx == 0 and vx > 0:
-                    # Blocked by collision — skip this target
+                    # Blocked by collision — back up then skip
                     _log.warning(f"Collision blocked path to ({target_x:.0f}, {target_y:.0f}), sectors={[round(s) for s in sectors]}")
+                    _log.info("Backing up 100mm...")
+                    for _ in range(10):  # 10 steps at 5Hz = 2 seconds
+                        if self._abort:
+                            break
+                        self._move_filtered(-0.05, 0, 0)
+                        time.sleep(1.0 / EXPLORE_UPDATE_HZ)
+                    self._stop_motors()
                     return False
 
             time.sleep(1.0 / EXPLORE_UPDATE_HZ)
@@ -239,40 +248,101 @@ class Explorer:
         time.sleep(0.5)
         _log.info("Initial scan complete")
 
+    def _is_blocked_direction(self, target_x, target_y):
+        """Check if direction to target is in a blocked zone."""
+        now = time.time()
+        pose = self._get_pose()
+        target_angle = math.atan2(target_y - pose[1], target_x - pose[0])
+
+        # Clean expired blocked zones
+        self._blocked_zones = [(a, t) for a, t in self._blocked_zones if t > now]
+
+        for blocked_angle, expire in self._blocked_zones:
+            diff = abs(target_angle - blocked_angle)
+            if diff > math.pi:
+                diff = 2 * math.pi - diff
+            if diff < math.radians(30):  # within ±30° of blocked direction
+                return True
+        return False
+
+    def _block_direction(self, target_x, target_y):
+        """Block the direction to a failed target for 30 seconds."""
+        pose = self._get_pose()
+        angle = math.atan2(target_y - pose[1], target_x - pose[0])
+        self._blocked_zones.append((angle, time.time() + 30))
+        _log.info(f"Blocked direction {math.degrees(angle):.0f}° for 30s")
+
     def _explore_loop(self):
-        """Main exploration loop."""
+        """Main exploration loop with blocked zones, time limit, and periodic re-scan."""
         try:
+            explore_start = time.time()
+            last_rescan = time.time()
+            consecutive_failures = 0
+
             # Do initial slow scan to build map from both sensors
             self._initial_scan()
 
             while not self._abort and self.state == "exploring":
+                # Check time limit
+                if self.time_limit > 0 and (time.time() - explore_start) > self.time_limit:
+                    self._stop_motors()
+                    self.state = "arrived"
+                    elapsed = time.time() - explore_start
+                    _log.info(f"Time limit reached ({elapsed:.0f}s). Exploration complete.")
+                    return
+
+                # Periodic re-scan every 60 seconds
+                if time.time() - last_rescan > 60:
+                    _log.info("Periodic re-scan...")
+                    self._rotate_by(360, speed=0.3)
+                    last_rescan = time.time()
+
                 # Find frontiers
                 t0 = time.time()
                 raw_frontiers = self._find_frontiers()
                 with self.lock:
-                    self.frontiers = raw_frontiers[:100]  # limit for UI
+                    self.frontiers = raw_frontiers[:100]
 
                 clusters = self._cluster_frontiers(raw_frontiers)
                 _log.info(f"Frontiers: {len(raw_frontiers)} raw, {len(clusters)} clusters ({time.time()-t0:.2f}s)")
 
                 if not clusters:
-                    # No more frontiers — exploration complete
                     self._stop_motors()
                     self.state = "arrived"
                     _log.info("Exploration complete — no more frontiers")
                     return
 
-                # Navigate to nearest frontier cluster center
-                target_x, target_y, size = clusters[0]
-                with self.lock:
-                    self.target = (target_x, target_y)
+                # Try up to 3 clusters, skip blocked directions
+                navigated = False
+                for cluster_idx, (target_x, target_y, size) in enumerate(clusters[:5]):
+                    if self._is_blocked_direction(target_x, target_y):
+                        _log.debug(f"Skipping blocked cluster ({target_x:.0f},{target_y:.0f})")
+                        continue
 
-                pose = self._get_pose()
-                _log.info(f"Navigate to ({target_x:.0f},{target_y:.0f}) size={size} from pose=({pose[0]:.0f},{pose[1]:.0f},{math.degrees(pose[2]):.0f}°)")
-                reached = self._navigate_to(target_x, target_y)
+                    with self.lock:
+                        self.target = (target_x, target_y)
 
-                if not reached:
-                    # Couldn't reach — try next frontier
+                    pose = self._get_pose()
+                    _log.info(f"Navigate to ({target_x:.0f},{target_y:.0f}) size={size} [#{cluster_idx}] from pose=({pose[0]:.0f},{pose[1]:.0f},{math.degrees(pose[2]):.0f}°)")
+                    reached = self._navigate_to(target_x, target_y)
+
+                    if reached:
+                        consecutive_failures = 0
+                        navigated = True
+                        break
+                    else:
+                        # Block this direction
+                        self._block_direction(target_x, target_y)
+                        consecutive_failures += 1
+
+                if not navigated:
+                    # All clusters blocked — do a re-scan to find new paths
+                    if consecutive_failures >= 5:
+                        _log.info(f"All directions blocked ({consecutive_failures} failures). Re-scanning...")
+                        self._blocked_zones.clear()
+                        self._rotate_by(360, speed=0.3)
+                        last_rescan = time.time()
+                        consecutive_failures = 0
                     time.sleep(0.5)
                     continue
 
@@ -321,13 +391,17 @@ class Explorer:
             self._stop_motors()
             self.state = "stopped"
 
-    def start_exploration(self):
+    def start_exploration(self, time_limit=None):
         if self.state == "exploring" or self.state == "returning":
             return {"error": "Already running"}
+        if time_limit is not None:
+            self.time_limit = time_limit
         self._abort = False
+        self._blocked_zones.clear()
         self.state = "exploring"
         self._thread = threading.Thread(target=self._explore_loop, daemon=True)
         self._thread.start()
+        _log.info(f"Exploration started (time_limit={self.time_limit}s)")
         return {"ok": True}
 
     def return_home(self):
@@ -340,6 +414,290 @@ class Explorer:
         self._thread = threading.Thread(target=self._return_loop, daemon=True)
         self._thread.start()
         return {"ok": True}
+
+    def start_floor_plan(self, time_limit=None):
+        """Random walk with collision avoidance to fill wall gaps."""
+        if self.state not in ("idle", "stopped"):
+            return {"error": f"Explorer busy: {self.state}"}
+        if time_limit is not None:
+            self.time_limit = time_limit
+        self._abort = False
+        self.state = "exploring"
+        self._thread = threading.Thread(target=self._floor_plan_loop, daemon=True)
+        self._thread.start()
+        _log.info(f"Floor plan started (time_limit={self.time_limit}s)")
+        return {"ok": True}
+
+    def _floor_plan_loop(self):
+        """Random walk: move forward, turn on collision, repeat."""
+        import random
+        try:
+            explore_start = time.time()
+
+            # Initial scan
+            self._initial_scan()
+
+            while not self._abort and self.state == "exploring":
+                # Check time limit
+                if self.time_limit > 0 and (time.time() - explore_start) > self.time_limit:
+                    self._stop_motors()
+                    self.state = "arrived"
+                    _log.info(f"Floor plan time limit reached ({time.time() - explore_start:.0f}s)")
+                    return
+
+                # Move forward until collision
+                blocked = False
+                fwd_start = time.time()
+                while not self._abort and not blocked:
+                    if self.time_limit > 0 and (time.time() - explore_start) > self.time_limit:
+                        break
+                    vx = self.explore_speed
+                    actual_vx, _, _ = self._move_filtered(vx, 0, 0)
+                    if actual_vx == 0:
+                        blocked = True
+                        _log.info(f"Blocked after {time.time() - fwd_start:.1f}s forward")
+                    time.sleep(1.0 / EXPLORE_UPDATE_HZ)
+
+                if self._abort:
+                    break
+
+                self._stop_motors()
+
+                # Back up a little
+                _log.debug("Backing up...")
+                for _ in range(5):
+                    if self._abort:
+                        break
+                    self._move_filtered(-0.04, 0, 0)
+                    time.sleep(1.0 / EXPLORE_UPDATE_HZ)
+                self._stop_motors()
+
+                # Turn random angle (90-270 degrees, random direction)
+                turn_deg = random.randint(90, 270)
+                if random.random() < 0.5:
+                    turn_deg = -turn_deg
+                _log.info(f"Turning {turn_deg}°")
+                self._rotate_by(turn_deg, speed=0.3)
+
+                # Check if forward is clear after turning
+                if self.collision:
+                    self.collision.update_sectors()
+                    sectors = self.collision.get_sector_distances()
+                    front_min = min(sectors[0], sectors[7], sectors[1])
+                    if front_min < 500:
+                        # Still blocked — try another direction
+                        _log.debug(f"Still blocked after turn (front={front_min}mm), turning more")
+                        self._rotate_by(random.choice([-90, 90, 180]), speed=0.3)
+
+                time.sleep(0.3)
+
+            _log.info("Floor plan complete")
+        except Exception as e:
+            _log.error(f"Floor plan error: {e}", exc_info=True)
+        finally:
+            self._stop_motors()
+            if self.state == "exploring":
+                self.state = "idle"
+
+    def start_wall_follow(self, time_limit=None, direction="right", wall_dist=500):
+        """Wall-following exploration: follow walls to trace room perimeter."""
+        if self.state not in ("idle", "stopped"):
+            return {"error": f"Explorer busy: {self.state}"}
+        if time_limit is not None:
+            self.time_limit = time_limit
+        self._wall_follow_dir = direction  # "right" or "left"
+        self._wall_follow_dist = wall_dist
+        self._abort = False
+        self.state = "exploring"
+        self._thread = threading.Thread(target=self._wall_follow_loop, daemon=True)
+        self._thread.start()
+        _log.info(f"Wall follow started (dir={direction}, dist={wall_dist}mm, time_limit={self.time_limit}s)")
+        return {"ok": True}
+
+    def _wall_follow_loop(self):
+        """Follow walls: keep wall on one side at target distance."""
+        try:
+            explore_start = time.time()
+            target_wall_dist = getattr(self, '_wall_follow_dist', 500)
+            wall_tolerance = 150    # mm — acceptable range ±
+
+            # Initial scan
+            self._initial_scan()
+
+            # Find the nearest wall and orient toward it
+            _log.info("Finding nearest wall...")
+            if self.collision:
+                self.collision.update_sectors()
+                sectors = self.collision.get_sector_distances()
+                # Find sector with closest wall (excluding rear ignore)
+                min_idx = min(range(8), key=lambda i: sectors[i])
+                # Turn to face the wall
+                target_angle = min_idx * 45  # sector center angle
+                _log.info(f"Nearest wall in sector {min_idx} ({target_angle}°) at {sectors[min_idx]}mm")
+                self._rotate_by(target_angle, speed=0.3)
+                # Now turn 90° so wall is on the chosen side
+                if self._wall_follow_dir == "right":
+                    self._rotate_by(-90, speed=0.3)
+                else:
+                    self._rotate_by(90, speed=0.3)
+
+            while not self._abort and self.state == "exploring":
+                # Check time limit
+                if self.time_limit > 0 and (time.time() - explore_start) > self.time_limit:
+                    self._stop_motors()
+                    self.state = "arrived"
+                    _log.info(f"Wall follow time limit reached ({time.time() - explore_start:.0f}s)")
+                    return
+
+                if not self.collision:
+                    time.sleep(0.2)
+                    continue
+
+                self.collision.update_sectors()
+                sectors = self.collision.get_sector_distances()
+
+                # Wall sensor: sector to the right (sector 2) or left (sector 6)
+                if self._wall_follow_dir == "right":
+                    wall_dist = sectors[2]  # right side
+                    wall_front_dist = sectors[1]  # right-front
+                else:
+                    wall_dist = sectors[6]  # left side
+                    wall_front_dist = sectors[7]  # left-front
+
+                front_dist = sectors[0]
+
+                # Steering logic — use lateral strafe (mecanum) instead of turning
+                vx = self.explore_speed
+                vy = 0
+                vz = 0
+
+                if front_dist < 500:
+                    # Wall ahead — stop and turn 90° away from wall side
+                    self._stop_motors()
+                    _log.info(f"Corner: wall ahead ({front_dist}mm), turning 90°")
+                    if self._wall_follow_dir == "right":
+                        self._rotate_by(90, speed=0.3)  # turn left
+                    else:
+                        self._rotate_by(-90, speed=0.3)  # turn right
+                    continue
+                elif wall_dist > 1500:
+                    # Lost wall — inside corner, turn 90° toward wall to follow it
+                    self._stop_motors()
+                    _log.info(f"Inside corner: lost wall ({wall_dist}mm), turning 90° toward wall")
+                    if self._wall_follow_dir == "right":
+                        self._rotate_by(-90, speed=0.3)  # turn right toward wall
+                    else:
+                        self._rotate_by(90, speed=0.3)  # turn left toward wall
+                    continue
+                elif wall_dist < target_wall_dist - wall_tolerance:
+                    # Too close to wall — strafe away (no turning)
+                    if self._wall_follow_dir == "right":
+                        vy = -0.05  # strafe left (away from right wall)
+                    else:
+                        vy = 0.05   # strafe right (away from left wall)
+                    _log.debug(f"Too close ({wall_dist}mm), strafing away")
+                elif wall_dist > target_wall_dist + wall_tolerance:
+                    # Too far from wall — strafe toward (no turning)
+                    if self._wall_follow_dir == "right":
+                        vy = 0.05   # strafe right (toward right wall)
+                    else:
+                        vy = -0.05  # strafe left (toward left wall)
+                    _log.debug(f"Too far ({wall_dist}mm), strafing toward")
+
+                actual_vx, _, _ = self._move_filtered(vx, vy, vz)
+                if actual_vx == 0 and vx > 0:
+                    # Collision — turn 90° away from wall side
+                    _log.info("Collision during wall follow, turning away")
+                    if self._wall_follow_dir == "right":
+                        self._rotate_by(90, speed=0.3)
+                    else:
+                        self._rotate_by(-90, speed=0.3)
+
+                time.sleep(1.0 / EXPLORE_UPDATE_HZ)
+
+        except Exception as e:
+            _log.error(f"Wall follow error: {e}", exc_info=True)
+        finally:
+            self._stop_motors()
+            if self.state == "exploring":
+                self.state = "idle"
+
+    def start_spiral(self, time_limit=None):
+        """Spiral outward exploration from current position."""
+        if self.state not in ("idle", "stopped"):
+            return {"error": f"Explorer busy: {self.state}"}
+        if time_limit is not None:
+            self.time_limit = time_limit
+        self._abort = False
+        self.state = "exploring"
+        self._thread = threading.Thread(target=self._spiral_loop, daemon=True)
+        self._thread.start()
+        _log.info(f"Spiral started (time_limit={self.time_limit}s)")
+        return {"ok": True}
+
+    def _spiral_loop(self):
+        """Spiral outward: move forward increasing distance, turn 90° right, repeat."""
+        try:
+            explore_start = time.time()
+
+            # Initial scan
+            self._initial_scan()
+
+            leg_distance = 500   # mm — start with short legs
+            leg_increment = 250  # mm — increase each pair of legs
+            leg_count = 0
+
+            while not self._abort and self.state == "exploring":
+                # Check time limit
+                if self.time_limit > 0 and (time.time() - explore_start) > self.time_limit:
+                    self._stop_motors()
+                    self.state = "arrived"
+                    _log.info(f"Spiral time limit reached ({time.time() - explore_start:.0f}s)")
+                    return
+
+                # Move forward for current leg distance
+                target_dist = leg_distance
+                moved = 0
+                _log.info(f"Spiral leg {leg_count + 1}: {target_dist}mm forward")
+
+                while moved < target_dist and not self._abort:
+                    if self.time_limit > 0 and (time.time() - explore_start) > self.time_limit:
+                        break
+                    vx = self.explore_speed
+                    actual_vx, _, _ = self._move_filtered(vx, 0, 0)
+                    if actual_vx == 0:
+                        _log.info(f"Spiral blocked at {moved:.0f}mm of {target_dist}mm")
+                        # Back up and turn
+                        for _ in range(5):
+                            if self._abort: break
+                            self._move_filtered(-0.04, 0, 0)
+                            time.sleep(1.0 / EXPLORE_UPDATE_HZ)
+                        self._stop_motors()
+                        break
+                    moved += actual_vx * (1.0 / EXPLORE_UPDATE_HZ) * 1000  # convert to mm
+                    time.sleep(1.0 / EXPLORE_UPDATE_HZ)
+
+                self._stop_motors()
+                if self._abort:
+                    break
+
+                # Turn 90° right
+                self._rotate_by(-90, speed=0.3)
+                time.sleep(0.3)
+
+                leg_count += 1
+                # Increase distance every 2 legs (completing one side of spiral)
+                if leg_count % 2 == 0:
+                    leg_distance += leg_increment
+                    _log.info(f"Spiral leg distance increased to {leg_distance}mm")
+
+            _log.info("Spiral complete")
+        except Exception as e:
+            _log.error(f"Spiral error: {e}", exc_info=True)
+        finally:
+            self._stop_motors()
+            if self.state == "exploring":
+                self.state = "idle"
 
     def start_scan_test(self):
         """Stationary 360° scan test: 2 CW + 2 CCW rotations for mapping debug."""

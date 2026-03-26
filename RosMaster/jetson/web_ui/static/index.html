@@ -174,7 +174,24 @@
                 style="width:50px;background:#0a0a1a;color:#ff6600;border:1px solid #333;padding:2px 4px;font-size:12px;text-align:right;" />
             <span style="font-size:11px;color:#888;">&deg;</span>
         </div>
-        <div id="controls-status" style="font-size:11px;color:#888;margin-left:auto;"></div>
+        <div style="display:flex;align-items:center;gap:4px;">
+            <span style="color:#aaa;font-size:11px;">ICP cap</span>
+            <input type="number" id="icp-cap" value="50" min="0" max="200" step="10" style="width:35px;background:#0a0a1a;color:#0f8;border:1px solid #333;padding:1px 3px;font-size:11px;text-align:right;" onchange="setSlamParams()">
+            <span style="color:#888;font-size:10px;">mm</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;">
+            <span style="color:#aaa;font-size:11px;">ICP qual</span>
+            <input type="number" id="icp-qual" value="0.3" min="0" max="1" step="0.1" style="width:35px;background:#0a0a1a;color:#0f8;border:1px solid #333;padding:1px 3px;font-size:11px;text-align:right;" onchange="setSlamParams()">
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;">
+            <input type="checkbox" id="landmark-checkbox" onchange="toggleLandmarks(this.checked)" />
+            <span style="color:#ffcc00;font-size:11px;">Landmarks</span>
+            <span id="landmark-count" style="color:#888;font-size:10px;"></span>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+            <div id="controls-status" style="font-size:11px;color:#888;"></div>
+            <button onclick="shutdownRobot()" style="background:#661111;color:#ff4444;border:1px solid #ff4444;padding:2px 8px;font-size:11px;cursor:pointer;">Shutdown</button>
+        </div>
     </div>
 
     <div id="timing-bar" style="background:#0a0e1a;padding:3px 16px;display:flex;gap:18px;font-size:11px;color:#888;border-bottom:1px solid #0f3460;">
@@ -183,6 +200,7 @@
         <span>Collision: <b id="tb-collision-us" style="color:#0f8">-</b>us</span>
         <span>Level: <b id="tb-level" style="color:#0f8">-</b></span>
         <span>Sectors: <b id="tb-sectors" style="color:#0df">-</b></span>
+        <span id="tb-jump" style="display:none;color:#ff4444;font-weight:bold;">⚠ JUMP</span>
     </div>
 
     <div id="main">
@@ -219,8 +237,14 @@
                     <div class="panel-row"><span class="panel-label">Frontiers</span><span class="panel-value" id="explorer-frontiers">0</span></div>
                     <div class="panel-row"><span class="panel-label">Recording</span><span class="panel-value" id="explorer-recording" style="font-size:10px;color:#f80;">-</span></div>
                     <div class="panel-row"><span class="panel-label">Speed</span><span class="panel-value"><input type="range" id="explore-speed" min="20" max="150" value="80" step="10" style="width:80px;vertical-align:middle;" oninput="setExploreSpeed(this.value)"><span id="explore-speed-val" style="margin-left:4px;">0.08</span> m/s</span></div>
+                    <div class="panel-row"><span class="panel-label">Time</span><span class="panel-value"><input type="number" id="explore-time" value="300" min="60" max="1800" step="60" style="width:50px;background:#0a0a1a;color:#0df;border:1px solid #333;padding:2px;font-size:11px;text-align:right;">s</span></div>
+                    <div class="panel-row"><span class="panel-label">Wall Dist</span><span class="panel-value"><input type="number" id="wall-dist" value="150" min="50" max="1000" step="50" style="width:50px;background:#0a0a1a;color:#ff0;border:1px solid #333;padding:2px;font-size:11px;text-align:right;">mm</span></div>
                     <div style="display:flex;gap:3px;margin-top:6px;flex-wrap:wrap;">
                         <button class="cal-btn cal-run" onclick="explorerCmd('start')">Explore</button>
+                        <button class="cal-btn" onclick="explorerCmd('floor_plan')" style="background:#1a1a3a;color:#f80;">Random</button>
+                        <button class="cal-btn" onclick="explorerCmd('wall_follow')" style="background:#1a1a3a;color:#ff0;">Wall-R</button>
+                        <button class="cal-btn" onclick="explorerCmd('wall_follow_left')" style="background:#1a1a3a;color:#ff0;">Wall-L</button>
+                        <button class="cal-btn" onclick="explorerCmd('spiral')" style="background:#1a1a3a;color:#0f8;">Spiral</button>
                         <button class="cal-btn" onclick="explorerCmd('scan_test')" style="background:#1a3a3a;color:#0df;">Scan</button>
                         <button class="cal-btn" onclick="explorerCmd('return_home')">Return</button>
                         <button class="cal-btn cal-abort" onclick="explorerCmd('stop')">Stop</button>
@@ -278,13 +302,15 @@
                     <span class="panel-label">Enabled</span>
                     <span class="panel-value" id="collision-enabled">--</span>
                 </div>
-                <div class="panel-row" style="margin-top:6px;">
+                <div style="margin-top:6px;display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:11px;">
+                    <span class="panel-label">Stop</span>
+                    <span><input type="number" id="col-stop" value="100" min="50" max="1000" step="50" style="width:45px;background:#0a0a1a;color:#ff4444;border:1px solid #333;padding:1px 3px;font-size:11px;text-align:right;" onchange="setCollision()">mm</span>
+                    <span class="panel-label">Slow</span>
+                    <span><input type="number" id="col-slow" value="200" min="100" max="1500" step="50" style="width:45px;background:#0a0a1a;color:#ffaa00;border:1px solid #333;padding:1px 3px;font-size:11px;text-align:right;" onchange="setCollision()">mm</span>
+                    <span class="panel-label">Caution</span>
+                    <span><input type="number" id="col-caution" value="300" min="100" max="2000" step="50" style="width:45px;background:#0a0a1a;color:#ffff00;border:1px solid #333;padding:1px 3px;font-size:11px;text-align:right;" onchange="setCollision()">mm</span>
                     <span class="panel-label">Rear Ignore</span>
-                    <span>
-                        <input type="number" id="ignore-angle-input" value="120" min="0" max="180" step="5"
-                            style="width:50px;background:#0a0a1a;color:#e0e0e0;border:1px solid #0f3460;padding:2px 4px;font-size:12px;text-align:right;" />
-                        <span style="font-size:11px;color:#888;">&deg;</span>
-                    </span>
+                    <span><input type="number" id="ignore-angle-input" value="140" min="0" max="180" step="5" style="width:45px;background:#0a0a1a;color:#e0e0e0;border:1px solid #333;padding:1px 3px;font-size:11px;text-align:right;" onchange="setCollision()">&deg;</span>
                 </div>
             </div>
 
@@ -317,6 +343,6 @@
         </div>
     </div>
 
-    <script src="/static/lidar.js?v=12"></script>
+    <script src="/static/lidar.js?v=13"></script>
 </body>
 </html>

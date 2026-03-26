@@ -9,9 +9,9 @@ HIGHEST PRIORITY: No code path may bypass collision avoidance.
 import math
 
 # Safety zone thresholds (mm)
-STOP_DIST = 300       # Emergency stop (was 200, raised for safety margin)
-SLOW_DIST = 500       # 30% speed
-CAUTION_DIST = 800    # 70% speed
+STOP_DIST = 100       # Emergency stop
+SLOW_DIST = 200       # 30% speed
+CAUTION_DIST = 300    # 70% speed
 
 # Sector definitions: 8 sectors of 45° each
 # Sector 0 = front (337.5° to 22.5°), clockwise
@@ -26,6 +26,10 @@ class CollisionAvoidance:
         self.enabled = True
         self.ignore_angle = 140  # for status reporting only (actual ignore is in LiDAR process)
         self._sector_distances = [9999] * NUM_SECTORS
+        # Configurable thresholds (can be changed at runtime via API)
+        self.stop_dist = STOP_DIST
+        self.slow_dist = SLOW_DIST
+        self.caution_dist = CAUTION_DIST
 
     def update_sectors(self):
         """Recompute sector distances from shared memory.
@@ -89,7 +93,7 @@ class CollisionAvoidance:
         # HARD SAFETY: if ANY non-ignored sector is below STOP distance,
         # block ALL translational motion regardless of movement direction.
         global_min = min(self._sector_distances)
-        if global_min < STOP_DIST:
+        if global_min < self.stop_dist:
             return 0, 0, vz  # only rotation allowed
 
         # Directional check: scale speed based on obstacles in movement direction
@@ -106,11 +110,11 @@ class CollisionAvoidance:
 
         # Scale speed: use the WORSE of global and directional minimums
         check_min = min(global_min, dir_min)
-        if check_min < STOP_DIST:
+        if check_min < self.stop_dist:
             scale = 0.0
-        elif check_min < SLOW_DIST:
+        elif check_min < self.slow_dist:
             scale = 0.3
-        elif check_min < CAUTION_DIST:
+        elif check_min < self.caution_dist:
             scale = 0.7
         else:
             scale = 1.0
@@ -126,11 +130,11 @@ class CollisionAvoidance:
         sectors = self._sector_distances
         min_dist = min(sectors)
 
-        if min_dist < STOP_DIST:
+        if min_dist < self.stop_dist:
             level = "STOP"
-        elif min_dist < SLOW_DIST:
+        elif min_dist < self.slow_dist:
             level = "SLOW"
-        elif min_dist < CAUTION_DIST:
+        elif min_dist < self.caution_dist:
             level = "CAUTION"
         else:
             level = "CLEAR"
@@ -142,8 +146,8 @@ class CollisionAvoidance:
             "sectors": [round(d) for d in sectors],
             "ignore_angle": self.ignore_angle,
             "thresholds": {
-                "stop": STOP_DIST,
-                "slow": SLOW_DIST,
-                "caution": CAUTION_DIST,
+                "stop": self.stop_dist,
+                "slow": self.slow_dist,
+                "caution": self.caution_dist,
             },
         }
