@@ -146,7 +146,7 @@ def _get_status(task=None):
     n_maps = len(glob.glob(os.path.join(MAPS_DIR, "*.npz")))
 
     # Check models per task
-    tasks = ["explore", "floor_plan", "complete_map", "wall_follow"]
+    tasks = ["explore", "floor_plan", "complete_map", "wall_follow", "wall_confirm", "gap_fill"]
     models_info = {}
     for t in tasks:
         task_dir = os.path.join(MODELS_DIR, t)
@@ -325,6 +325,108 @@ class LocalHandler(http.server.SimpleHTTPRequestHandler):
         # Comm test: proxy to agent APIs
         if self.path.startswith('/api/comm/'):
             self._proxy_comm('POST')
+            return
+
+        # Floor plan processing API
+        if self.path == '/api/floor_plan/process':
+            content_len = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(content_len)) if content_len else {}
+            grid_flat = body.get('grid')
+            grid_size = body.get('grid_size', 600)
+            cell_size = body.get('cell_size_mm', 50)
+            if not grid_flat:
+                self._json_response({"ok": False, "error": "No grid data"})
+                return
+            try:
+                import numpy as np
+                from training.floor_plan_processor import process_grid
+                grid = np.array(grid_flat, dtype=np.float32).reshape(grid_size, grid_size)
+                fp = process_grid(grid, cell_size_mm=cell_size)
+                result = fp.to_json()
+                result['ok'] = True
+                self._json_response(result)
+            except Exception as e:
+                import traceback
+                self._json_response({"ok": False, "error": str(e),
+                                     "trace": traceback.format_exc()})
+            return
+
+        if self.path == '/api/floor_plan/svg':
+            content_len = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(content_len)) if content_len else {}
+            grid_flat = body.get('grid')
+            grid_size = body.get('grid_size', 600)
+            cell_size = body.get('cell_size_mm', 50)
+            if not grid_flat:
+                self._json_response({"ok": False, "error": "No grid data"})
+                return
+            try:
+                import numpy as np
+                import tempfile
+                from training.floor_plan_processor import process_grid
+                grid = np.array(grid_flat, dtype=np.float32).reshape(grid_size, grid_size)
+                fp = process_grid(grid, cell_size_mm=cell_size)
+                # Write SVG to temp file and return contents
+                svg_path = os.path.join(tempfile.gettempdir(), 'rosmaster_floor_plan.svg')
+                fp.to_svg(svg_path)
+                with open(svg_path, 'r') as f:
+                    svg_content = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/svg+xml')
+                self.send_header('Content-Disposition', 'attachment; filename="floor_plan.svg"')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(svg_content.encode('utf-8'))
+            except Exception as e:
+                self._json_response({"ok": False, "error": str(e)})
+            return
+
+        # Route nav corrections API
+        if self.path == '/api/route_nav/corrections':
+            content_len = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(content_len)) if content_len else {}
+            route = body.get('route', '')
+            corrs = body.get('corrections', {})
+            if not route or not corrs:
+                self._json_response({"ok": False, "error": "No route or corrections"})
+                return
+            try:
+                corr_dir = os.path.join(ROOT_DIR, 'routes', route, 'corrections')
+                os.makedirs(corr_dir, exist_ok=True)
+                corr_path = os.path.join(corr_dir, 'corrections.json')
+                # Merge with existing
+                existing = {}
+                if os.path.exists(corr_path):
+                    with open(corr_path) as f:
+                        existing = json.load(f)
+                existing.update(corrs)
+                with open(corr_path, 'w') as f:
+                    json.dump(existing, f, indent=2)
+                self._json_response({"ok": True, "saved": len(existing)})
+            except Exception as e:
+                self._json_response({"ok": False, "error": str(e)})
+            return
+
+        if self.path == '/api/route_nav/retrain':
+            content_len = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(content_len)) if content_len else {}
+            route = body.get('route', '')
+            # Find all routes with corrections or use all routes
+            routes_dir = os.path.join(ROOT_DIR, 'routes')
+            all_routes = [d for d in os.listdir(routes_dir)
+                         if os.path.isdir(os.path.join(routes_dir, d))
+                         and os.path.exists(os.path.join(routes_dir, d, 'waypoints.json'))]
+            route_arg = ','.join(all_routes) if all_routes else route
+            cmd = [
+                sys.executable, os.path.join(TRAINING_DIR, "behavior_cloning.py"),
+                "--route", route_arg,
+                "--routes-dir", routes_dir,
+                "--epochs", "200",
+                "--model-dir", os.path.join(MODELS_DIR, "route_nav"),
+                "--use-corrections",
+            ]
+            ok, msg = _run_async("retrain_route_nav", cmd)
+            self._json_response({"ok": ok, "message": msg or "Retraining started"})
             return
 
         # Training pipeline API

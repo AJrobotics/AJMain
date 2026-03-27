@@ -32,6 +32,11 @@ TRADER_SOURCE = os.path.join(LOCAL_BASE, "trader", "ib_smart_trader")
 
 SSH_OPTS = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5"]
 
+# Prevent CMD window popups on Windows
+_SUBPROCESS_KWARGS = {}
+if sys.platform == "win32":
+    _SUBPROCESS_KWARGS["creationflags"] = subprocess.CREATE_NO_WINDOW
+
 # Files to deploy
 TRADER_FILES = [
     "run.py",
@@ -57,15 +62,15 @@ def ssh_cmd(command: str, quiet: bool = False) -> subprocess.CompletedProcess:
     """Execute a command on CashCow via SSH."""
     full_cmd = ["ssh"] + SSH_OPTS + [f"{REMOTE_USER}@{REMOTE_HOST}", command]
     if quiet:
-        return subprocess.run(full_cmd, capture_output=True, text=True)
+        return subprocess.run(full_cmd, capture_output=True, text=True, **_SUBPROCESS_KWARGS)
     else:
-        return subprocess.run(full_cmd)
+        return subprocess.run(full_cmd, **_SUBPROCESS_KWARGS)
 
 
 def scp_file(local_path: str, remote_path: str) -> int:
     """Copy a file to CashCow via SCP."""
     full_cmd = ["scp"] + SSH_OPTS + [local_path, f"{REMOTE_USER}@{REMOTE_HOST}:{remote_path}"]
-    return subprocess.call(full_cmd)
+    return subprocess.call(full_cmd, **_SUBPROCESS_KWARGS)
 
 
 def check_connection() -> bool:

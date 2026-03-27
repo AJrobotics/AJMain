@@ -122,6 +122,7 @@ def compute_actions_from_optical_flow(route_dir):
 
         samples.append({
             "frame_path": path_curr,
+            "frame_idx": wp_curr.get("frame_idx", i),
             "lidar_bins": lidar_bins,
             "action": action,
             "flow_magnitude": flow_magnitude,
@@ -331,6 +332,28 @@ def train(args):
         print("No samples generated")
         return
 
+    # Apply manual corrections if available
+    if getattr(args, 'use_corrections', False):
+        corr_count = 0
+        for name in route_names:
+            corr_path = os.path.join(args.routes_dir, name.strip(), 'corrections', 'corrections.json')
+            if os.path.exists(corr_path):
+                with open(corr_path) as f:
+                    corrs = json.load(f)
+                # Match corrections to samples by frame index
+                for s in all_samples:
+                    frame_idx = str(s.get('frame_idx', ''))
+                    if frame_idx in corrs:
+                        c = corrs[frame_idx]
+                        # Corrections are in real velocity space, normalize to [-1,1]
+                        s['action'] = np.array([
+                            np.clip((c['vx'] - 0.05) / 0.10, -1, 1),
+                            np.clip(c['vy'] / 0.12, -1, 1),
+                            np.clip(c['vz'] / 1.0, -1, 1),
+                        ], dtype=np.float32)
+                        corr_count += 1
+                print(f"  Applied {corr_count} corrections from {name}")
+
     np.random.shuffle(all_samples)
     samples = all_samples
     print(f"\n--- Total training samples: {len(samples)} ---")
@@ -376,6 +399,8 @@ if __name__ == "__main__":
                         help="Training epochs")
     parser.add_argument("--lr", type=float, default=1e-3,
                         help="Learning rate")
+    parser.add_argument("--use-corrections", action="store_true",
+                        help="Apply manual corrections from corrections.json")
     args = parser.parse_args()
 
     # Auto-detect routes directory

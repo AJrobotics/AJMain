@@ -29,19 +29,24 @@ ROBOTS = {
 LOCAL_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SSH_OPTS = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5"]
 
+# Prevent CMD window popups on Windows
+_SUBPROCESS_KWARGS = {}
+if sys.platform == "win32":
+    _SUBPROCESS_KWARGS["creationflags"] = subprocess.CREATE_NO_WINDOW
+
 
 def ssh_cmd(user, host, command, quiet=False):
     full_cmd = ["ssh"] + SSH_OPTS + [f"{user}@{host}", command]
     if quiet:
-        result = subprocess.run(full_cmd, capture_output=True, text=True)
+        result = subprocess.run(full_cmd, capture_output=True, text=True, **_SUBPROCESS_KWARGS)
         return result.returncode, result.stdout.strip()
     else:
-        return subprocess.call(full_cmd), ""
+        return subprocess.call(full_cmd, **_SUBPROCESS_KWARGS), ""
 
 
 def scp_file(local_path, user, host, remote_path):
     full_cmd = ["scp"] + SSH_OPTS + [local_path, f"{user}@{host}:{remote_path}"]
-    return subprocess.call(full_cmd)
+    return subprocess.call(full_cmd, **_SUBPROCESS_KWARGS)
 
 
 def check_connection(user, host, name):

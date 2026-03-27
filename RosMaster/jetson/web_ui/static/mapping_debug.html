@@ -75,6 +75,7 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
         <a href="/" style="color:#0df;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#0a0e1a;">Dashboard</a>
         <a href="/static/sensor_debug.html" style="color:#0f8;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#0a0e1a;">Sensors</a>
         <a href="/static/mapping_debug.html" style="color:#f80;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#16213e;">Mapping</a>
+        <a href="/static/route_viewer.html" style="color:#ff0;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#0a0e1a;">RouteNav</a>
     </nav>
     <select id="mode-select" onchange="setMode(this.value)" style="background:#1a1a3a;color:#0f8;border:2px solid #0f8;padding:5px 10px;font-family:inherit;font-size:13px;font-weight:bold;border-radius:3px;">
         <option value="live">Live</option>
@@ -84,6 +85,8 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
     <button class="view-btn active" data-view="raw" onclick="setView('raw')">Raw Map</button>
     <button class="view-btn" data-view="walls" onclick="setView('walls')">Wall Lines</button>
     <button class="view-btn" data-view="floor" onclick="setView('floor')">Floor Plan</button>
+    <button class="hdr-btn" id="export-svg-btn" onclick="exportFloorPlanSVG()" style="display:none;background:#1a2a3a;color:#0df;font-size:11px;">Export SVG</button>
+    <span id="floor-plan-status" style="display:none;font-size:10px;color:#888;"></span>
     <button class="view-btn" data-view="gps" onclick="setView('gps')">GPS</button>
     <button class="hdr-btn" onclick="saveMap()">Save</button>
     <button class="hdr-btn" onclick="loadMap()">Load</button>
@@ -183,6 +186,8 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
                     <option value="nn:floor_plan">NN: Floor Plan</option>
                     <option value="nn:complete_map">NN: Complete Map</option>
                     <option value="nn:wall_follow">NN: Wall Follow</option>
+                    <option value="nn:wall_confirm">NN: Wall Confirm</option>
+                    <option value="nn:gap_fill">NN: Gap Fill</option>
                 </select>
             </div>
             <div class="sp-row"><span>Robot:</span><span id="sim-pose-info">Click map to place</span></div>
@@ -219,6 +224,8 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
                         <option value="floor_plan">Floor Plan</option>
                         <option value="complete_map">Complete Map</option>
                         <option value="wall_follow">Wall Follow</option>
+                        <option value="wall_confirm">Wall Confirm</option>
+                        <option value="gap_fill">Gap Fill</option>
                     </select>
                     <span id="train-task-status" style="font-size:9px;color:#666;white-space:nowrap;"></span>
                 </div>
@@ -308,6 +315,8 @@ let wallLines = [];
 let pose = [15000, 15000, 0];
 let poseHistory = [];
 let viewMode = 'raw';       // raw, walls, floor, gps
+let floorPlanData = null;   // {walls: [[x1,y1,x2,y2],...], rooms: [{id,label,centroid,boundary,...},...]}
+let floorPlanPending = false;
 let needsRedraw = true;
 let selectedRecEntry = null; // recording entry to overlay on main canvas
 let appMode = 'live';        // live, offline, or simulation
@@ -327,6 +336,7 @@ let simPlaceStart = null;   // {x, y} mouse down position for heading drag
 let simStep = 0;
 let simCollisions = 0;
 let simExplored = new Set();
+let simTotalFree = 0;          // total free cells in grid (for coverage %)
 let simAutoRunning = false;
 let simAutoTimer = null;
 let simOnnxSession = null;  // ONNX Runtime session for NN inference
@@ -510,10 +520,15 @@ function setView(mode) {
     viewMode = mode;
     document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === mode));
     document.getElementById('gps-panel').style.display = mode === 'gps' ? '' : 'none';
+    document.getElementById('export-svg-btn').style.display = mode === 'floor' ? '' : 'none';
+    document.getElementById('floor-plan-status').style.display = mode === 'floor' ? '' : 'none';
     if (mode === 'gps') {
         gpsStartPolling();
     } else {
         gpsStopPolling();
+    }
+    if (mode === 'floor' && gridData) {
+        fetchFloorPlan();
     }
     needsRedraw = true;
 }
@@ -628,10 +643,18 @@ function draw() {
         drawGpsView(w, h);
         return;
     }
-    if (viewMode === 'raw' || viewMode === 'floor') {
+    if (viewMode === 'raw') {
         drawGrid();
     }
-    if (viewMode === 'walls' || viewMode === 'floor') {
+    if (viewMode === 'floor') {
+        if (floorPlanData && floorPlanData.walls) {
+            drawFloorPlanView();
+        } else {
+            drawGrid();
+            drawWallLinesView();
+        }
+    }
+    if (viewMode === 'walls') {
         drawWallLinesView();
     }
     if (appMode === 'simulation') {
@@ -1693,6 +1716,20 @@ async function simNNAction() {
         obs[36] = Math.min((simSectors[6] || 9999) / 3000.0, 1.0);  // left side
         obs[37] = Math.min(150 / 3000.0, 1.0);  // target dist (150mm default)
         obs[38] = Math.min((simSectors[0] || 9999) / 3000.0, 1.0);  // front
+    } else if (simNNTask === 'wall_confirm') {
+        // 39 inputs: 36 LiDAR + uncertain_wall_angle + uncertain_wall_dist + wall_confidence
+        obs = new Float32Array(39);
+        obs.set(bins);
+        obs[36] = 0.5;  // uncertain wall angle (placeholder — no hint wall tracking in browser sim)
+        obs[37] = 0.5;  // uncertain wall dist
+        obs[38] = 0.5;  // wall confidence
+    } else if (simNNTask === 'gap_fill') {
+        // 39 inputs: 36 LiDAR + gap_angle + gap_dist + gap_size
+        obs = new Float32Array(39);
+        obs.set(bins);
+        obs[36] = 0.5;  // gap angle (placeholder — no gap detection in browser sim)
+        obs[37] = 0.5;  // gap dist
+        obs[38] = 0.5;  // gap size
     } else {
         // explore: 36 inputs
         obs = bins;
@@ -1723,8 +1760,8 @@ async function simNNAction() {
 
 function simFindNearestFrontier() {
     // Find nearest unexplored free cell relative to robot
-    const rx = Math.floor(simPose[0] / CELL);
-    const ry = Math.floor(simPose[1] / CELL);
+    const rx = Math.floor(simRobot.x / CELL);
+    const ry = Math.floor(simRobot.y / CELL);
     let bestDist = SIM_MAX_RANGE;
     let bestAngle = 0;
     if (!gridData) return { angle: 0, dist: SIM_MAX_RANGE };
@@ -1740,7 +1777,7 @@ function simFindNearestFrontier() {
             if (dist < bestDist) {
                 bestDist = dist;
                 const worldAngle = Math.atan2(dy, dx);
-                bestAngle = Math.atan2(Math.sin(worldAngle - simPose[2]), Math.cos(worldAngle - simPose[2]));
+                bestAngle = Math.atan2(Math.sin(worldAngle - simRobot.theta), Math.cos(worldAngle - simRobot.theta));
             }
         }
     }
@@ -1888,9 +1925,10 @@ function simUpdatePanel() {
 
     // Count free cells for coverage
     let totalFree = 0;
+    simTotalFree = 0;
     if (gridData) {
         for (let i = 0; i < gridData.length; i++) {
-            if (gridData[i] < -0.5) totalFree++;
+            if (gridData[i] < -0.5) { totalFree++; simTotalFree++; }
         }
     }
     const pct = totalFree > 0 ? (simExplored.size / totalFree * 100).toFixed(1) : '0';
@@ -2072,22 +2110,25 @@ const TASK_REWARDS = {
         ['Obs: 36 LiDAR bins', ''],
     ],
     floor_plan: [
-        ['New cell explored',  '+2.0'],
-        ['Facing frontier',    '+0.1 max'],
-        ['Coverage 10%',       '+3.0 bonus'],
-        ['Collision',          '-20.0'],
-        ['Time penalty',       '-0.05/step'],
+        ['New cell explored',  '+3.0'],
+        ['Facing frontier',    '+0.5 max'],
+        ['Coverage 10%',       '+5.0 bonus'],
+        ['Forward movement',   '+0.3'],
+        ['Collision',          '-10.0'],
+        ['Stalling/spinning',  '-1.5'],
+        ['Time penalty',       '-0.1/step'],
         ['Obs: 36 LiDAR + frontier angle/dist + coverage', ''],
     ],
     complete_map: [
-        ['New cell explored',  '+2.0'],
-        ['Wall cell scanned',  '+1.5'],
-        ['Facing frontier',    '+0.3 max'],
-        ['Coverage 10%',       '+3.0 bonus'],
-        ['Wall complete 10%',  '+2.0 bonus'],
-        ['Collision',          '-15.0'],
-        ['Stalling',           '-0.3'],
-        ['Time penalty',       '-0.05/step'],
+        ['New cell explored',  '+3.0'],
+        ['Wall cell scanned',  '+2.0'],
+        ['Facing frontier',    '+0.5 max'],
+        ['Coverage 10%',       '+5.0 bonus'],
+        ['Wall complete 10%',  '+3.0 bonus'],
+        ['Forward movement',   '+0.3'],
+        ['Collision',          '-10.0'],
+        ['Stalling/spinning',  '-2.0'],
+        ['Time penalty',       '-0.1/step'],
         ['Obs: 36 LiDAR + frontier angle/dist + coverage', ''],
     ],
     wall_follow: [
@@ -2098,6 +2139,25 @@ const TASK_REWARDS = {
         ['Collision',          '-30.0'],
         ['Time penalty',       '-0.05/step'],
         ['Obs: 36 LiDAR + side dist + target dist + front dist', ''],
+    ],
+    wall_confirm: [
+        ['Wall confirmed',     '+3.0'],
+        ['Facing uncertain',   '+0.5 max'],
+        ['Forward movement',   '+0.3'],
+        ['Confidence +10%',    '+3.0 bonus'],
+        ['Collision',          '-10.0'],
+        ['Stalling',           '-1.5'],
+        ['Time penalty',       '-0.1/step'],
+        ['Obs: 36 LiDAR + uncertain wall angle/dist + confidence', ''],
+    ],
+    gap_fill: [
+        ['Gap closed',         '+5.0'],
+        ['Facing gap',         '+1.0 max'],
+        ['Forward movement',   '+0.3'],
+        ['Collision',          '-10.0'],
+        ['Stalling',           '-2.0'],
+        ['Time penalty',       '-0.1/step'],
+        ['Obs: 36 LiDAR + gap angle/dist + gap size', ''],
     ],
 };
 
@@ -2384,6 +2444,160 @@ async function simLoadSelectedONNX() {
         const policySelect = document.getElementById('sim-policy');
         if (policySelect) policySelect.value = 'nn:' + task;
         simPolicy = 'nn';
+    }
+}
+
+// ============================================================
+// Floor Plan Processing (server-side pipeline)
+// ============================================================
+
+async function fetchFloorPlan() {
+    if (!gridData || floorPlanPending) return;
+    floorPlanPending = true;
+    const statusEl = document.getElementById('floor-plan-status');
+    statusEl.textContent = 'Processing...';
+    statusEl.style.color = '#ff0';
+    try {
+        const gridArray = Array.from(gridData);
+        const r = await fetch(TRAIN_BASE + '/api/floor_plan/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ grid: gridArray, grid_size: GRID, cell_size_mm: CELL }),
+        });
+        const data = await r.json();
+        if (data.ok) {
+            floorPlanData = data;
+            statusEl.textContent = data.walls.length + ' walls, ' + data.rooms.length + ' rooms';
+            statusEl.style.color = '#0f8';
+            document.getElementById('export-svg-btn').style.display = '';
+            needsRedraw = true;
+        } else {
+            statusEl.textContent = 'Error: ' + (data.error || 'unknown');
+            statusEl.style.color = '#f44';
+            floorPlanData = null;
+        }
+    } catch (e) {
+        statusEl.textContent = 'Fetch error: ' + e.message;
+        statusEl.style.color = '#f44';
+        floorPlanData = null;
+    }
+    floorPlanPending = false;
+}
+
+function drawFloorPlanView() {
+    if (!floorPlanData) return;
+
+    // White background
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, GRID, GRID);
+
+    // Draw room fills (light gray polygons)
+    for (const room of floorPlanData.rooms) {
+        if (room.boundary && room.boundary.length >= 3) {
+            ctx.fillStyle = '#e8e8e8';
+            ctx.strokeStyle = '#ddd';
+            ctx.lineWidth = 0.5 / zoom;
+            ctx.beginPath();
+            const p0 = room.boundary[0];
+            ctx.moveTo(p0[0] / CELL, p0[1] / CELL);
+            for (let i = 1; i < room.boundary.length; i++) {
+                ctx.lineTo(room.boundary[i][0] / CELL, room.boundary[i][1] / CELL);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
+    }
+
+    // Draw grid lines every 1m (20 cells)
+    ctx.strokeStyle = '#eee';
+    ctx.lineWidth = 0.3 / zoom;
+    for (let g = 0; g < GRID; g += 20) {
+        ctx.beginPath(); ctx.moveTo(g, 0); ctx.lineTo(g, GRID); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, g); ctx.lineTo(GRID, g); ctx.stroke();
+    }
+
+    // Draw wall lines (thick black)
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3 / zoom;
+    ctx.lineCap = 'round';
+    for (const w of floorPlanData.walls) {
+        ctx.beginPath();
+        ctx.moveTo(w[0] / CELL, w[1] / CELL);
+        ctx.lineTo(w[2] / CELL, w[3] / CELL);
+        ctx.stroke();
+    }
+
+    // Draw room labels
+    const fontSize = Math.max(8, 14 / zoom);
+    ctx.font = fontSize + 'px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const room of floorPlanData.rooms) {
+        const cx = room.centroid[0] / CELL;
+        const cy = room.centroid[1] / CELL;
+        // Room name
+        ctx.fillStyle = '#555';
+        ctx.fillText(room.label, cx, cy - fontSize * 0.6);
+        // Area
+        ctx.fillStyle = '#888';
+        ctx.font = (fontSize * 0.75) + 'px Arial, sans-serif';
+        ctx.fillText(room.area_m2.toFixed(1) + ' m\u00b2', cx, cy + fontSize * 0.4);
+        ctx.font = fontSize + 'px Arial, sans-serif';
+    }
+
+    // Scale bar (bottom-left of visible area)
+    const scaleLen = 1000 / CELL; // 1 meter in cell units
+    const sx = 10 / zoom;
+    const sy = GRID - 10 / zoom;
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2 / zoom;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy); ctx.lineTo(sx + scaleLen, sy);
+    ctx.stroke();
+    // End caps
+    const capH = 4 / zoom;
+    ctx.beginPath(); ctx.moveTo(sx, sy - capH); ctx.lineTo(sx, sy + capH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx + scaleLen, sy - capH); ctx.lineTo(sx + scaleLen, sy + capH); ctx.stroke();
+    // Label
+    ctx.fillStyle = '#333';
+    ctx.font = Math.max(6, 10 / zoom) + 'px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('1 m', sx + scaleLen / 2, sy + 12 / zoom);
+}
+
+async function exportFloorPlanSVG() {
+    if (!gridData) { alert('No grid data to export.'); return; }
+    const statusEl = document.getElementById('floor-plan-status');
+    statusEl.textContent = 'Generating SVG...';
+    statusEl.style.color = '#ff0';
+    try {
+        const gridArray = Array.from(gridData);
+        const r = await fetch(TRAIN_BASE + '/api/floor_plan/svg', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ grid: gridArray, grid_size: GRID, cell_size_mm: CELL }),
+        });
+        if (r.ok) {
+            const blob = await r.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'floor_plan.svg';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            statusEl.textContent = 'SVG downloaded';
+            statusEl.style.color = '#0f8';
+        } else {
+            const data = await r.json();
+            statusEl.textContent = 'SVG error: ' + (data.error || r.status);
+            statusEl.style.color = '#f44';
+        }
+    } catch (e) {
+        statusEl.textContent = 'SVG error: ' + e.message;
+        statusEl.style.color = '#f44';
     }
 }
 

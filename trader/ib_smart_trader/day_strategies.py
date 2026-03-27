@@ -676,6 +676,376 @@ class DayStrategyEnsemble:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  SHORT-SPECIFIC STRATEGIES (aggressive, fast in/out)
+# ═══════════════════════════════════════════════════════════════
+
+@dataclass
+class ShortStrategyConfig:
+    """Config tuned for aggressive short scalping"""
+    # VWAP Rejection
+    vwap_reject_zone_pct: float = 0.3       # Price within 0.3% of VWAP
+    vwap_reject_confirm_bars: int = 2       # 2 bearish bars for confirmation
+
+    # Fast EMA Death Cross
+    ema_fast: int = 5                       # Faster than long's 8
+    ema_slow: int = 13                      # Faster than long's 18
+    ema_gap_threshold_pct: float = 0.05     # Min gap between EMAs to confirm
+
+    # Momentum Breakdown
+    vol_spike_ratio: float = 1.5            # Higher than long's 1.3
+    breakdown_lookback: int = 20            # Look back N bars for support low
+    red_bar_confirm: int = 2               # N consecutive red bars needed
+
+    # Overbought Fade
+    rsi_period: int = 10
+    rsi_overbought: float = 70.0            # Stricter than long's 65
+    stochastic_period: int = 14
+    stochastic_overbought: float = 80.0
+    macd_fast: int = 8
+    macd_slow: int = 21
+    macd_signal: int = 7
+
+    # Ensemble
+    ensemble_threshold: float = -0.25       # Slightly stricter than long's -0.20
+    min_strategies_agree: int = 1
+
+    # Weights — favor VWAP rejection and momentum breakdown
+    weight_vwap_reject: float = 0.35
+    weight_fast_ema: float = 0.25
+    weight_momentum: float = 0.25
+    weight_overbought: float = 0.15
+
+    # ATR SL/TP (tighter for quick exits)
+    atr_period: int = 10
+    atr_stop_multiplier: float = 0.8        # Tighter SL (long uses 1.2)
+    atr_profit_multiplier: float = 1.0      # Quick TP (long uses 2.0)
+
+
+class VWAPRejectionShort:
+    """
+    VWAP Rejection Short — price rallies to VWAP in a downtrend, gets rejected.
+    VWAP acts as resistance in a falling market.
+    """
+    @staticmethod
+    def get_signal(
+        close: pd.Series, high: pd.Series, low: pd.Series,
+        volume: pd.Series, config: ShortStrategyConfig,
+    ) -> DaySignal:
+        if len(close) < 20:
+            return DaySignal("VWAP_REJECT", SignalType.HOLD, 0.0, "Insufficient data")
+
+        vwap = DayIndicators.vwap(close, high, low, volume)
+        price = float(close.iloc[-1])
+        current_vwap = float(vwap.iloc[-1])
+
+        if pd.isna(current_vwap) or current_vwap <= 0:
+            return DaySignal("VWAP_REJECT", SignalType.HOLD, 0.0, "No VWAP")
+
+        dist_pct = (price - current_vwap) / current_vwap * 100
+        zone = config.vwap_reject_zone_pct
+
+        # Count recent bearish bars
+        bearish_count = 0
+        for i in range(1, min(config.vwap_reject_confirm_bars + 1, len(close))):
+            if close.iloc[-i] < close.iloc[-i - 1]:
+                bearish_count += 1
+
+        # SHORT signal: price near VWAP (slightly below) + recent bars bearish
+        # Price approached VWAP but couldn't break above → rejection
+        if -zone * 2 <= dist_pct <= zone and bearish_count >= config.vwap_reject_confirm_bars:
+            confidence = 0.65
+            proximity_bonus = max(0, (zone - abs(dist_pct)) / zone * 0.15)
+            confidence += proximity_bonus
+            confidence = min(0.90, confidence)
+            return DaySignal(
+                "VWAP_REJECT", SignalType.SELL, confidence,
+                f"VWAP ${current_vwap:.2f} rejection (dist: {dist_pct:+.2f}%, {bearish_count} bearish bars)",
+            )
+
+        # COVER signal: price drops well below VWAP (profit zone)
+        if dist_pct < -zone * 3:
+            return DaySignal(
+                "VWAP_REJECT", SignalType.BUY, 0.55,
+                f"Price far below VWAP (dist: {dist_pct:+.2f}%) — cover signal",
+            )
+
+        return DaySignal("VWAP_REJECT", SignalType.HOLD, 0.3,
+                         f"VWAP ${current_vwap:.2f} | dist: {dist_pct:+.2f}%")
+
+
+class FastEMADeathCross:
+    """
+    Fast EMA(5)/EMA(13) Death Cross — quicker than long's EMA(8)/EMA(18).
+    Also detects sustained downtrend (price below both EMAs with widening gap).
+    """
+    @staticmethod
+    def get_signal(close: pd.Series, config: ShortStrategyConfig) -> DaySignal:
+        if len(close) < config.ema_slow + 5:
+            return DaySignal("FAST_EMA", SignalType.HOLD, 0.0, "Insufficient data")
+
+        ema_fast = DayIndicators.ema(close, config.ema_fast)
+        ema_slow = DayIndicators.ema(close, config.ema_slow)
+
+        ef = float(ema_fast.iloc[-1])
+        es = float(ema_slow.iloc[-1])
+        ef_prev = float(ema_fast.iloc[-2])
+        es_prev = float(ema_slow.iloc[-2])
+        price = float(close.iloc[-1])
+
+        gap_pct = abs(ef - es) / es * 100 if es > 0 else 0
+
+        # Death Cross: fast EMA crosses below slow EMA
+        if ef_prev >= es_prev and ef < es:
+            confidence = 0.75
+            return DaySignal(
+                "FAST_EMA", SignalType.SELL, confidence,
+                f"Death Cross | EMA{config.ema_fast}={ef:.2f} < EMA{config.ema_slow}={es:.2f}",
+            )
+
+        # Downtrend holding: both EMAs descending, price below both
+        if ef < es and price < ef and gap_pct >= config.ema_gap_threshold_pct:
+            confidence = 0.60 + min(0.15, gap_pct * 0.1)
+            return DaySignal(
+                "FAST_EMA", SignalType.SELL, min(0.85, confidence),
+                f"Downtrend holding (gap: {gap_pct:.2f}%)",
+            )
+
+        # Golden Cross (cover signal)
+        if ef_prev <= es_prev and ef > es:
+            return DaySignal(
+                "FAST_EMA", SignalType.BUY, 0.65,
+                f"Golden Cross — cover signal | EMA{config.ema_fast}={ef:.2f} > EMA{config.ema_slow}={es:.2f}",
+            )
+
+        return DaySignal("FAST_EMA", SignalType.HOLD, 0.3,
+                         f"EMA neutral | EMA{config.ema_fast}={ef:.2f} EMA{config.ema_slow}={es:.2f}")
+
+
+class MomentumBreakdown:
+    """
+    Momentum Breakdown — volume spike + price breaks below recent support.
+    Higher volume threshold (1.5x) than long strategy for stronger confirmation.
+    """
+    @staticmethod
+    def get_signal(
+        close: pd.Series, high: pd.Series, low: pd.Series,
+        volume: pd.Series, config: ShortStrategyConfig,
+    ) -> DaySignal:
+        if len(close) < config.breakdown_lookback + 5:
+            return DaySignal("MOMENTUM_BD", SignalType.HOLD, 0.0, "Insufficient data")
+
+        price = float(close.iloc[-1])
+        avg_vol = float(volume.iloc[-config.breakdown_lookback:].mean())
+        curr_vol = float(volume.iloc[-1])
+        vol_ratio = curr_vol / avg_vol if avg_vol > 0 else 0
+
+        # Recent low (support level)
+        recent_low = float(low.iloc[-config.breakdown_lookback:-1].min())
+
+        # Count consecutive red bars
+        red_bars = 0
+        for i in range(1, min(6, len(close))):
+            if close.iloc[-i] < close.iloc[-i - 1]:
+                red_bars += 1
+            else:
+                break
+
+        # SHORT: Volume spike + break below support + confirmed red bars
+        if (vol_ratio >= config.vol_spike_ratio and
+                price < recent_low and
+                red_bars >= config.red_bar_confirm):
+            breakdown_pct = (price - recent_low) / recent_low * 100
+            confidence = 0.70 + min(0.20, (vol_ratio - config.vol_spike_ratio) * 0.1)
+            confidence = min(0.90, confidence)
+            return DaySignal(
+                "MOMENTUM_BD", SignalType.SELL, confidence,
+                f"Breakdown! Low ${recent_low:.2f} → ${price:.2f} ({breakdown_pct:+.2f}%) "
+                f"| Vol {vol_ratio:.1f}x | {red_bars} red bars",
+            )
+
+        # Volume spike but no breakdown yet — watch
+        if vol_ratio >= config.vol_spike_ratio:
+            return DaySignal(
+                "MOMENTUM_BD", SignalType.HOLD, 0.40,
+                f"Volume {vol_ratio:.1f}x spike | Awaiting breakdown (low: ${recent_low:.2f})",
+            )
+
+        return DaySignal("MOMENTUM_BD", SignalType.HOLD, 0.3,
+                         f"Volume {vol_ratio:.1f}x (threshold: {config.vol_spike_ratio}x not met)")
+
+
+class OverboughtFade:
+    """
+    Overbought Fade — RSI ≥ 70 + Stochastic ≥ 80 + MACD turning negative.
+    Mean reversion: overextended stocks snap back. Quick fade for 0.5-1%.
+    """
+    @staticmethod
+    def get_signal(close: pd.Series, high: pd.Series, low: pd.Series,
+                   config: ShortStrategyConfig) -> DaySignal:
+        if len(close) < max(config.rsi_period, config.stochastic_period) + 5:
+            return DaySignal("OB_FADE", SignalType.HOLD, 0.0, "Insufficient data")
+
+        price = float(close.iloc[-1])
+
+        # RSI
+        rsi = DayIndicators.rsi(close, config.rsi_period)
+        rsi_val = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50.0
+
+        # Stochastic %K
+        low_min = low.rolling(config.stochastic_period).min()
+        high_max = high.rolling(config.stochastic_period).max()
+        stoch_k = ((close - low_min) / (high_max - low_min) * 100).fillna(50)
+        stoch_val = float(stoch_k.iloc[-1])
+
+        # MACD histogram
+        macd_line, signal_line, histogram = DayIndicators.macd(
+            close, config.macd_fast, config.macd_slow, config.macd_signal
+        )
+        hist_val = float(histogram.iloc[-1]) if not pd.isna(histogram.iloc[-1]) else 0.0
+        hist_prev = float(histogram.iloc[-2]) if len(histogram) > 1 and not pd.isna(histogram.iloc[-2]) else 0.0
+        hist_turning_down = hist_val < hist_prev
+
+        signals_hit = 0
+        reasons = []
+
+        if rsi_val >= config.rsi_overbought:
+            signals_hit += 1
+            reasons.append(f"RSI {rsi_val:.1f} overbought")
+
+        if stoch_val >= config.stochastic_overbought:
+            signals_hit += 1
+            reasons.append(f"Stoch {stoch_val:.0f}% overbought")
+
+        if hist_turning_down and hist_prev > 0:
+            signals_hit += 1
+            reasons.append(f"MACD hist turning down ({hist_val:.3f})")
+
+        # SHORT: at least 2 of 3 overbought signals
+        if signals_hit >= 2:
+            confidence = 0.55 + signals_hit * 0.10
+            confidence = min(0.85, confidence)
+            return DaySignal(
+                "OB_FADE", SignalType.SELL, confidence,
+                " + ".join(reasons),
+            )
+
+        # Oversold (cover signal)
+        if rsi_val <= 30 and stoch_val <= 20:
+            return DaySignal(
+                "OB_FADE", SignalType.BUY, 0.60,
+                f"RSI {rsi_val:.1f} + Stoch {stoch_val:.0f}% oversold — cover signal",
+            )
+
+        return DaySignal("OB_FADE", SignalType.HOLD, 0.3,
+                         f"RSI {rsi_val:.1f} | Stoch {stoch_val:.0f}% | MACD hist: {hist_val:.3f}")
+
+
+class ShortEnsemble:
+    """
+    Short-specific consensus engine — 4 bearish strategies tuned for
+    aggressive, fast in/out short scalping. Separate from the long ensemble.
+    """
+
+    def __init__(self, config: ShortStrategyConfig = None):
+        self.config = config or ShortStrategyConfig()
+
+    def analyze(
+        self,
+        symbol: str,
+        close: pd.Series,
+        high: pd.Series,
+        low: pd.Series,
+        volume: pd.Series,
+    ) -> DayEnsembleDecision:
+        """Run 4 short strategies -> short consensus decision"""
+        cfg = self.config
+        signals: list[DaySignal] = []
+
+        signals.append(VWAPRejectionShort.get_signal(close, high, low, volume, cfg))
+        signals.append(FastEMADeathCross.get_signal(close, cfg))
+        signals.append(MomentumBreakdown.get_signal(close, high, low, volume, cfg))
+        signals.append(OverboughtFade.get_signal(close, high, low, cfg))
+
+        # Weighted consensus (SELL = negative = short signal)
+        weight_map = {
+            "VWAP_REJECT": cfg.weight_vwap_reject,
+            "FAST_EMA": cfg.weight_fast_ema,
+            "MOMENTUM_BD": cfg.weight_momentum,
+            "OB_FADE": cfg.weight_overbought,
+        }
+
+        consensus_score = 0.0
+        sell_count = 0
+        buy_count = 0
+
+        for sig in signals:
+            weight = weight_map.get(sig.strategy_name, 0.1)
+            if sig.signal == SignalType.SELL:
+                consensus_score -= sig.confidence * weight
+                sell_count += 1
+            elif sig.signal == SignalType.BUY:
+                consensus_score += sig.confidence * weight
+                buy_count += 1
+
+        max_possible = sum(weight_map.values())
+        if max_possible > 0:
+            consensus_score = consensus_score / max_possible
+
+        # Decision
+        final_signal = SignalType.HOLD
+        reason_parts = []
+
+        if (consensus_score <= cfg.ensemble_threshold and
+                sell_count >= cfg.min_strategies_agree):
+            final_signal = SignalType.SELL
+            reason_parts.append(
+                f"SHORT consensus ({sell_count} strategies, score: {consensus_score:+.2f})"
+            )
+        elif (consensus_score >= abs(cfg.ensemble_threshold) and
+              buy_count >= cfg.min_strategies_agree):
+            final_signal = SignalType.BUY
+            reason_parts.append(
+                f"COVER consensus ({buy_count} strategies, score: {consensus_score:+.2f})"
+            )
+        else:
+            reason_parts.append(
+                f"Short consensus not met (SELL:{sell_count} BUY:{buy_count}, "
+                f"score: {consensus_score:+.2f}, threshold: {cfg.ensemble_threshold})"
+            )
+
+        # ATR-based SL/TP (INVERTED for shorts)
+        current_price = float(close.iloc[-1])
+        atr_series = DayIndicators.atr(high, low, close, cfg.atr_period)
+        atr_value = float(atr_series.iloc[-1]) if not pd.isna(atr_series.iloc[-1]) else 0.0
+
+        if atr_value > 0:
+            stop_loss = round(current_price + atr_value * cfg.atr_stop_multiplier, 2)
+            take_profit = round(current_price - atr_value * cfg.atr_profit_multiplier, 2)
+            risk_pct = round(atr_value * cfg.atr_stop_multiplier / current_price * 100, 2)
+            reward_pct = round(atr_value * cfg.atr_profit_multiplier / current_price * 100, 2)
+        else:
+            stop_loss = round(current_price * 1.005, 2)
+            take_profit = round(current_price * 0.995, 2)
+            risk_pct = 0.5
+            reward_pct = 0.5
+
+        reason_parts.append(
+            f"ATR=${atr_value:.2f} | SL=${stop_loss} (+{risk_pct}%) | "
+            f"TP=${take_profit} (-{reward_pct}%)"
+        )
+
+        return DayEnsembleDecision(
+            symbol=symbol,
+            final_signal=final_signal,
+            consensus_score=round(consensus_score, 3),
+            individual_signals=signals,
+            stop_loss_price=stop_loss,
+            take_profit_price=take_profit,
+            reason=" | ".join(reason_parts),
+        )
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Demo
 # ═══════════════════════════════════════════════════════════════
 

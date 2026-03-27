@@ -57,17 +57,14 @@ test_capture.jpg
 .claude/
 
 # RL training artifacts (keep only final/latest models and source)
-RosMaster/training/models/nav_ppo_*0_steps.zip
-RosMaster/training/models/explore/explore_ppo_*0_steps.zip
-!RosMaster/training/models/nav_ppo_final.zip
-!RosMaster/training/models/nav_ppo_500000_steps.zip
-!RosMaster/training/models/explore/explore_ppo_20000_steps.zip
+RosMaster/training/models/**/*_steps.zip
 RosMaster/training/tb_logs/
 RosMaster/training/maps/*.npz
 
-# Route frames (large image sets)
+# Route data (large files)
 RosMaster/routes/*/frames/
 RosMaster/routes/*/*.npz
+RosMaster/routes/*/*.mp4
 
 # Temp files
 tmp_*

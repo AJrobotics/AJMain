@@ -11,10 +11,10 @@ body { margin:0; background:#0a0a1a; color:#e0e0e0; font-family:monospace; }
 #main { display:flex; height:calc(100vh - 44px); }
 #viewer { flex:1; display:flex; flex-direction:column; padding:10px; }
 #frame-area { display:flex; gap:10px; flex:1; }
-#camera-view { flex:1; display:flex; flex-direction:column; }
-#camera-view img { width:100%; max-height:400px; object-fit:contain; background:#000; border:1px solid #333; }
-#lidar-view { width:300px; }
-#lidar-canvas { width:100%; background:#0a0a1a; border:1px solid #333; }
+#camera-view { width:300px; min-width:300px; display:flex; flex-direction:column; }
+#camera-view img { width:100%; max-height:250px; object-fit:contain; background:#000; border:1px solid #333; }
+#lidar-view { flex:1; min-width:600px; }
+#lidar-canvas { width:100%; background:#0a0a1a; border:1px solid #333; cursor:crosshair; }
 #controls { padding:10px 0; display:flex; align-items:center; gap:10px; }
 #slider { flex:1; }
 #info-panel { width:350px; overflow-y:auto; border-left:1px solid #333; padding:10px; font-size:13px; }
@@ -30,6 +30,12 @@ body { margin:0; background:#0a0a1a; color:#e0e0e0; font-family:monospace; }
 <body>
 <div id="header">
     <h1>Route Prediction Viewer</h1>
+    <nav style="display:flex;gap:8px;margin-left:4px;">
+        <a href="/" style="color:#0df;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#0a0e1a;">Dashboard</a>
+        <a href="/static/sensor_debug.html" style="color:#0f8;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#0a0e1a;">Sensors</a>
+        <a href="/static/mapping_debug.html" style="color:#f80;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#0a0e1a;">Mapping</a>
+        <a href="/static/route_viewer.html" style="color:#ff0;text-decoration:none;font-size:12px;padding:2px 8px;border:1px solid #0f3460;border-radius:3px;background:#16213e;">RouteNav</a>
+    </nav>
     <button class="hdr-btn" id="live-btn" onclick="toggleLive()" style="background:#1a3a1a;color:#0f8;font-weight:bold;">LIVE</button>
     <select id="route-select" class="hdr-btn" onchange="loadRoute(this.value)"></select>
     <button class="hdr-btn" onclick="autoPlay()">Play</button>
@@ -50,9 +56,17 @@ body { margin:0; background:#0a0a1a; color:#e0e0e0; font-family:monospace; }
             </div>
             <div id="lidar-view">
                 <div style="color:#0df;font-size:12px;margin-bottom:4px;">LiDAR + Prediction</div>
-                <canvas id="lidar-canvas" width="300" height="300"></canvas>
+                <canvas id="lidar-canvas" width="600" height="600"></canvas>
                 <div class="arrow-legend">
-                    <span style="color:#0f8;">Green = predicted direction</span>
+                    <span style="color:#0f8;">Green = predicted</span>
+                    <span style="color:#f80;">Orange = corrected (click to set)</span>
+                    <span style="color:#0df;">Cyan arc = rotation (drag dot)</span>
+                </div>
+                <div style="margin-top:6px;display:flex;gap:8px;align-items:center;">
+                    <button class="hdr-btn" onclick="clearCorrection()" style="background:#3a1a1a;color:#f44;">Clear Edit</button>
+                    <button class="hdr-btn" onclick="saveCorrections()" style="background:#1a3a1a;color:#0f8;">Save All</button>
+                    <button class="hdr-btn" onclick="retrainFromCorrections()" style="background:#1a2a3a;color:#0df;">Retrain</button>
+                    <span id="edit-status" style="color:#888;font-size:11px;"></span>
                 </div>
             </div>
         </div>
@@ -84,6 +98,161 @@ let predictions = [];
 let currentIdx = 0;
 let autoTimer = null;
 const routesBase = '/routes';
+let corrections = {};  // frame_idx -> {vx, vy, vz}
+let draggingRotation = false;
+let editCount = 0;
+
+// Interactive editing on LiDAR canvas
+function initCanvasEditing() {
+    const canvas = document.getElementById('lidar-canvas');
+
+    canvas.addEventListener('mousedown', function(e) {
+        if (predictions.length === 0) return;
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const mx = (e.clientX - rect.left) * scaleX;
+        const my = (e.clientY - rect.top) * scaleY;
+        const cx = canvas.width / 2, cy = canvas.height / 2;
+        const dx = mx - cx, dy = my - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        console.log('Click at canvas:', mx.toFixed(0), my.toFixed(0), 'dist from center:', dist.toFixed(0));
+
+        // Check if clicking near rotation dot (within 25px of the dot)
+        const p = predictions[currentIdx];
+        const curVz = corrections[p.frame_idx] ? corrections[p.frame_idx].vz : p.pred[2];
+        const rotRadius = 50;
+        const rotAngle = -Math.PI / 2 + curVz * 0.5;
+        const rotX = cx + Math.cos(rotAngle) * rotRadius;
+        const rotY = cy + Math.sin(rotAngle) * rotRadius;
+        if (Math.hypot(mx - rotX, my - rotY) < 30) {
+            draggingRotation = true;
+            console.log('Dragging rotation');
+            return;
+        }
+
+        // Click to set movement direction (anywhere except very center)
+        if (dist > 15) {
+            const radius = Math.min(cx, cy) - 20;
+            const angle = Math.atan2(dy, dx);
+            const speed = Math.min(dist / (radius * 3), 0.2);  // more sensitive
+            // Convert screen angle to vx, vy (up = forward = +vx)
+            const vx = -Math.sin(angle) * speed;  // up on screen = forward
+            const vy = Math.cos(angle) * speed;   // drawing negates vy, so don't negate here
+            const curCorr = corrections[p.frame_idx] || {vx: p.pred[0], vy: p.pred[1], vz: p.pred[2]};
+            corrections[p.frame_idx] = {vx: vx, vy: vy, vz: curCorr.vz};
+            editCount++;
+            console.log('Set direction: vx=', vx.toFixed(3), 'vy=', vy.toFixed(3), 'angle=', (angle*180/Math.PI).toFixed(1));
+            updateEditStatus();
+            showFrame(currentIdx);
+        }
+    });
+
+    canvas.addEventListener('mousemove', function(e) {
+        if (predictions.length === 0) return;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const mx = (e.clientX - rect.left) * scaleX;
+        const my = (e.clientY - rect.top) * scaleY;
+        const cx = canvas.width / 2, cy = canvas.height / 2;
+
+        if (draggingRotation) {
+            const dx = mx - cx, dy = my - cy;
+            const angle = Math.atan2(dy, dx);
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            // Convert to vz: angle relative to top (-PI/2)
+            let vz = (angle + Math.PI / 2) * 2.0;
+            vz = Math.max(-1.0, Math.min(1.0, vz));
+            // Also set movement direction toward the cyan dot
+            const radius = Math.min(cx, cy) - 20;
+            const speed = Math.min(dist / (radius * 3), 0.2);
+            const vx = -Math.sin(angle) * speed;
+            const vy = Math.cos(angle) * speed;
+            const p = predictions[currentIdx];
+            corrections[p.frame_idx] = {vx: vx, vy: vy, vz: vz};
+            drawLidar(p);
+        } else if (e.buttons === 1) {
+            // Drag to set direction (live update while mouse held)
+            const dx = mx - cx, dy = my - cy;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 15) {
+                const radius = Math.min(cx, cy) - 20;
+                const angle = Math.atan2(dy, dx);
+                const speed = Math.min(dist / (radius * 3), 0.2);
+                const vx = -Math.sin(angle) * speed;
+                const vy = Math.cos(angle) * speed;
+                const p = predictions[currentIdx];
+                const curCorr = corrections[p.frame_idx] || {vx: p.pred[0], vy: p.pred[1], vz: p.pred[2]};
+                corrections[p.frame_idx] = {vx: vx, vy: vy, vz: curCorr.vz};
+                drawLidar(p);
+            }
+        }
+    });
+
+    canvas.addEventListener('mouseup', function() {
+        if (draggingRotation) {
+            draggingRotation = false;
+            updateEditStatus();
+        }
+    });
+
+    canvas.addEventListener('mouseleave', function() {
+        draggingRotation = false;
+    });
+}
+
+function clearCorrection() {
+    if (predictions.length === 0) return;
+    const p = predictions[currentIdx];
+    delete corrections[p.frame_idx];
+    updateEditStatus();
+    showFrame(currentIdx);
+}
+
+function updateEditStatus() {
+    const n = Object.keys(corrections).length;
+    document.getElementById('edit-status').textContent = n > 0 ? n + ' frame(s) corrected' : '';
+}
+
+async function saveCorrections() {
+    const routeName = document.getElementById('route-select').value;
+    const n = Object.keys(corrections).length;
+    if (n === 0) { alert('No corrections to save'); return; }
+    try {
+        const r = await fetch('/api/route_nav/corrections', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({route: routeName, corrections: corrections})
+        });
+        const d = await r.json();
+        document.getElementById('edit-status').textContent = 'Saved ' + n + ' corrections';
+        document.getElementById('edit-status').style.color = '#0f8';
+    } catch(e) {
+        document.getElementById('edit-status').textContent = 'Save failed: ' + e;
+        document.getElementById('edit-status').style.color = '#f44';
+    }
+}
+
+async function retrainFromCorrections() {
+    await saveCorrections();
+    const routeName = document.getElementById('route-select').value;
+    try {
+        const r = await fetch('/api/route_nav/retrain', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({route: routeName})
+        });
+        const d = await r.json();
+        document.getElementById('edit-status').textContent = d.message || 'Retraining...';
+        document.getElementById('edit-status').style.color = '#0df';
+    } catch(e) {
+        document.getElementById('edit-status').textContent = 'Retrain failed: ' + e;
+        document.getElementById('edit-status').style.color = '#f44';
+    }
+}
 
 // Load route list
 async function init() {
@@ -207,47 +376,84 @@ function drawLidar(p) {
 
     // Robot center
     ctx.fillStyle = '#ff0';
-    ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
 
-    // Prediction arrow (green = forward direction)
-    const vx = p.pred[0], vy = p.pred[1], vz = p.pred[2];
-    const arrowLen = Math.sqrt(vx * vx + vy * vy) * radius * 5;
-    const arrowAngle = Math.atan2(-vy, vx) - Math.PI / 2; // rotate to screen coords (up = forward)
+    // Get correction if exists
+    const corr = corrections[p.frame_idx];
+    const predVx = p.pred[0], predVy = p.pred[1], predVz = p.pred[2];
+    const dispVx = corr ? corr.vx : predVx;
+    const dispVy = corr ? corr.vy : predVy;
+    const dispVz = corr ? corr.vz : predVz;
 
-    if (arrowLen > 3) {
-        ctx.strokeStyle = '#0f8';
-        ctx.lineWidth = 3;
+    // Draw prediction arrow (green, dimmed if corrected)
+    const predLen = Math.sqrt(predVx * predVx + predVy * predVy) * radius * 5;
+    const predAngle = Math.atan2(predVy, predVx) - Math.PI / 2;
+    if (predLen > 3) {
+        ctx.strokeStyle = corr ? 'rgba(0,255,136,0.3)' : '#0f8';
+        ctx.lineWidth = corr ? 2 : 3;
         ctx.beginPath();
         ctx.moveTo(cx, cy);
-        const ex = cx + Math.cos(arrowAngle) * arrowLen;
-        const ey = cy + Math.sin(arrowAngle) * arrowLen;
+        const ex = cx + Math.cos(predAngle) * predLen;
+        const ey = cy + Math.sin(predAngle) * predLen;
         ctx.lineTo(ex, ey);
         ctx.stroke();
-        // Arrowhead
         const headLen = 8;
         ctx.beginPath();
         ctx.moveTo(ex, ey);
-        ctx.lineTo(ex - headLen * Math.cos(arrowAngle - 0.4), ey - headLen * Math.sin(arrowAngle - 0.4));
+        ctx.lineTo(ex - headLen * Math.cos(predAngle - 0.4), ey - headLen * Math.sin(predAngle - 0.4));
         ctx.moveTo(ex, ey);
-        ctx.lineTo(ex - headLen * Math.cos(arrowAngle + 0.4), ey - headLen * Math.sin(arrowAngle + 0.4));
+        ctx.lineTo(ex - headLen * Math.cos(predAngle + 0.4), ey - headLen * Math.sin(predAngle + 0.4));
         ctx.stroke();
     }
 
-    // Rotation indicator (blue arc)
-    if (Math.abs(vz) > 0.05) {
-        ctx.strokeStyle = '#0df';
+    // Draw correction arrow (orange, thick)
+    if (corr) {
+        const corrLen = Math.sqrt(dispVx * dispVx + dispVy * dispVy) * radius * 5;
+        const corrAngle = Math.atan2(dispVy, dispVx) - Math.PI / 2;
+        if (corrLen > 3) {
+            ctx.strokeStyle = '#f80';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            const ex = cx + Math.cos(corrAngle) * corrLen;
+            const ey = cy + Math.sin(corrAngle) * corrLen;
+            ctx.lineTo(ex, ey);
+            ctx.stroke();
+            const headLen = 10;
+            ctx.beginPath();
+            ctx.moveTo(ex, ey);
+            ctx.lineTo(ex - headLen * Math.cos(corrAngle - 0.4), ey - headLen * Math.sin(corrAngle - 0.4));
+            ctx.moveTo(ex, ey);
+            ctx.lineTo(ex - headLen * Math.cos(corrAngle + 0.4), ey - headLen * Math.sin(corrAngle + 0.4));
+            ctx.stroke();
+        }
+    }
+
+    // Rotation indicator (cyan arc + draggable dot)
+    const rotRadius = 30;
+    const rotAngle = dispVz * 0.5;
+    if (Math.abs(dispVz) > 0.02 || corr) {
+        ctx.strokeStyle = corr ? '#f80' : '#0df';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        const rotAngle = vz * 0.5; // scale for visibility
-        ctx.arc(cx, cy, 20, -Math.PI / 2, -Math.PI / 2 + rotAngle, vz < 0);
+        ctx.arc(cx, cy, rotRadius, -Math.PI / 2, -Math.PI / 2 + rotAngle, dispVz < 0);
         ctx.stroke();
-        // Arrow tip
-        const tipAngle = -Math.PI / 2 + rotAngle;
-        const tipX = cx + Math.cos(tipAngle) * 20;
-        const tipY = cy + Math.sin(tipAngle) * 20;
-        ctx.fillStyle = '#0df';
-        ctx.beginPath(); ctx.arc(tipX, tipY, 3, 0, Math.PI * 2); ctx.fill();
     }
+    // Draggable direction dot (always visible, bigger for easy grabbing)
+    const tipAngle = -Math.PI / 2 + rotAngle;
+    const dotRadius = 50;  // further from center for easier dragging
+    const tipX = cx + Math.cos(tipAngle) * dotRadius;
+    const tipY = cy + Math.sin(tipAngle) * dotRadius;
+    ctx.fillStyle = corr ? '#f80' : '#0df';
+    ctx.beginPath(); ctx.arc(tipX, tipY, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Label
+    ctx.fillStyle = '#fff';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('drag', tipX, tipY + 20);
 
     // Labels
     ctx.fillStyle = '#666';
@@ -401,6 +607,7 @@ function livePoll() {
 }
 
 init();
+initCanvasEditing();
 </script>
 </body>
 </html>

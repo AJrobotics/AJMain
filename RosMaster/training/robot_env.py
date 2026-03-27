@@ -5,9 +5,12 @@ Loads a saved occupancy grid (.npz from SLAM engine) and simulates robot
 navigation using ray-cast LiDAR. Designed for training RL navigation policies.
 
 Supports multiple task types:
-  - explore:    General exploration (36 LiDAR bins)
-  - floor_plan: Complete map coverage (36 LiDAR + frontier angle/dist + coverage)
-  - wall_follow: Maintain wall distance (36 LiDAR + side distance + target dist)
+  - explore:      General exploration (36 LiDAR bins)
+  - floor_plan:   Complete map coverage (36 LiDAR + frontier angle/dist + coverage)
+  - complete_map: Map + wall completeness (36 LiDAR + frontier angle/dist + coverage)
+  - wall_follow:  Maintain wall distance (36 LiDAR + side distance + target dist)
+  - wall_confirm: Revisit uncertain walls (36 LiDAR + uncertain_wall angle/dist + confidence)
+  - gap_fill:     Find and fill wall gaps (36 LiDAR + gap angle/dist + gap size)
 
 Action: 3 continuous floats in [-1, 1] -> mapped to (vx, vy, vz)
 """
@@ -50,6 +53,8 @@ TASK_TYPES = {
     "floor_plan":   {"obs_size": NUM_BINS + 3, "desc": "Complete map coverage"},      # +frontier_angle, frontier_dist, coverage
     "complete_map": {"obs_size": NUM_BINS + 3, "desc": "Map + wall completeness"},    # +frontier_angle, frontier_dist, coverage (with wall rewards)
     "wall_follow":  {"obs_size": NUM_BINS + 3, "desc": "Wall following"},             # +side_dist, target_dist, forward_dist
+    "wall_confirm": {"obs_size": NUM_BINS + 3, "desc": "Revisit and confirm uncertain walls"},  # +uncertain_wall_angle, uncertain_wall_dist, wall_confidence
+    "gap_fill":     {"obs_size": NUM_BINS + 3, "desc": "Find and fill wall gaps"},    # +gap_angle, gap_dist, gap_size
 }
 
 # Episode limits
@@ -445,6 +450,20 @@ class RobotNavEnv(gym.Env):
         self._collision_count = 0
         self._last_milestone = 0
         self._last_wall_milestone = 0
+        self._last_confidence_milestone = 0
+
+        # Wall confirmation tracking: hint walls that have been confirmed solid
+        self.confirmed_walls = set()
+        # Pre-compute hint wall cells (log-odds 0.3-0.8) for wall_confirm task
+        self.hint_wall_mask = (self.grid > 0.3) & (self.grid <= 0.8)
+        self.hint_wall_cells = set(zip(*np.where(self.hint_wall_mask[::-1].T > 0)))  # (x, y) coords
+        # Actually use proper indexing: find cells where hint_wall_mask is True
+        hint_ys, hint_xs = np.where(self.hint_wall_mask)
+        self.hint_wall_cells = set(zip(hint_xs.tolist(), hint_ys.tolist()))
+        self.solid_wall_cells = set()
+        solid_ys, solid_xs = np.where(self.grid > 0.8)
+        self.solid_wall_cells = set(zip(solid_xs.tolist(), solid_ys.tolist()))
+        self.total_wall_cells = len(self.hint_wall_cells) + len(self.solid_wall_cells)
 
         # Update wall mask
         self.wall_mask = self.grid > 0.8
@@ -543,10 +562,24 @@ class RobotNavEnv(gym.Env):
         # Mark newly explored cells and scanned walls
         newly_explored, newly_scanned_walls = self._mark_explored()
 
+        # Wall confirmation tracking (for wall_confirm task)
+        newly_confirmed_walls = 0
+        if self.task == "wall_confirm":
+            newly_confirmed_walls = self._confirm_walls_from_scan()
+
+        # Gap closure tracking (for gap_fill task)
+        newly_closed_gaps = 0
+        if self.task == "gap_fill":
+            # Confirm walls first (gaps close when scanned hint walls become solid)
+            newly_confirmed_walls = self._confirm_walls_from_scan()
+            newly_closed_gaps = self._check_gaps_closed()
+
         # Compute task-specific reward
         collision = in_wall or was_blocked
         reward = self._compute_reward(newly_explored, collision, distances,
-                                      newly_scanned_walls=newly_scanned_walls)
+                                      newly_scanned_walls=newly_scanned_walls,
+                                      newly_confirmed_walls=newly_confirmed_walls,
+                                      newly_closed_gaps=newly_closed_gaps)
 
         self.step_count += 1
         self.total_reward += reward
@@ -590,6 +623,15 @@ class RobotNavEnv(gym.Env):
             "in_wall": in_wall,
         }
 
+        if self.task == "wall_confirm":
+            info["confirmed_walls"] = len(self.confirmed_walls)
+            info["hint_walls"] = len(self.hint_wall_cells)
+            _, _, confidence = self._find_nearest_uncertain_wall()
+            info["wall_confidence"] = confidence
+        elif self.task == "gap_fill":
+            info["confirmed_walls"] = len(self.confirmed_walls)
+            info["closed_gaps"] = newly_closed_gaps
+
         return obs, reward, terminated, truncated, info
 
     # ================================================================
@@ -629,10 +671,31 @@ class RobotNavEnv(gym.Env):
             ], dtype=np.float32)
             return np.concatenate([lidar_bins, extra])
 
+        elif self.task == "wall_confirm":
+            # Add: uncertain_wall_angle, uncertain_wall_dist, wall_confidence
+            uw_angle, uw_dist, confidence = self._find_nearest_uncertain_wall()
+            extra = np.array([
+                (uw_angle / math.pi + 1.0) / 2.0,   # [-pi,pi] -> [0,1]
+                min(uw_dist / MAX_RANGE_MM, 1.0),    # normalize dist
+                confidence,                            # [0,1]
+            ], dtype=np.float32)
+            return np.concatenate([lidar_bins, extra])
+
+        elif self.task == "gap_fill":
+            # Add: gap_angle, gap_dist, gap_size
+            gap_angle, gap_dist, gap_size = self._find_nearest_gap()
+            extra = np.array([
+                (gap_angle / math.pi + 1.0) / 2.0,   # [-pi,pi] -> [0,1]
+                min(gap_dist / MAX_RANGE_MM, 1.0),    # normalize dist
+                min(gap_size / 20.0, 1.0),             # normalize by max expected gap
+            ], dtype=np.float32)
+            return np.concatenate([lidar_bins, extra])
+
         return lidar_bins
 
     def _compute_reward(self, newly_explored, collision, distances,
-                        newly_scanned_walls=0):
+                        newly_scanned_walls=0, newly_confirmed_walls=0,
+                        newly_closed_gaps=0):
         """Compute task-specific reward."""
         if self.task == "explore":
             # Primary goal: maximize explored area
@@ -650,52 +713,74 @@ class RobotNavEnv(gym.Env):
             return reward
 
         elif self.task == "floor_plan":
-            reward = -0.05
-            reward += newly_explored * 2.0
+            reward = -0.1  # stronger time penalty
 
+            reward += newly_explored * 3.0  # stronger exploration incentive
+
+            # Stronger frontier facing signal
             frontier_angle, frontier_dist = self._find_nearest_frontier()
             if frontier_dist < MAX_RANGE_MM:
-                reward += max(0, math.cos(frontier_angle) * 0.1)
+                reward += max(0, math.cos(frontier_angle) * 0.5)
 
+            # Coverage milestones
             coverage = len(self.explored_cells) / self.total_free
             milestone = int(coverage * 10)
             if milestone > self._last_milestone:
-                reward += 3.0 * (milestone - self._last_milestone)
+                reward += 5.0 * (milestone - self._last_milestone)
                 self._last_milestone = milestone
 
             if collision:
-                reward -= 20.0
+                reward -= 10.0  # less scared of walls
+
+            # Anti-spinning + forward movement bonus
+            speed = math.sqrt(
+                (self.pose[0] - getattr(self, '_prev_x', self.pose[0]))**2 +
+                (self.pose[1] - getattr(self, '_prev_y', self.pose[1]))**2)
+            if speed < 5 and newly_explored == 0:
+                reward -= 1.5  # heavy stalling penalty
+            elif speed > 10:
+                reward += 0.3  # reward forward movement
+            self._prev_x, self._prev_y = self.pose[0], self.pose[1]
             return reward
 
         elif self.task == "complete_map":
-            reward = -0.05
-            reward += newly_explored * 2.0
-            reward += newly_scanned_walls * 1.5
+            reward = -0.1  # stronger time penalty to encourage efficiency
 
+            # Reward exploration and wall scanning
+            reward += newly_explored * 3.0
+            reward += newly_scanned_walls * 2.0
+
+            # Reward facing frontiers (stronger signal)
             frontier_angle, frontier_dist = self._find_nearest_frontier()
             if frontier_dist < MAX_RANGE_MM:
-                reward += max(0, math.cos(frontier_angle) * 0.3)
+                reward += max(0, math.cos(frontier_angle) * 0.5)
 
+            # Coverage milestones
             coverage = len(self.explored_cells) / self.total_free
             milestone = int(coverage * 10)
             if milestone > self._last_milestone:
-                reward += 3.0 * (milestone - self._last_milestone)
+                reward += 5.0 * (milestone - self._last_milestone)
                 self._last_milestone = milestone
 
+            # Wall coverage milestones
             wall_coverage = len(self.scanned_walls) / max(self.total_walls, 1)
             wall_milestone = int(wall_coverage * 10)
             if wall_milestone > self._last_wall_milestone:
-                reward += 2.0 * (wall_milestone - self._last_wall_milestone)
+                reward += 3.0 * (wall_milestone - self._last_wall_milestone)
                 self._last_wall_milestone = wall_milestone
 
             if collision:
-                reward -= 15.0
+                reward -= 10.0
 
+            # Strong anti-spinning penalty
             speed = math.sqrt(
                 (self.pose[0] - getattr(self, '_prev_x', self.pose[0]))**2 +
                 (self.pose[1] - getattr(self, '_prev_y', self.pose[1]))**2)
             if speed < 5 and newly_explored == 0 and newly_scanned_walls == 0:
-                reward -= 0.3
+                reward -= 2.0  # heavy penalty for spinning/stalling
+            # Reward forward movement
+            elif speed > 10:
+                reward += 0.3  # bonus for actually moving
             self._prev_x, self._prev_y = self.pose[0], self.pose[1]
             return reward
 
@@ -726,6 +811,70 @@ class RobotNavEnv(gym.Env):
             # Small reward for smooth movement (explored cells as proxy)
             reward += newly_explored * 0.1
 
+            return reward
+
+        elif self.task == "wall_confirm":
+            reward = -0.1  # time penalty
+
+            # Reward wall confirmations (hint -> solid)
+            reward += newly_confirmed_walls * 3.0
+
+            # Reward facing uncertain walls
+            uw_angle, uw_dist, confidence = self._find_nearest_uncertain_wall()
+            if uw_dist < MAX_RANGE_MM:
+                reward += 0.5 * math.cos(uw_angle)
+
+            # Reward forward movement
+            speed = math.sqrt(
+                (self.pose[0] - getattr(self, '_prev_x', self.pose[0]))**2 +
+                (self.pose[1] - getattr(self, '_prev_y', self.pose[1]))**2)
+            if speed > 10:
+                reward += 0.3
+
+            # Stalling penalty (no movement AND no confirmations)
+            if speed < 5 and newly_confirmed_walls == 0:
+                reward -= 1.5
+
+            # Collision penalty
+            if collision:
+                reward -= 10.0
+
+            # Wall confidence milestones (every 10%)
+            confidence_milestone = int(confidence * 10)
+            if confidence_milestone > self._last_confidence_milestone:
+                reward += 3.0 * (confidence_milestone - self._last_confidence_milestone)
+                self._last_confidence_milestone = confidence_milestone
+
+            self._prev_x, self._prev_y = self.pose[0], self.pose[1]
+            return reward
+
+        elif self.task == "gap_fill":
+            reward = -0.1  # time penalty
+
+            # Reward gap closures
+            reward += newly_closed_gaps * 5.0
+
+            # Reward facing gaps
+            gap_angle, gap_dist, gap_size = self._find_nearest_gap()
+            if gap_dist < MAX_RANGE_MM:
+                reward += 1.0 * math.cos(gap_angle)
+
+            # Reward forward movement
+            speed = math.sqrt(
+                (self.pose[0] - getattr(self, '_prev_x', self.pose[0]))**2 +
+                (self.pose[1] - getattr(self, '_prev_y', self.pose[1]))**2)
+            if speed > 10:
+                reward += 0.3
+
+            # Stalling penalty
+            if speed < 5 and newly_closed_gaps == 0:
+                reward -= 2.0
+
+            # Collision penalty
+            if collision:
+                reward -= 10.0
+
+            self._prev_x, self._prev_y = self.pose[0], self.pose[1]
             return reward
 
         return -0.1
@@ -766,6 +915,206 @@ class RobotNavEnv(gym.Env):
             return 0.0, MAX_RANGE_MM  # no frontiers left
 
         return best_angle, best_dist
+
+    def _find_nearest_uncertain_wall(self):
+        """Find angle and distance to nearest hint wall (log-odds 0.3-0.8).
+
+        Returns (angle_relative, distance_mm, wall_confidence).
+        angle_relative is relative to robot heading, in [-pi, pi].
+        wall_confidence is ratio of solid walls to total wall cells.
+        """
+        rx = int(self.pose[0] / CELL_SIZE_MM)
+        ry = int(self.pose[1] / CELL_SIZE_MM)
+
+        best_dist = float('inf')
+        best_angle = 0.0
+
+        # Check hint wall cells that haven't been confirmed yet
+        unconfirmed = self.hint_wall_cells - self.confirmed_walls
+        for (x, y) in unconfirmed:
+            dx = x - rx
+            dy = y - ry
+            dist = math.sqrt(dx * dx + dy * dy) * CELL_SIZE_MM
+            if dist < best_dist:
+                best_dist = dist
+                world_angle = math.atan2(dy, dx)
+                best_angle = world_angle - self.pose[2]
+                best_angle = math.atan2(math.sin(best_angle), math.cos(best_angle))
+
+        # Wall confidence: ratio of solid to total (solid + hint)
+        total = len(self.solid_wall_cells) + len(self.hint_wall_cells)
+        if total > 0:
+            confidence = (len(self.solid_wall_cells) + len(self.confirmed_walls)) / total
+        else:
+            confidence = 1.0
+
+        if best_dist == float('inf'):
+            return 0.0, MAX_RANGE_MM, confidence
+
+        return best_angle, best_dist, confidence
+
+    def _confirm_walls_from_scan(self):
+        """Check if any hint walls are now scanned from close range (<1000mm).
+
+        Uses ray-casting: for each ray, if it hits a hint wall cell within 1000mm,
+        mark that cell as confirmed.
+
+        Returns count of newly confirmed walls.
+        """
+        ox = int(self.pose[0] / CELL_SIZE_MM)
+        oy = int(self.pose[1] / CELL_SIZE_MM)
+        confirm_range_cells = int(1000 / CELL_SIZE_MM)  # 20 cells
+        newly_confirmed = 0
+
+        for i in range(NUM_RAYS):
+            angle = self.pose[2] + math.radians(i)
+            dx = math.cos(angle)
+            dy = math.sin(angle)
+
+            for step in range(1, confirm_range_cells):
+                cx = ox + int(dx * step)
+                cy = oy + int(dy * step)
+
+                if cx < 0 or cx >= GRID_SIZE or cy < 0 or cy >= GRID_SIZE:
+                    break
+
+                cell = (cx, cy)
+                if cell in self.hint_wall_cells and cell not in self.confirmed_walls:
+                    self.confirmed_walls.add(cell)
+                    newly_confirmed += 1
+                    break  # stop ray at first hint wall hit
+
+                # Stop at solid walls too
+                if self.wall_mask[cy, cx]:
+                    break
+
+        return newly_confirmed
+
+    def _find_nearest_gap(self):
+        """Find angle and distance to nearest gap in wall segments.
+
+        A gap is where two wall segment endpoints are close (within 500mm / 10 cells)
+        but not connected by wall cells.
+
+        Returns (angle_relative, distance_mm, gap_size_cells).
+        """
+        rx = int(self.pose[0] / CELL_SIZE_MM)
+        ry = int(self.pose[1] / CELL_SIZE_MM)
+
+        # Find wall boundary cells (wall cells adjacent to non-wall cells)
+        # These are potential segment endpoints
+        boundary_cells = []
+        for y in range(1, GRID_SIZE - 1):
+            for x in range(1, GRID_SIZE - 1):
+                if not self.wall_mask[y, x]:
+                    continue
+                # Check 4-connected neighbors for non-wall
+                has_free_neighbor = False
+                for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    ny, nx = y + dy, x + dx
+                    if not self.wall_mask[ny, nx] and self.grid[ny, nx] < -0.5:
+                        has_free_neighbor = True
+                        break
+                if has_free_neighbor:
+                    boundary_cells.append((x, y))
+
+        if len(boundary_cells) < 2:
+            return 0.0, MAX_RANGE_MM, 0
+
+        # Find endpoints: boundary cells with few wall neighbors (degree 1 in wall connectivity)
+        endpoints = []
+        boundary_set = set(boundary_cells)
+        for (x, y) in boundary_cells:
+            wall_neighbors = 0
+            for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                ny, nx = y + dy, x + dx
+                if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE and self.wall_mask[ny, nx]:
+                    wall_neighbors += 1
+            # Endpoint: wall cell with few wall neighbors (1-2 = likely segment end)
+            if wall_neighbors <= 2:
+                endpoints.append((x, y))
+
+        if len(endpoints) < 2:
+            return 0.0, MAX_RANGE_MM, 0
+
+        # Find closest pair of endpoints that are close but not wall-connected
+        gap_threshold = 10  # cells = 500mm
+        best_gap_dist_to_robot = float('inf')
+        best_gap_angle = 0.0
+        best_gap_size = 0
+
+        # Limit search to avoid O(n^2) explosion — sample up to 200 endpoints
+        sample_endpoints = endpoints[:200] if len(endpoints) > 200 else endpoints
+
+        for i in range(len(sample_endpoints)):
+            x1, y1 = sample_endpoints[i]
+            for j in range(i + 1, len(sample_endpoints)):
+                x2, y2 = sample_endpoints[j]
+                gap_dist = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+                if gap_dist < 2 or gap_dist > gap_threshold:
+                    continue  # too close (same segment) or too far (not a gap)
+
+                # Check that there's no wall between the two endpoints (it's a real gap)
+                steps = int(gap_dist) + 1
+                is_gap = True
+                for s in range(1, steps):
+                    t = s / steps
+                    mx = int(x1 + (x2 - x1) * t)
+                    my = int(y1 + (y2 - y1) * t)
+                    if 0 <= mx < GRID_SIZE and 0 <= my < GRID_SIZE and self.wall_mask[my, mx]:
+                        is_gap = False
+                        break
+
+                if is_gap:
+                    # Gap found — compute midpoint
+                    mid_x = (x1 + x2) / 2.0
+                    mid_y = (y1 + y2) / 2.0
+                    dx = mid_x - rx
+                    dy = mid_y - ry
+                    dist_to_robot = math.sqrt(dx * dx + dy * dy) * CELL_SIZE_MM
+
+                    if dist_to_robot < best_gap_dist_to_robot:
+                        best_gap_dist_to_robot = dist_to_robot
+                        world_angle = math.atan2(dy, dx)
+                        best_gap_angle = world_angle - self.pose[2]
+                        best_gap_angle = math.atan2(math.sin(best_gap_angle),
+                                                     math.cos(best_gap_angle))
+                        best_gap_size = gap_dist
+
+        if best_gap_dist_to_robot == float('inf'):
+            return 0.0, MAX_RANGE_MM, 0
+
+        return best_gap_angle, best_gap_dist_to_robot, best_gap_size
+
+    def _check_gaps_closed(self):
+        """Check if any gaps have been closed by wall confirmation this step.
+
+        Simplified: count wall boundary cells that now have more wall neighbors
+        than before (indicating the gap between segments has been filled).
+
+        Returns count of newly closed gaps.
+        """
+        # A gap is considered closed when confirmed wall cells bridge two endpoints
+        # For simplicity, count confirmed walls that are in gap regions
+        # (adjacent to 2+ wall segments from different directions)
+        newly_closed = 0
+        for (cx, cy) in self.confirmed_walls:
+            # Check if this confirmed cell bridges wall segments
+            wall_neighbors_h = 0  # horizontal wall neighbors
+            wall_neighbors_v = 0  # vertical wall neighbors
+            for dx in [-1, 1]:
+                nx = cx + dx
+                if 0 <= nx < GRID_SIZE and self.wall_mask[cy, nx]:
+                    wall_neighbors_h += 1
+            for dy in [-1, 1]:
+                ny = cy + dy
+                if 0 <= ny < GRID_SIZE and self.wall_mask[ny, cx]:
+                    wall_neighbors_v += 1
+            # Bridges if connects walls in at least one direction
+            if wall_neighbors_h >= 2 or wall_neighbors_v >= 2:
+                newly_closed += 1
+        return newly_closed
 
     def render(self):
         if self.render_mode is None:

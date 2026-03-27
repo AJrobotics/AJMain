@@ -166,11 +166,14 @@ class DayTrader:
 
         # Strategy engine
         self.ensemble = None
+        self.short_ensemble = None
         self.strategy_config = None
         try:
             from day_strategies import DayStrategyEnsemble, DayStrategyConfig
+            from day_strategies import ShortEnsemble, ShortStrategyConfig
             self.strategy_config = DayStrategyConfig()
             self.ensemble = DayStrategyEnsemble(self.strategy_config)
+            self.short_ensemble = ShortEnsemble(ShortStrategyConfig())
         except ImportError:
             print("  ⚠️ day_strategies.py not found")
 
@@ -352,11 +355,16 @@ class DayTrader:
         except Exception:
             pass
 
-        # Ensemble analysis
+        # Ensemble analysis (long)
         if self.ensemble is None:
             return None
 
         decision = self.ensemble.analyze(symbol, close, high, low, volume, is_morning)
+
+        # Short ensemble analysis (separate strategies)
+        short_decision = None
+        if self.short_ensemble and symbol in SHORT_ALLOWED:
+            short_decision = self.short_ensemble.analyze(symbol, close, high, low, volume)
 
         # Signal Bridge check (optional)
         bridge_blocked = False
@@ -370,17 +378,24 @@ class DayTrader:
             "symbol": symbol,
             "contract": contract,
             "decision": decision,
+            "short_decision": short_decision,
             "bridge_blocked": bridge_blocked,
             "current_price": float(close.iloc[-1]),
         }
 
     def process_signal(self, analysis: dict):
-        """Analysis result -> execute order"""
+        """Analysis result -> execute order (long ensemble + short ensemble)"""
         decision = analysis["decision"]
+        short_decision = analysis.get("short_decision")
         symbol = analysis["symbol"]
         price = analysis["current_price"]
 
-        # Logging
+        has_position = self.risk_manager and symbol in self.risk_manager.positions
+        position_side = None
+        if has_position:
+            position_side = self.risk_manager.positions[symbol].side
+
+        # ── Log long ensemble ──
         buy_count = sum(1 for s in decision.individual_signals if s.signal.name == "BUY")
         sell_count = sum(1 for s in decision.individual_signals if s.signal.name == "SELL")
 
@@ -395,54 +410,74 @@ class DayTrader:
                 f"({sig.confidence:.0%}) {sig.reason}"
             )
 
-        if decision.final_signal.name == "HOLD":
-            return
+        # ── Log short ensemble (if available) ──
+        if short_decision:
+            short_sell_count = sum(1 for s in short_decision.individual_signals if s.signal.name == "SELL")
+            short_buy_count = sum(1 for s in short_decision.individual_signals if s.signal.name == "BUY")
+            self.logger.info(
+                f"  🩳 {symbol} SHORT | {short_decision.final_signal.value} | "
+                f"Score: {short_decision.consensus_score:+.3f} | "
+                f"SELL:{short_sell_count} BUY:{short_buy_count}"
+            )
+            for sig in short_decision.individual_signals:
+                self.logger.info(
+                    f"      {sig.strategy_name:15s} → {sig.signal.name:4s} "
+                    f"({sig.confidence:.0%}) {sig.reason}"
+                )
 
         if analysis.get("bridge_blocked"):
             return
 
-        # Risk check
+        # ── Risk check ──
         if self.risk_manager:
             risk = self.risk_manager.check_risk(symbol, price)
 
-            # Must liquidate all positions
             if risk.must_close_all:
                 self.logger.warning(f"  🔴 {risk.level.value} — Full liquidation order")
                 self._liquidate_all()
                 return
 
-            # Close individual stock
             for sym in risk.must_close_symbols:
                 self.logger.warning(f"  🔴 {sym} forced liquidation")
                 self._close_position(sym)
 
-            # Cannot open new position
-            if not risk.can_open_new and decision.final_signal.name in ("BUY", "SELL"):
-                # Still allow SELL to close existing positions
-                if decision.final_signal.name == "SELL" and self.risk_manager and symbol in self.risk_manager.positions:
-                    pass  # Allow closing existing positions even when can_open_new is False
-                elif decision.final_signal.name == "BUY":
-                    self.logger.info(f"  🟡 Cannot open new position: {', '.join(risk.reasons)}")
-                    return
-                else:
-                    self.logger.info(f"  🟡 Cannot open new short: {', '.join(risk.reasons)}")
-                    return
+        # ── Route 1: Cover short (long ensemble BUY OR short ensemble BUY) ──
+        if position_side == "SHORT":
+            if decision.final_signal.name == "BUY":
+                self._cover_short(analysis)
+                return
+            if short_decision and short_decision.final_signal.name == "BUY":
+                self._cover_short(analysis)
+                return
 
-        # Execute order
-        if decision.final_signal.name == "BUY":
-            # BUY signal: open long OR cover short
-            if self.risk_manager and symbol in self.risk_manager.positions:
-                pos = self.risk_manager.positions[symbol]
-                if pos.side == "SHORT":
-                    self._cover_short(analysis)
+        # ── Route 2: Long ensemble actions ──
+        if decision.final_signal.name == "BUY" and not has_position:
+            if self.risk_manager:
+                risk = self.risk_manager.check_risk(symbol, price)
+                if not risk.can_open_new:
+                    self.logger.info(f"  🟡 Cannot open long: {', '.join(risk.reasons)}")
                     return
             self._execute_buy(analysis)
-        elif decision.final_signal.name == "SELL":
-            # SELL signal: close long OR open short
-            if self.risk_manager and symbol in self.risk_manager.positions:
-                self._execute_sell(analysis)
-            else:
-                self._execute_short(analysis)
+            return
+
+        if decision.final_signal.name == "SELL" and has_position and position_side == "LONG":
+            self._execute_sell(analysis)
+            return
+
+        # ── Route 3: Short ensemble -> open short (separate decision) ──
+        if (short_decision and
+                short_decision.final_signal.name == "SELL" and
+                not has_position and
+                symbol in SHORT_ALLOWED):
+            if self.risk_manager:
+                risk = self.risk_manager.check_risk(symbol, price)
+                if not risk.can_open_new:
+                    self.logger.info(f"  🟡 Cannot open short: {', '.join(risk.reasons)}")
+                    return
+            # Use SHORT ensemble's SL/TP (tighter, faster exit)
+            analysis["short_decision"] = short_decision
+            self._execute_short(analysis)
+            return
 
     def _execute_buy(self, analysis: dict):
         """Execute buy order"""
@@ -541,10 +576,10 @@ class DayTrader:
             self.logger.error(f"  ❌ SELL order failed: {e}")
 
     def _execute_short(self, analysis: dict):
-        """Open a short position on a SELL signal (no existing position)."""
+        """Open a short position using SHORT ensemble's decision."""
         symbol = analysis["symbol"]
         price = analysis["current_price"]
-        decision = analysis["decision"]
+        short_decision = analysis.get("short_decision") or analysis["decision"]
 
         # Only short high-liquidity stocks
         if symbol not in SHORT_ALLOWED:
@@ -562,7 +597,7 @@ class DayTrader:
         # Position sizing (50% of normal for shorts)
         shares = 5  # Default
         if self.risk_manager:
-            stop_distance = abs(price - decision.stop_loss_price) if decision.stop_loss_price > 0 else 0
+            stop_distance = abs(price - short_decision.stop_loss_price) if short_decision.stop_loss_price > 0 else 0
             sizing = self.risk_manager.calculate_position_size(
                 symbol, price, stop_distance=stop_distance, is_short=True,
             )
@@ -572,12 +607,15 @@ class DayTrader:
                 f"${sizing['dollar_amount']:,.2f} | {sizing['method']}"
             )
 
-        # Compute short stop-loss (price goes UP = bad for short)
-        short_sl_pct = 2.0  # default
-        if self.risk_manager:
-            short_sl_pct = getattr(self.risk_manager.config, 'short_stop_loss_pct', 2.0)
-        stop_loss = round(price * (1 + short_sl_pct / 100), 2)
-        take_profit = round(price * (1 - short_sl_pct * 1.5 / 100), 2)  # TP at 1.5x SL distance
+        # Use short ensemble's ATR-based SL/TP (tighter than long)
+        stop_loss = short_decision.stop_loss_price
+        take_profit = short_decision.take_profit_price
+
+        # Fallback to config-based SL/TP if ensemble didn't provide
+        if stop_loss <= price:  # SL should be ABOVE price for shorts
+            short_sl_pct = getattr(self.risk_manager.config, 'short_stop_loss_pct', 2.0) if self.risk_manager else 2.0
+            stop_loss = round(price * (1 + short_sl_pct / 100), 2)
+            take_profit = round(price * (1 - short_sl_pct * 1.25 / 100), 2)
 
         if self.config.trade_mode == TradeMode.ALERT:
             self.logger.info(

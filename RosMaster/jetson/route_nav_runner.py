@@ -95,8 +95,8 @@ class RouteNavRunner:
 
             # Forward speed: use magnitude of vx prediction (always go forward)
             vx = abs(raw_vx) * 0.08 + 0.02   # [0.02, 0.10] slower, safer
-            vy = raw_vy * 0.08                 # [-0.08, 0.08] strafe
-            vz = raw_vz * 1.0                  # [-1.0, 1.0] rotation
+            vy = -raw_vy * 0.08                # negate: camera mirror vs motor convention
+            vz = -raw_vz * 1.0                 # negate: IMU convention vs motor convention
 
             return vx, vy, vz
 
