@@ -67,6 +67,69 @@ class TraderModule:
         self._sms_date = ""
         self._load_watcher_state()
 
+        # Market indices cache
+        self._indices_cache = {"data": None, "ts": 0}
+        self._indices_lock = threading.Lock()
+
+    def _get_market_indices(self, port: int = IB_PAPER_PORT) -> dict:
+        """Fetch real-time market index values from IB using ETF proxies."""
+        with self._indices_lock:
+            if self._indices_cache["data"] and time.time() - self._indices_cache["ts"] < 30:
+                return self._indices_cache["data"]
+        try:
+            import asyncio
+            try:
+                asyncio.get_event_loop()
+            except RuntimeError:
+                asyncio.set_event_loop(asyncio.new_event_loop())
+
+            from ib_insync import IB, Stock
+            ib = IB()
+            ib.connect("127.0.0.1", port, clientId=98, timeout=5)
+
+            # Use ETFs and convert to approximate index values
+            # SPY ≈ S&P500 / 10, QQQ ≈ NASDAQ-100 / 34.5, DIA ≈ Dow / 90
+            etf_to_index = [
+                ("SPY", "S&P 500", 10.0),
+                ("QQQ", "NASDAQ", 34.5),
+                ("DIA", "Dow Jones", 90.0),
+            ]
+            indices = []
+            for sym, label, multiplier in etf_to_index:
+                c = Stock(sym, "SMART", "USD")
+                ib.qualifyContracts(c)
+                bars = ib.reqHistoricalData(
+                    c, endDateTime="", durationStr="2 D",
+                    barSizeSetting="1 day", whatToShow="TRADES",
+                    useRTH=True, formatDate=1,
+                )
+                if bars and len(bars) >= 2:
+                    etf_price = bars[-1].close
+                    prev_close = bars[-2].close
+                    chg_pct = ((etf_price - prev_close) / prev_close) * 100
+                    index_val = etf_price * multiplier
+                elif bars and len(bars) == 1:
+                    etf_price = bars[0].close
+                    chg_pct = 0
+                    index_val = etf_price * multiplier
+                else:
+                    index_val = None
+                    chg_pct = 0
+                indices.append({
+                    "symbol": label,
+                    "price": round(float(index_val)) if index_val else None,
+                    "change_pct": round(chg_pct, 2),
+                })
+
+            ib.disconnect()
+            result = {"indices": indices, "ts": _dt.now().strftime("%H:%M:%S")}
+            with self._indices_lock:
+                self._indices_cache = {"data": result, "ts": time.time()}
+            return result
+        except Exception as e:
+            logger.warning("Market indices fetch failed: %s", e)
+            return {"indices": [], "error": str(e)}
+
     def _get_ib_portfolio(self, port: int = IB_PAPER_PORT) -> dict:
         """Connect to IB Gateway and fetch account + portfolio data."""
         with self._portfolio_lock:
@@ -759,6 +822,11 @@ class TraderModule:
         def trader_portfolio():
             port = request.args.get("port", IB_PAPER_PORT, type=int)
             return jsonify(self._get_ib_portfolio(port))
+
+        @bp.route("/api/trader/market-indices")
+        def market_indices():
+            port = request.args.get("port", IB_PAPER_PORT, type=int)
+            return jsonify(self._get_market_indices(port))
 
         @bp.route("/api/trader/start", methods=["POST"])
         def trader_start():

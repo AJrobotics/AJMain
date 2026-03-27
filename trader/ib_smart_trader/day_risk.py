@@ -64,6 +64,9 @@ class DayRiskConfig:
     cooldown_after_loss_min: int = 10         # N-minute cooldown after stop loss
     max_trades_per_hour: int = 10             # Max trades per hour
 
+    # ── Short selling ──
+    short_stop_loss_pct: float = 2.0          # Stop-loss % for short positions
+
 
 # ═══════════════════════════════════════════════════════════════
 #  Risk state
@@ -315,8 +318,14 @@ class DayRiskManager:
                 if pos.side == "LONG" and pos.current_price <= pos.stop_loss:
                     result.must_close_symbols.append(symbol)
                     result.reasons.append(
-                        f"🛑 {symbol} stop loss reached "
+                        f"🛑 {symbol} LONG stop loss reached "
                         f"${pos.current_price:.2f} <= SL ${pos.stop_loss:.2f}"
+                    )
+                elif pos.side == "SHORT" and pos.current_price >= pos.stop_loss:
+                    result.must_close_symbols.append(symbol)
+                    result.reasons.append(
+                        f"🛑 {symbol} SHORT stop loss reached "
+                        f"${pos.current_price:.2f} >= SL ${pos.stop_loss:.2f}"
                     )
 
             # Take profit price reached check
@@ -324,8 +333,14 @@ class DayRiskManager:
                 if pos.side == "LONG" and pos.current_price >= pos.take_profit:
                     result.must_close_symbols.append(symbol)
                     result.reasons.append(
-                        f"🎯 {symbol} take profit reached "
+                        f"🎯 {symbol} LONG take profit reached "
                         f"${pos.current_price:.2f} >= TP ${pos.take_profit:.2f}"
+                    )
+                elif pos.side == "SHORT" and pos.current_price <= pos.take_profit:
+                    result.must_close_symbols.append(symbol)
+                    result.reasons.append(
+                        f"🎯 {symbol} SHORT take profit reached "
+                        f"${pos.current_price:.2f} <= TP ${pos.take_profit:.2f}"
                     )
 
     def _check_position_count(self, result: RiskCheckResult):
@@ -407,7 +422,7 @@ class DayRiskManager:
 
     def calculate_position_size(
         self, symbol: str, price: float, atr: float = 0.0,
-        stop_distance: float = 0.0,
+        stop_distance: float = 0.0, is_short: bool = False,
     ) -> dict:
         """
         Calculate position size
@@ -444,6 +459,12 @@ class DayRiskManager:
         if shares * price > max_dollar:
             shares = int(max_dollar / price)
             dollar_amount = shares * price
+
+        # Short positions: 50% of normal size
+        if is_short:
+            shares = max(1, shares // 2)
+            dollar_amount = shares * price
+            method += " (SHORT 50%)"
 
         # Minimum 1 share
         shares = max(1, shares)

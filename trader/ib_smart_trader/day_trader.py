@@ -37,6 +37,10 @@ except ImportError as e:
     print(f"  Missing: {e}")
     HAS_IB = False
 
+# Stocks allowed for short selling (high liquidity only)
+SHORT_ALLOWED = {"SPY", "QQQ", "AAPL", "NVDA", "META", "MSFT", "AMZN", "GOOGL", "AMD", "TSLA"}
+MAX_SHORT_POSITIONS = 2
+
 
 # ═══════════════════════════════════════════════════════════════
 #  Configuration
@@ -413,15 +417,32 @@ class DayTrader:
                 self._close_position(sym)
 
             # Cannot open new position
-            if not risk.can_open_new and decision.final_signal.name == "BUY":
-                self.logger.info(f"  🟡 Cannot open new position: {', '.join(risk.reasons)}")
-                return
+            if not risk.can_open_new and decision.final_signal.name in ("BUY", "SELL"):
+                # Still allow SELL to close existing positions
+                if decision.final_signal.name == "SELL" and self.risk_manager and symbol in self.risk_manager.positions:
+                    pass  # Allow closing existing positions even when can_open_new is False
+                elif decision.final_signal.name == "BUY":
+                    self.logger.info(f"  🟡 Cannot open new position: {', '.join(risk.reasons)}")
+                    return
+                else:
+                    self.logger.info(f"  🟡 Cannot open new short: {', '.join(risk.reasons)}")
+                    return
 
         # Execute order
         if decision.final_signal.name == "BUY":
+            # BUY signal: open long OR cover short
+            if self.risk_manager and symbol in self.risk_manager.positions:
+                pos = self.risk_manager.positions[symbol]
+                if pos.side == "SHORT":
+                    self._cover_short(analysis)
+                    return
             self._execute_buy(analysis)
         elif decision.final_signal.name == "SELL":
-            self._execute_sell(analysis)
+            # SELL signal: close long OR open short
+            if self.risk_manager and symbol in self.risk_manager.positions:
+                self._execute_sell(analysis)
+            else:
+                self._execute_short(analysis)
 
     def _execute_buy(self, analysis: dict):
         """Execute buy order"""
@@ -519,6 +540,111 @@ class DayTrader:
         except Exception as e:
             self.logger.error(f"  ❌ SELL order failed: {e}")
 
+    def _execute_short(self, analysis: dict):
+        """Open a short position on a SELL signal (no existing position)."""
+        symbol = analysis["symbol"]
+        price = analysis["current_price"]
+        decision = analysis["decision"]
+
+        # Only short high-liquidity stocks
+        if symbol not in SHORT_ALLOWED:
+            return
+
+        # Check max short positions
+        if self.risk_manager:
+            short_count = sum(
+                1 for p in self.risk_manager.positions.values() if p.side == "SHORT"
+            )
+            if short_count >= MAX_SHORT_POSITIONS:
+                self.logger.info(f"  🟡 {symbol} short blocked — max shorts ({MAX_SHORT_POSITIONS}) reached")
+                return
+
+        # Position sizing (50% of normal for shorts)
+        shares = 5  # Default
+        if self.risk_manager:
+            stop_distance = abs(price - decision.stop_loss_price) if decision.stop_loss_price > 0 else 0
+            sizing = self.risk_manager.calculate_position_size(
+                symbol, price, stop_distance=stop_distance, is_short=True,
+            )
+            shares = sizing["shares"]
+            self.logger.info(
+                f"  📏 Short sizing: {shares} shares × ${price:.2f} = "
+                f"${sizing['dollar_amount']:,.2f} | {sizing['method']}"
+            )
+
+        # Compute short stop-loss (price goes UP = bad for short)
+        short_sl_pct = 2.0  # default
+        if self.risk_manager:
+            short_sl_pct = getattr(self.risk_manager.config, 'short_stop_loss_pct', 2.0)
+        stop_loss = round(price * (1 + short_sl_pct / 100), 2)
+        take_profit = round(price * (1 - short_sl_pct * 1.5 / 100), 2)  # TP at 1.5x SL distance
+
+        if self.config.trade_mode == TradeMode.ALERT:
+            self.logger.info(
+                f"  🔔 [ALERT] SHORT {symbol} x{shares} @ ${price:.2f} | "
+                f"SL=${stop_loss:.2f} TP=${take_profit:.2f}"
+            )
+            return
+
+        # AUTO mode: place short order (SELL without position = short in IB)
+        try:
+            contract = analysis["contract"]
+            order = MarketOrder("SELL", shares)
+            trade = self.ib.placeOrder(contract, order)
+            self.ib.sleep(1)
+
+            self.logger.info(
+                f"  ✅ SHORT order sent! {symbol} x{shares} | "
+                f"OrderID: {trade.order.orderId} | Status: {trade.orderStatus.status}"
+            )
+
+            if self.risk_manager:
+                self.risk_manager.open_position(
+                    symbol, "SHORT", price, shares,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                )
+
+        except Exception as e:
+            self.logger.error(f"  ❌ SHORT order failed: {e}")
+
+    def _cover_short(self, analysis: dict):
+        """Cover (close) a short position by buying shares."""
+        symbol = analysis["symbol"]
+        price = analysis["current_price"]
+
+        if not self.risk_manager or symbol not in self.risk_manager.positions:
+            return
+
+        pos = self.risk_manager.positions[symbol]
+        if pos.side != "SHORT":
+            return
+
+        current_qty = pos.quantity
+        if current_qty <= 0:
+            return
+
+        if self.config.trade_mode == TradeMode.ALERT:
+            self.logger.info(f"  🔔 [ALERT] COVER SHORT {symbol} x{current_qty} @ ${price:.2f}")
+            return
+
+        try:
+            contract = analysis["contract"]
+            order = MarketOrder("BUY", int(current_qty))
+            trade = self.ib.placeOrder(contract, order)
+            self.ib.sleep(1)
+
+            self.logger.info(
+                f"  ✅ COVER SHORT order sent! {symbol} x{current_qty} | "
+                f"OrderID: {trade.order.orderId}"
+            )
+
+            if self.risk_manager:
+                self.risk_manager.close_position(symbol, price)
+
+        except Exception as e:
+            self.logger.error(f"  ❌ COVER SHORT order failed: {e}")
+
     def _close_position(self, symbol: str):
         """Close position for a specific stock — Day Trader's own positions only"""
         if not HAS_IB:
@@ -529,7 +655,8 @@ class DayTrader:
             self.logger.info(f"  ⚪ {symbol} not a Day Trader position — skipping liquidation")
             return
 
-        qty = self.risk_manager.positions[symbol].quantity
+        pos = self.risk_manager.positions[symbol]
+        qty = pos.quantity
         if qty <= 0:
             return
 
@@ -538,10 +665,14 @@ class DayTrader:
             if contract.symbol == symbol:
                 price = self.get_current_price(contract)
                 if price and self.config.trade_mode == TradeMode.AUTO:
-                    if qty > 0:
+                    if pos.side == "SHORT":
+                        # Cover short: BUY to close
+                        order = MarketOrder("BUY", int(qty))
+                    else:
+                        # Close long: SELL
                         order = MarketOrder("SELL", int(qty))
-                        self.ib.placeOrder(contract, order)
-                        self.ib.sleep(1)
+                    self.ib.placeOrder(contract, order)
+                    self.ib.sleep(1)
                 if price and self.risk_manager:
                     self.risk_manager.close_position(symbol, price)
                 break
@@ -573,8 +704,13 @@ class DayTrader:
                 return
             with open(limits_path, "r") as f:
                 data = json.load(f)
-            level = int(data.get("day", {}).get("aggressiveness", 5))
+            day_limits = data.get("day", {})
+            level = int(day_limits.get("aggressiveness", 5))
             self.risk_manager.apply_aggressiveness(level)
+            # Apply short stop-loss from dashboard
+            short_sl = day_limits.get("short_stop_loss_pct")
+            if short_sl is not None:
+                self.risk_manager.config.short_stop_loss_pct = float(short_sl)
         except Exception:
             pass
 
