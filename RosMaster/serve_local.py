@@ -279,6 +279,29 @@ class LocalHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
             return
 
+        # Serve route files (frames, predictions)
+        if self.path.startswith('/routes/'):
+            fname = self.path.replace('/routes/', '')
+            route_path = os.path.join(ROOT_DIR, "routes", fname)
+            if os.path.exists(route_path) and os.path.isfile(route_path):
+                self.send_response(200)
+                if route_path.endswith('.json'):
+                    self.send_header('Content-Type', 'application/json')
+                elif route_path.endswith('.jpg'):
+                    self.send_header('Content-Type', 'image/jpeg')
+                else:
+                    self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                size = os.path.getsize(route_path)
+                self.send_header('Content-Length', str(size))
+                self.end_headers()
+                with open(route_path, 'rb') as f:
+                    self.wfile.write(f.read())
+            else:
+                self.send_response(404)
+                self.end_headers()
+            return
+
         # Serve ONNX model files
         if self.path.startswith('/models/'):
             fname = self.path.replace('/models/', '')

@@ -53,6 +53,7 @@ class Explorer:
 
         # NN navigator (lazy-loaded)
         self._nn_navigator = None
+        self._route_nav_runner = None
 
     def _move_filtered(self, vx, vy, vz):
         """Move with collision avoidance."""
@@ -904,6 +905,75 @@ class Explorer:
         except Exception as e:
             _log.error(f"Error reading LiDAR for NN: {e}")
             return None
+
+    # ================================================================
+    # Route Nav (behavior cloning: camera + LiDAR)
+    # ================================================================
+
+    def start_route_nav(self, time_limit=None):
+        """Start navigation using behavior cloning model (camera + LiDAR)."""
+        if self.state not in ("idle", "stopped"):
+            return {"error": f"Explorer busy: {self.state}"}
+
+        if self._route_nav_runner is None:
+            try:
+                from route_nav_runner import RouteNavRunner
+                self._route_nav_runner = RouteNavRunner()
+            except Exception as e:
+                _log.error(f"Failed to load route nav runner: {e}")
+                return {"error": f"Route nav model not available: {e}"}
+
+        if not self._route_nav_runner.available:
+            return {"error": "Route nav model not loaded (check /home/jetson/RosMaster/models/route_nav_policy.pt)"}
+
+        if time_limit is not None:
+            self.time_limit = time_limit
+        self._abort = False
+        self.state = "exploring"
+        self._thread = threading.Thread(target=self._route_nav_loop, daemon=True)
+        self._thread.start()
+        _log.info("Route nav started (camera + LiDAR)")
+        return {"ok": True}
+
+    def _route_nav_loop(self):
+        """Main loop for behavior cloning navigation."""
+        start_time = time.time()
+        step_dt = 1.0 / EXPLORE_UPDATE_HZ
+
+        try:
+            while not self._abort and self.state == "exploring":
+                elapsed = time.time() - start_time
+                if self.time_limit and elapsed > self.time_limit:
+                    _log.info("Route nav time limit (%.0fs)", elapsed)
+                    self.state = "arrived"
+                    return
+
+                # Get camera frame
+                cam = getattr(self, 'cam', None)
+                rgb_b64 = cam.get_frame() if cam else None
+                if not rgb_b64:
+                    time.sleep(step_dt)
+                    continue
+
+                # Get LiDAR scan
+                lidar_scan = None
+                if self.lidar_reader:
+                    lidar_scan = self.lidar_reader.get_scan()
+
+                # Get action from model
+                vx, vy, vz = self._route_nav_runner.get_action(rgb_b64, lidar_scan)
+
+                # Apply collision avoidance
+                self._move_filtered(vx, vy, vz)
+
+                time.sleep(step_dt)
+
+        except Exception as e:
+            _log.error(f"Route nav error: {e}", exc_info=True)
+        finally:
+            self._stop_motors()
+            if self.state == "exploring":
+                self.state = "idle"
 
     # ================================================================
     # Route following

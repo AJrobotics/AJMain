@@ -411,6 +411,11 @@ class ExplorerHandler(tornado.web.RequestHandler):
                 time_limit = int(data.get("time_limit", 300))
                 result = explorer.start_nn_explore(time_limit=time_limit)
                 _start_recording()
+            elif action == "route_nav":
+                time_limit = int(data.get("time_limit", 300))
+                explorer.cam = cam_primary
+                result = explorer.start_route_nav(time_limit=time_limit)
+                _start_recording()
             elif action == "route_follow":
                 route_name = data.get("route_name", "")
                 time_limit = int(data.get("time_limit", 600))
@@ -582,6 +587,74 @@ class RouteHandler(tornado.web.RequestHandler):
 
         else:
             self.write(json.dumps({"ok": False, "error": "Unknown action"}))
+
+
+class RouteNavLiveHandler(tornado.web.RequestHandler):
+    """Returns live camera frame + LiDAR + model prediction for route viewer."""
+    def get(self):
+        import base64
+        result = {"ok": False}
+
+        # Get camera frame
+        rgb_b64 = cam_primary.get_frame() if cam_primary else None
+
+        # Get LiDAR scan
+        scan = lidar.get_scan() if lidar else []
+        scan_compact = [[p["angle"], p["dist"]] for p in scan] if scan else []
+
+        # Get sectors
+        sectors = collision.get_sector_distances() if collision else [9999] * 8
+
+        # Run model prediction if route_nav_runner is loaded in explorer
+        pred = [0, 0, 0]
+        if hasattr(explorer, '_route_nav_runner') and explorer._route_nav_runner and explorer._route_nav_runner.available and rgb_b64:
+            try:
+                vx, vy, vz = explorer._route_nav_runner.get_action(rgb_b64, scan)
+                pred = [round(vx, 4), round(vy, 4), round(vz, 4)]
+            except Exception:
+                pass
+        elif rgb_b64:
+            # Lazy load runner for live preview
+            try:
+                from route_nav_runner import RouteNavRunner
+                if not hasattr(self, '_runner'):
+                    RouteNavLiveHandler._runner = RouteNavRunner()
+                if RouteNavLiveHandler._runner.available:
+                    vx, vy, vz = RouteNavLiveHandler._runner.get_action(rgb_b64, scan)
+                    pred = [round(vx, 4), round(vy, 4), round(vz, 4)]
+            except Exception:
+                pass
+
+        # LiDAR bins
+        import numpy as np
+        distances = np.full(360, 6000.0, dtype=np.float32)
+        for s in scan_compact:
+            idx = int(round(s[0])) % 360
+            if 0 < s[1] < distances[idx]:
+                distances[idx] = s[1]
+        bins = distances.reshape(36, 10).min(axis=1)
+        lidar_bins = [round(float(b / 6000.0), 3) for b in bins]
+
+        # IMU
+        imu_yaw = 0
+        if bot:
+            try:
+                _, _, imu_yaw = bot.get_imu_attitude_data()
+            except Exception:
+                pass
+
+        result = {
+            "ok": True,
+            "frame": rgb_b64[:200] + "..." if rgb_b64 and len(rgb_b64) > 200 else rgb_b64,
+            "frame_full": rgb_b64,
+            "pred": pred,
+            "lidar_bins": lidar_bins,
+            "sectors": [round(s) for s in sectors],
+            "imu_yaw": round(imu_yaw, 1),
+            "state": explorer.state,
+        }
+        self.set_header('Access-Control-Allow-Origin', '*')
+        self.write(json.dumps(result))
 
 
 class ShutdownHandler(tornado.web.RequestHandler):
@@ -1153,6 +1226,7 @@ def make_app():
         (r"/api/gps/test_receive", GpsTestReceiveHandler),
         (r"/api/xbee", XBeeStatusHandler),
         (r"/api/route", RouteHandler),
+        (r"/api/route_nav/live", RouteNavLiveHandler),
         (r"/ws/slam", SlamWSHandler),
         (r"/ws/status", StatusWSHandler),
         (r"/ws/debug", DebugWSHandler),

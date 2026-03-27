@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Route Prediction Viewer</title>
+<style>
+body { margin:0; background:#0a0a1a; color:#e0e0e0; font-family:monospace; }
+#header { background:#0d1a2a; padding:8px 16px; display:flex; align-items:center; gap:16px; border-bottom:1px solid #333; }
+#header h1 { font-size:16px; color:#00d4ff; margin:0; }
+.hdr-btn { background:#1a2a3a; color:#0df; border:1px solid #333; padding:4px 12px; cursor:pointer; font-size:12px; border-radius:3px; }
+.hdr-btn:hover { background:#2a3a4a; }
+#main { display:flex; height:calc(100vh - 44px); }
+#viewer { flex:1; display:flex; flex-direction:column; padding:10px; }
+#frame-area { display:flex; gap:10px; flex:1; }
+#camera-view { flex:1; display:flex; flex-direction:column; }
+#camera-view img { width:100%; max-height:400px; object-fit:contain; background:#000; border:1px solid #333; }
+#lidar-view { width:300px; }
+#lidar-canvas { width:100%; background:#0a0a1a; border:1px solid #333; }
+#controls { padding:10px 0; display:flex; align-items:center; gap:10px; }
+#slider { flex:1; }
+#info-panel { width:350px; overflow-y:auto; border-left:1px solid #333; padding:10px; font-size:13px; }
+.info-row { display:flex; justify-content:space-between; padding:3px 0; }
+.info-label { color:#888; }
+.info-val { color:#0f8; }
+#pred-visual { margin-top:10px; }
+#pred-canvas { width:100%; height:200px; background:#0a0a1a; border:1px solid #333; }
+.arrow-legend { font-size:11px; margin-top:4px; }
+.arrow-legend span { margin-right:12px; }
+</style>
+</head>
+<body>
+<div id="header">
+    <h1>Route Prediction Viewer</h1>
+    <button class="hdr-btn" id="live-btn" onclick="toggleLive()" style="background:#1a3a1a;color:#0f8;font-weight:bold;">LIVE</button>
+    <select id="route-select" class="hdr-btn" onchange="loadRoute(this.value)"></select>
+    <button class="hdr-btn" onclick="autoPlay()">Play</button>
+    <button class="hdr-btn" onclick="autoStop()">Stop</button>
+    <span id="frame-info" style="color:#888;">Frame 0 / 0</span>
+</div>
+<div id="main">
+    <div id="viewer">
+        <div id="frame-area">
+            <div id="camera-view">
+                <div style="color:#0df;font-size:12px;margin-bottom:4px;">Camera (what robot sees)</div>
+                <img id="camera-img" />
+                <div id="controls">
+                    <button class="hdr-btn" onclick="prevFrame()">Prev</button>
+                    <input type="range" id="slider" min="0" max="0" value="0" oninput="seekFrame(this.value)">
+                    <button class="hdr-btn" onclick="nextFrame()">Next</button>
+                </div>
+            </div>
+            <div id="lidar-view">
+                <div style="color:#0df;font-size:12px;margin-bottom:4px;">LiDAR + Prediction</div>
+                <canvas id="lidar-canvas" width="300" height="300"></canvas>
+                <div class="arrow-legend">
+                    <span style="color:#0f8;">Green = predicted direction</span>
+                </div>
+            </div>
+        </div>
+        <div id="pred-visual">
+            <div style="color:#0df;font-size:12px;margin-bottom:4px;">Prediction Timeline</div>
+            <canvas id="pred-canvas" width="900" height="200"></canvas>
+        </div>
+    </div>
+    <div id="info-panel">
+        <div style="color:#00d4ff;font-size:14px;margin-bottom:8px;">PREDICTION</div>
+        <div class="info-row"><span class="info-label">Frame</span><span class="info-val" id="p-frame">-</span></div>
+        <div class="info-row"><span class="info-label">Time</span><span class="info-val" id="p-time">-</span></div>
+        <div class="info-row"><span class="info-label">IMU Yaw</span><span class="info-val" id="p-imu">-</span></div>
+        <div style="margin-top:10px;color:#ff0;font-size:14px;">Model Output</div>
+        <div class="info-row"><span class="info-label">vx (forward)</span><span class="info-val" id="p-vx" style="font-size:18px;">-</span></div>
+        <div class="info-row"><span class="info-label">vy (strafe)</span><span class="info-val" id="p-vy" style="font-size:18px;">-</span></div>
+        <div class="info-row"><span class="info-label">vz (rotation)</span><span class="info-val" id="p-vz" style="font-size:18px;">-</span></div>
+        <div style="margin-top:10px;">
+            <div class="info-row"><span class="info-label">Speed</span><span class="info-val" id="p-speed">-</span></div>
+            <div class="info-row"><span class="info-label">Direction</span><span class="info-val" id="p-dir">-</span></div>
+        </div>
+        <div style="margin-top:16px;color:#00d4ff;font-size:14px;">INTERPRETATION</div>
+        <div id="p-interpret" style="margin-top:4px;font-size:13px;color:#aaa;line-height:1.6;">-</div>
+    </div>
+</div>
+
+<script>
+let predictions = [];
+let currentIdx = 0;
+let autoTimer = null;
+const routesBase = '/routes';
+
+// Load route list
+async function init() {
+    // Try API first, then scan known routes
+    const sel = document.getElementById('route-select');
+    let routes = [];
+    try {
+        const r = await fetch('/api/route?action=list');
+        const d = await r.json();
+        routes = d.routes || [];
+    } catch(e) {}
+
+    if (routes.length === 0) {
+        // Try loading known routes by checking predictions files
+        for (const name of ['P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10']) {
+            try {
+                const r = await fetch(routesBase + '/' + name + '/predictions/model_predictions.json');
+                if (r.ok) {
+                    const preds = await r.json();
+                    routes.push({name: name, keyframes: preds.length});
+                }
+            } catch(e) {}
+        }
+    }
+
+    sel.innerHTML = routes.map(r =>
+        '<option value="' + r.name + '">' + r.name + ' (' + (r.keyframes || '?') + ' frames)</option>'
+    ).join('');
+    if (routes.length > 0) loadRoute(routes[0].name);
+}
+
+async function loadRoute(name) {
+    try {
+        const r = await fetch(routesBase + '/' + name + '/predictions/model_predictions.json');
+        predictions = await r.json();
+        document.getElementById('slider').max = predictions.length - 1;
+        document.getElementById('frame-info').textContent = 'Loaded: ' + predictions.length + ' frames';
+        currentIdx = 0;
+        showFrame(0);
+        drawTimeline();
+    } catch(e) {
+        console.error('Load error:', e);
+        // Try via API proxy
+        predictions = [];
+    }
+}
+
+function showFrame(idx) {
+    if (idx < 0 || idx >= predictions.length) return;
+    currentIdx = idx;
+    const p = predictions[idx];
+    const routeName = document.getElementById('route-select').value;
+
+    // Update camera image
+    const img = document.getElementById('camera-img');
+    img.src = routesBase + '/' + routeName + '/frames/frame_' + String(p.frame_idx).padStart(6, '0') + '.jpg';
+
+    // Update slider
+    document.getElementById('slider').value = idx;
+    document.getElementById('frame-info').textContent = 'Frame ' + (idx + 1) + ' / ' + predictions.length;
+
+    // Update info
+    document.getElementById('p-frame').textContent = p.frame_idx;
+    document.getElementById('p-time').textContent = p.t + 's';
+    document.getElementById('p-imu').textContent = p.imu_yaw.toFixed(1) + '\u00B0';
+
+    const vx = p.pred[0], vy = p.pred[1], vz = p.pred[2];
+    document.getElementById('p-vx').textContent = vx.toFixed(3) + ' m/s';
+    document.getElementById('p-vx').style.color = vx > 0.02 ? '#0f8' : (vx < -0.02 ? '#f44' : '#888');
+    document.getElementById('p-vy').textContent = vy.toFixed(3) + ' m/s';
+    document.getElementById('p-vy').style.color = Math.abs(vy) > 0.02 ? '#ff0' : '#888';
+    document.getElementById('p-vz').textContent = vz.toFixed(2) + ' rad/s';
+    document.getElementById('p-vz').style.color = Math.abs(vz) > 0.1 ? '#0df' : '#888';
+
+    const speed = Math.sqrt(vx * vx + vy * vy);
+    document.getElementById('p-speed').textContent = (speed * 1000).toFixed(0) + ' mm/s';
+
+    // Interpret
+    let interp = '';
+    if (speed < 0.01 && Math.abs(vz) < 0.05) interp = 'STOP — robot should stay still';
+    else if (Math.abs(vz) > 0.3) interp = (vz > 0 ? 'TURN LEFT' : 'TURN RIGHT') + ' at ' + Math.abs(vz).toFixed(1) + ' rad/s';
+    else if (vx > 0.05) interp = 'FORWARD at ' + (vx * 1000).toFixed(0) + ' mm/s';
+    else if (vx < -0.02) interp = 'BACKWARD at ' + (-vx * 1000).toFixed(0) + ' mm/s';
+    else if (Math.abs(vy) > 0.02) interp = (vy > 0 ? 'STRAFE RIGHT' : 'STRAFE LEFT') + ' at ' + (Math.abs(vy) * 1000).toFixed(0) + ' mm/s';
+    else interp = 'SLOW MOVE — vx=' + (vx*1000).toFixed(0) + ' vy=' + (vy*1000).toFixed(0) + ' mm/s';
+    document.getElementById('p-interpret').textContent = interp;
+
+    // Draw LiDAR + prediction arrow
+    drawLidar(p);
+
+    // Highlight timeline
+    drawTimeline();
+}
+
+function drawLidar(p) {
+    const canvas = document.getElementById('lidar-canvas');
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    const cx = w / 2, cy = h / 2;
+    const radius = Math.min(cx, cy) - 20;
+    ctx.clearRect(0, 0, w, h);
+
+    // Range rings
+    ctx.strokeStyle = '#1a2a2a';
+    ctx.lineWidth = 0.5;
+    for (const frac of [0.25, 0.5, 0.75, 1.0]) {
+        ctx.beginPath(); ctx.arc(cx, cy, radius * frac, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // LiDAR bins (36 sectors)
+    if (p.lidar_bins) {
+        ctx.fillStyle = 'rgba(0, 255, 136, 0.6)';
+        for (let i = 0; i < 36; i++) {
+            const angle = (i * 10 - 90) * Math.PI / 180;
+            const dist = p.lidar_bins[i] * radius;
+            const x = cx + Math.cos(angle) * dist;
+            const y = cy + Math.sin(angle) * dist;
+            ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
+        }
+    }
+
+    // Robot center
+    ctx.fillStyle = '#ff0';
+    ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
+
+    // Prediction arrow (green = forward direction)
+    const vx = p.pred[0], vy = p.pred[1], vz = p.pred[2];
+    const arrowLen = Math.sqrt(vx * vx + vy * vy) * radius * 5;
+    const arrowAngle = Math.atan2(-vy, vx) - Math.PI / 2; // rotate to screen coords (up = forward)
+
+    if (arrowLen > 3) {
+        ctx.strokeStyle = '#0f8';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        const ex = cx + Math.cos(arrowAngle) * arrowLen;
+        const ey = cy + Math.sin(arrowAngle) * arrowLen;
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+        // Arrowhead
+        const headLen = 8;
+        ctx.beginPath();
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(ex - headLen * Math.cos(arrowAngle - 0.4), ey - headLen * Math.sin(arrowAngle - 0.4));
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(ex - headLen * Math.cos(arrowAngle + 0.4), ey - headLen * Math.sin(arrowAngle + 0.4));
+        ctx.stroke();
+    }
+
+    // Rotation indicator (blue arc)
+    if (Math.abs(vz) > 0.05) {
+        ctx.strokeStyle = '#0df';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const rotAngle = vz * 0.5; // scale for visibility
+        ctx.arc(cx, cy, 20, -Math.PI / 2, -Math.PI / 2 + rotAngle, vz < 0);
+        ctx.stroke();
+        // Arrow tip
+        const tipAngle = -Math.PI / 2 + rotAngle;
+        const tipX = cx + Math.cos(tipAngle) * 20;
+        const tipY = cy + Math.sin(tipAngle) * 20;
+        ctx.fillStyle = '#0df';
+        ctx.beginPath(); ctx.arc(tipX, tipY, 3, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Labels
+    ctx.fillStyle = '#666';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Front', cx, 12);
+    ctx.fillText('Back', cx, h - 4);
+    ctx.fillText('L', 8, cy);
+    ctx.fillText('R', w - 8, cy);
+}
+
+function drawTimeline() {
+    const canvas = document.getElementById('pred-canvas');
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    if (predictions.length === 0) return;
+
+    const n = predictions.length;
+    const barW = w / n;
+
+    // Draw vx, vy, vz as stacked colored bars
+    const mid = h / 2;
+    const scale = mid * 3; // scale factor for visibility
+
+    for (let i = 0; i < n; i++) {
+        const p = predictions[i];
+        const x = i * barW;
+        const vx = p.pred[0], vy = p.pred[1], vz = p.pred[2];
+
+        // vx bar (green up, red down)
+        ctx.fillStyle = vx > 0 ? 'rgba(0,255,136,0.7)' : 'rgba(255,68,68,0.7)';
+        ctx.fillRect(x, mid - vx * scale, barW - 1, vx * scale);
+
+        // vz bar (cyan)
+        ctx.fillStyle = 'rgba(0,200,255,0.4)';
+        ctx.fillRect(x, mid - vz * scale * 0.3, barW - 1, vz * scale * 0.3);
+    }
+
+    // Center line
+    ctx.strokeStyle = '#444';
+    ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(w, mid); ctx.stroke();
+
+    // Current frame marker
+    ctx.strokeStyle = '#ff0';
+    ctx.lineWidth = 2;
+    const cx = currentIdx * barW + barW / 2;
+    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
+
+    // Labels
+    ctx.fillStyle = '#0f8'; ctx.font = '10px monospace';
+    ctx.fillText('vx (fwd)', 5, 12);
+    ctx.fillStyle = '#0df';
+    ctx.fillText('vz (rot)', 5, 24);
+    ctx.fillStyle = '#ff0';
+    ctx.fillText('Frame ' + (currentIdx + 1), cx + 4, 12);
+}
+
+function nextFrame() { showFrame(Math.min(currentIdx + 1, predictions.length - 1)); }
+function prevFrame() { showFrame(Math.max(currentIdx - 1, 0)); }
+function seekFrame(v) { showFrame(parseInt(v)); }
+function autoPlay() { if (!autoTimer) autoTimer = setInterval(() => nextFrame(), 200); }
+function autoStop() { if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } }
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight') nextFrame();
+    else if (e.key === 'ArrowLeft') prevFrame();
+    else if (e.key === ' ') { e.preventDefault(); autoTimer ? autoStop() : autoPlay(); }
+});
+
+// ============================================================
+// LIVE MODE — real-time camera + model prediction from robot
+// ============================================================
+let liveMode = false;
+let liveTimer = null;
+const ROBOT_API = 'http://192.168.1.99:8080';
+
+function toggleLive() {
+    liveMode = !liveMode;
+    const btn = document.getElementById('live-btn');
+    if (liveMode) {
+        btn.style.background = '#3a1a1a';
+        btn.style.color = '#f44';
+        btn.textContent = 'LIVE';
+        autoStop();
+        document.getElementById('frame-info').textContent = 'LIVE from robot';
+        document.getElementById('controls').style.display = 'none';
+        document.getElementById('pred-canvas').parentElement.style.display = 'none';
+        liveTimer = setInterval(livePoll, 200);  // 5Hz
+    } else {
+        btn.style.background = '#1a3a1a';
+        btn.style.color = '#0f8';
+        btn.textContent = 'LIVE';
+        if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+        document.getElementById('controls').style.display = 'flex';
+        document.getElementById('pred-canvas').parentElement.style.display = 'block';
+    }
+}
+
+function livePoll() {
+    fetch(ROBOT_API + '/api/route_nav/live')
+        .then(r => r.json())
+        .then(d => {
+            if (!d.ok || !liveMode) return;
+
+            // Update camera image
+            if (d.frame_full) {
+                document.getElementById('camera-img').src = 'data:image/jpeg;base64,' + d.frame_full;
+            }
+
+            // Update info panel
+            document.getElementById('p-frame').textContent = 'LIVE';
+            document.getElementById('p-time').textContent = d.state || '-';
+            document.getElementById('p-imu').textContent = d.imu_yaw + '\u00B0';
+
+            const vx = d.pred[0], vy = d.pred[1], vz = d.pred[2];
+            document.getElementById('p-vx').textContent = vx.toFixed(3) + ' m/s';
+            document.getElementById('p-vx').style.color = vx > 0.05 ? '#0f8' : '#888';
+            document.getElementById('p-vy').textContent = vy.toFixed(3) + ' m/s';
+            document.getElementById('p-vy').style.color = Math.abs(vy) > 0.02 ? '#ff0' : '#888';
+            document.getElementById('p-vz').textContent = vz.toFixed(2) + ' rad/s';
+            document.getElementById('p-vz').style.color = Math.abs(vz) > 0.1 ? '#0df' : '#888';
+
+            const speed = Math.sqrt(vx * vx + vy * vy);
+            document.getElementById('p-speed').textContent = (speed * 1000).toFixed(0) + ' mm/s';
+
+            // Interpret
+            let interp = '';
+            if (speed < 0.01 && Math.abs(vz) < 0.05) interp = 'STOP';
+            else if (Math.abs(vz) > 0.3) interp = (vz > 0 ? 'TURN LEFT ' : 'TURN RIGHT ') + Math.abs(vz).toFixed(1) + ' rad/s';
+            else if (vx > 0.05) interp = 'FORWARD ' + (vx * 1000).toFixed(0) + ' mm/s';
+            else interp = 'SLOW';
+            if (d.state === 'exploring') interp = '[ ACTIVE ] ' + interp;
+            document.getElementById('p-interpret').textContent = interp;
+            document.getElementById('p-interpret').style.color = d.state === 'exploring' ? '#0f8' : '#888';
+
+            // Draw LiDAR + prediction
+            drawLidar({
+                pred: d.pred,
+                lidar_bins: d.lidar_bins,
+            });
+
+            document.getElementById('frame-info').textContent = 'LIVE | ' + interp;
+            document.getElementById('frame-info').style.color = d.state === 'exploring' ? '#0f8' : '#f44';
+        })
+        .catch(e => {
+            document.getElementById('frame-info').textContent = 'LIVE | Connection lost';
+            document.getElementById('frame-info').style.color = '#f44';
+        });
+}
+
+init();
+</script>
+</body>
+</html>
