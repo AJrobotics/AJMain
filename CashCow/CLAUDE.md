@@ -4,11 +4,21 @@
 
 All trading code MUST enforce these rules. They are non-negotiable and apply to every trader (Smart, Day, Politician).
 
-### Rule 1: Cash-Only Trading
+### Rule 1: Cash-Only Trading (Long Positions)
 
-- Every trade MUST be executed within the available cash balance.
+- Every **long** trade MUST be executed within the available cash balance.
 - Never place a buy order that exceeds the current available cash.
-- Do NOT use margin or leverage. All positions must be fully cash-backed.
+- Do NOT use margin or leverage for long positions. All long positions must be fully cash-backed.
+
+### Rule 1b: Short Selling (Day Trader Only — Intraday)
+
+- Short selling is **only** allowed in the Day Trader and **only** for intraday positions (must be closed by EOD).
+- Short selling is **NOT** allowed in Smart Trader or Politician Trader.
+- Allowed only on **high-liquidity** stocks (e.g., SPY, QQQ, AAPL, NVDA, META, MSFT, AMZN, GOOGL, AMD, TSLA). Never short small-cap or low-float stocks.
+- **Max short stop-loss**: configurable per-trade stop-loss % (default 2%). If a short position loses more than this %, auto-close it.
+- **Position sizing**: Short positions should use 50% of the normal long position size.
+- **Max short positions**: At most 2 short positions open simultaneously.
+- All shorts MUST be liquidated at EOD with all other Day Trader positions.
 
 ### Rule 2: Pre-Order Cash Validation
 

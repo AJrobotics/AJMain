@@ -1052,6 +1052,21 @@
                 </div>
             </div>
 
+            <!-- TraderWatcher (compact bar) -->
+            <div id="watcher-bar" style="display:none;margin-bottom:8px;padding:4px 12px;background:#0a1628;border:1px solid #1a3a5c;border-radius:6px;display:flex;align-items:center;justify-content:space-between;font-size:11px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="color:#64ffda;font-weight:600;">&#128065; Watcher</span>
+                    <span id="watcher-status-text" style="color:#555;">--</span>
+                    <span id="watcher-restart-count" style="color:#888;"></span>
+                </div>
+                <label style="position:relative;display:inline-block;width:30px;height:16px;cursor:pointer;">
+                    <input type="checkbox" id="watcher-toggle" onchange="toggleWatcher(this.checked)"
+                           style="opacity:0;width:0;height:0;position:absolute;">
+                    <span id="watcher-slider" style="position:absolute;top:0;left:0;right:0;bottom:0;background:#333;border-radius:8px;transition:.3s;"></span>
+                    <span id="watcher-knob" style="position:absolute;top:2px;left:2px;width:12px;height:12px;background:#888;border-radius:50%;transition:.3s;"></span>
+                </label>
+            </div>
+
             <!-- CashCow: Portfolio Overview (prominently displayed) -->
             <div id="portfolio-section" style="display:none;margin-bottom:20px;">
                 <div class="card" style="border-color:#00e5ff;padding:20px;">
@@ -1250,6 +1265,11 @@
                                     <div style="display:flex;align-items:center;justify-content:space-between;">
                                         <span style="font-size:11px;color:#888;">Daily Loss Limit $</span>
                                         <input type="number" id="day-daily-loss-limit" min="-50000" max="0" step="100" value="-2000"
+                                               style="width:60px;background:#0a192f;border:1px solid #1a3a5c;border-radius:4px;padding:3px 6px;color:#e0e0e0;font-size:11px;text-align:right;font-family:'Consolas',monospace;">
+                                    </div>
+                                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span style="font-size:11px;color:#888;">Short Stop-Loss %</span>
+                                        <input type="number" id="day-short-stop-loss-pct" min="0.5" max="10" step="0.5" value="2.0"
                                                style="width:60px;background:#0a192f;border:1px solid #1a3a5c;border-radius:4px;padding:3px 6px;color:#e0e0e0;font-size:11px;text-align:right;font-family:'Consolas',monospace;">
                                     </div>
                                 </div>
@@ -2110,6 +2130,7 @@
                 document.getElementById('day-max-positions').value = Math.max(1, Math.round(_scale(lv, 2, 10)));
                 document.getElementById('day-max-trades-hour').value = Math.max(1, Math.round(_scale(lv, 3, 25)));
                 document.getElementById('day-daily-loss-limit').value = Math.round(_scale(lv, -500, -5000));
+                document.getElementById('day-short-stop-loss-pct').value = Math.round(_scale(lv, 1.0, 5.0) * 10) / 10;
             }
         }
 
@@ -2132,6 +2153,7 @@
                     if (dt.max_positions !== undefined) document.getElementById('day-max-positions').value = dt.max_positions;
                     if (dt.max_trades_per_hour !== undefined) document.getElementById('day-max-trades-hour').value = dt.max_trades_per_hour;
                     if (dt.daily_loss_hard_limit !== undefined) document.getElementById('day-daily-loss-limit').value = dt.daily_loss_hard_limit;
+                    if (dt.short_stop_loss_pct !== undefined) document.getElementById('day-short-stop-loss-pct').value = dt.short_stop_loss_pct;
                 })
                 .catch(err => console.error('Failed to load trading limits:', err));
         }
@@ -2154,6 +2176,7 @@
                     max_positions: parseInt(document.getElementById('day-max-positions').value) || 5,
                     max_trades_per_hour: parseInt(document.getElementById('day-max-trades-hour').value) || 10,
                     daily_loss_hard_limit: parseFloat(document.getElementById('day-daily-loss-limit').value) || -2000,
+                    short_stop_loss_pct: parseFloat(document.getElementById('day-short-stop-loss-pct').value) || 2.0,
                 };
             }
             statusEl.textContent = 'Saving...';
@@ -2179,6 +2202,66 @@
                 statusEl.style.color = '#e94560';
                 setTimeout(() => { statusEl.textContent = ''; }, 3000);
             });
+        }
+
+        // ── TraderWatcher ──
+        function toggleWatcher(enabled) {
+            fetch('/api/trader/watcher', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enabled: enabled})
+            })
+            .then(r => r.json())
+            .then(d => { loadWatcherStatus(); })
+            .catch(err => {
+                document.getElementById('watcher-toggle').checked = !enabled;
+            });
+        }
+
+        function loadWatcherStatus() {
+            if (MACHINE !== 'CashCow') return;
+            document.getElementById('watcher-bar').style.display = 'flex';
+            fetch('/api/trader/watcher')
+                .then(r => r.json())
+                .then(d => {
+                    const toggle = document.getElementById('watcher-toggle');
+                    const slider = document.getElementById('watcher-slider');
+                    const knob = document.getElementById('watcher-knob');
+                    const statusText = document.getElementById('watcher-status-text');
+                    const countText = document.getElementById('watcher-restart-count');
+
+                    toggle.checked = d.enabled;
+                    if (d.enabled) {
+                        slider.style.background = '#64ffda44';
+                        knob.style.background = '#64ffda';
+                        knob.style.left = '16px';
+                        const lastEvt = d.recent_events && d.recent_events.length > 0 ? d.recent_events[d.recent_events.length - 1] : null;
+                        if (!d.ib_gateway_up) {
+                            statusText.textContent = 'GW down';
+                            statusText.style.color = '#ffc107';
+                        } else if (lastEvt) {
+                            statusText.textContent = lastEvt.time + ' ' + lastEvt.message;
+                            statusText.style.color = lastEvt.level === 'warning' ? '#ffc107' : '#64ffda';
+                        } else {
+                            statusText.textContent = 'Active';
+                            statusText.style.color = '#64ffda';
+                        }
+                    } else {
+                        slider.style.background = '#333';
+                        knob.style.background = '#888';
+                        knob.style.left = '2px';
+                        statusText.textContent = 'Off';
+                        statusText.style.color = '#555';
+                    }
+
+                    if (d.restart_count_today > 0) {
+                        countText.textContent = d.restart_count_today + ' restarts';
+                        countText.style.color = '#ffc107';
+                    } else {
+                        countText.textContent = '';
+                    }
+                })
+                .catch(() => {});
         }
 
         function deployTrader(action) {
@@ -3476,10 +3559,12 @@
             loadDayTraderPanel();
             loadTradingLimits();
             loadTradeHistory();
+            loadWatcherStatus();
             setInterval(loadPortfolio, 30000);
             setInterval(loadTraderStatus, 30000);
             setInterval(loadIBGatewayStatus, 30000);
             setInterval(loadDayTraderPanel, 15000);
+            setInterval(loadWatcherStatus, 30000);
         }
         if (MACHINE === 'Christy') {
             document.getElementById('christy-dashboard').style.display = '';

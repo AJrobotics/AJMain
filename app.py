@@ -1289,27 +1289,9 @@ def api_cashcow_portfolio():
 
 
 # --- IB Gateway Monitor ---
-
-_ib_monitor = {
-    "running": False,
-    "gateway_connected": None,     # True/False/None
-    "gateway_pid": None,
-    "port_open": False,
-    "last_check": None,
-    "last_error": None,
-    "sms_sent_today": False,       # prevent multiple SMS per day
-    "sms_last_sent": None,
-    "check_count": 0,
-}
-_ib_monitor_lock = threading.Lock()
-
-SMS_PHONE = "6616180571"
-SMS_GATEWAY = f"{SMS_PHONE}@vtext.com"
-
-# Gmail SMTP settings — use App Password (not regular password)
-# To create: Google Account → Security → 2-Step Verification → App passwords
-GMAIL_USER = os.environ.get("GMAIL_USER", "")        # e.g. yourname@gmail.com
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")  # 16-char app password
+# NOTE: IB Gateway monitoring + SMS alerts have been moved to TraderWatcher
+# on CashCow (agent_modules/trader_module.py). The endpoints below now proxy
+# to CashCow's /api/trader/watcher for backward compatibility.
 
 # --- Reboot Detection ---
 # Track last known uptime (seconds) per machine to detect reboots
@@ -1319,150 +1301,6 @@ _reboot_lock = threading.Lock()
 _reboot_monitor_started = False
 
 
-def _check_ib_gateway():
-    """Check if IB Gateway/TWS is running on CashCow via SSH (paramiko)."""
-    info = find_machine("CashCow")
-    if not info:
-        return {"connected": False, "error": "CashCow not found"}
-
-    host = info.get("host")
-    user = info.get("username")
-
-    try:
-        cmd = (
-            "echo 'MARK_GW'; "
-            "ps aux | grep -E '(ibgateway|IBGateway|java.*jts|java.*ibgateway)' | grep -v grep || echo 'GW_NOT_RUNNING'; "
-            "echo 'MARK_PORT'; "
-            "ss -tlnp 2>/dev/null | grep ':7497' || netstat -tlnp 2>/dev/null | grep ':7497' || echo 'PORT_CLOSED'; "
-            "echo 'MARK_TWS'; "
-            "ps aux | grep -E '(Trader Workstation|tws)' | grep -v grep || echo 'TWS_NOT_RUNNING'; "
-            "echo 'MARK_END'"
-        )
-        output, stderr, rc = _ssh_run(user, host, cmd, timeout=10)
-        sections = re.split(r'MARK_(?:GW|PORT|TWS|END)', output)
-        sec = [s.strip() for s in sections]
-
-        gw_info = sec[1] if len(sec) > 1 else ""
-        port_info = sec[2] if len(sec) > 2 else ""
-        tws_info = sec[3] if len(sec) > 3 else ""
-
-        gw_running = bool(gw_info) and "GW_NOT_RUNNING" not in gw_info
-        tws_running = bool(tws_info) and "TWS_NOT_RUNNING" not in tws_info
-        port_open = bool(port_info) and "PORT_CLOSED" not in port_info
-
-        connected = gw_running or tws_running or port_open
-
-        pid = None
-        proc_line = gw_info if gw_running else tws_info if tws_running else ""
-        if proc_line:
-            for line in proc_line.splitlines():
-                parts = line.split()
-                if len(parts) > 1 and parts[1].isdigit():
-                    pid = parts[1]
-                    break
-
-        return {
-            "connected": connected,
-            "gateway_running": gw_running,
-            "tws_running": tws_running,
-            "port_open": port_open,
-            "pid": pid,
-            "error": None,
-        }
-    except Exception as e:
-        return {"connected": False, "error": str(e)}
-
-
-def _send_sms_alert(message):
-    """Send SMS via Verizon email-to-SMS gateway using Gmail SMTP."""
-    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
-        err = ("Gmail credentials not set. Set environment variables: "
-               "GMAIL_USER=yourname@gmail.com GMAIL_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx")
-        log_event(f"SMS alert failed: {err}", level="error")
-        return False, err
-
-    try:
-        msg = MIMEText(message)
-        msg["From"] = GMAIL_USER
-        msg["To"] = SMS_GATEWAY
-        msg["Subject"] = ""  # SMS doesn't use subject
-
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_USER, [SMS_GATEWAY], msg.as_string())
-
-        log_event(f"SMS alert sent to {SMS_PHONE}: {message}")
-        return True, None
-    except smtplib.SMTPAuthenticationError as e:
-        err = f"Gmail login failed. Check GMAIL_USER and GMAIL_APP_PASSWORD. ({e})"
-        log_event(f"SMS alert error: {err}", level="error")
-        return False, err
-    except Exception as e:
-        err = str(e)
-        log_event(f"SMS alert error: {err}", level="error")
-        return False, err
-
-
-def _ib_monitor_loop():
-    """Background thread: check IB Gateway every 30s, alert before market open."""
-    from datetime import datetime
-    import pytz
-
-    et = pytz.timezone("US/Eastern")
-
-    while _ib_monitor["running"]:
-        try:
-            result = _check_ib_gateway()
-            now_et = datetime.now(et)
-
-            with _ib_monitor_lock:
-                _ib_monitor["gateway_connected"] = result["connected"]
-                _ib_monitor["gateway_pid"] = result.get("pid")
-                _ib_monitor["port_open"] = result.get("port_open", False)
-                _ib_monitor["last_check"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                _ib_monitor["last_error"] = result.get("error")
-                _ib_monitor["check_count"] += 1
-
-                # Reset SMS flag at midnight ET
-                if now_et.hour == 0 and now_et.minute < 1:
-                    _ib_monitor["sms_sent_today"] = False
-
-                # Alert: 30 min before market open (9:00 AM ET) on weekdays
-                is_weekday = now_et.weekday() < 5
-                is_alert_window = now_et.hour == 9 and 0 <= now_et.minute <= 5
-                if (is_weekday and is_alert_window and
-                        not result["connected"] and
-                        not _ib_monitor["sms_sent_today"]):
-                    ok, _ = _send_sms_alert(
-                        f"AJ Alert: IB Gateway NOT connected on CashCow! "
-                        f"Market opens in 30min. Check now."
-                    )
-                    if ok:
-                        _ib_monitor["sms_sent_today"] = True
-                        _ib_monitor["sms_last_sent"] = _ib_monitor["last_check"]
-
-        except Exception as e:
-            with _ib_monitor_lock:
-                _ib_monitor["last_error"] = str(e)
-
-        # Wait 30 seconds
-        for _ in range(30):
-            if not _ib_monitor["running"]:
-                break
-            _time.sleep(1)
-
-
-def _start_ib_monitor():
-    """Start the IB Gateway monitor background thread."""
-    if _ib_monitor["running"]:
-        return
-    _ib_monitor["running"] = True
-    t = threading.Thread(target=_ib_monitor_loop, daemon=True, name="ib-gateway-monitor")
-    t.start()
-    log_event("IB Gateway monitor started (30s interval)")
 
 
 _SSH_DIR = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), ".ssh")
@@ -1618,48 +1456,30 @@ def start_reboot_monitor():
 
 @app.route("/api/cashcow/ib-gateway-status")
 def api_ib_gateway_status():
-    """Get IB Gateway connection status."""
-    # Start monitor if not running
-    if not _ib_monitor["running"]:
-        _start_ib_monitor()
-
-    with _ib_monitor_lock:
+    """Proxy to CashCow's TraderWatcher for IB Gateway status."""
+    try:
+        r = http_requests.get("http://192.168.1.91:5000/api/trader/watcher", timeout=5)
+        d = r.json()
         return jsonify({
-            "connected": _ib_monitor["gateway_connected"],
-            "pid": _ib_monitor["gateway_pid"],
-            "port_open": _ib_monitor["port_open"],
-            "last_check": _ib_monitor["last_check"],
-            "last_error": _ib_monitor["last_error"],
-            "sms_sent_today": _ib_monitor["sms_sent_today"],
-            "sms_last_sent": _ib_monitor["sms_last_sent"],
-            "check_count": _ib_monitor["check_count"],
-            "monitor_running": _ib_monitor["running"],
+            "connected": d.get("ib_gateway_up"),
+            "monitor_running": d.get("enabled", False),
+            "smart_running": d.get("smart_running"),
+            "day_running": d.get("day_running"),
+            "restart_count_today": d.get("restart_count_today", 0),
         })
-
-
-@app.route("/api/cashcow/ib-gateway-check", methods=["POST"])
-def api_ib_gateway_check():
-    """Force an immediate IB Gateway check."""
-    result = _check_ib_gateway()
-    with _ib_monitor_lock:
-        _ib_monitor["gateway_connected"] = result["connected"]
-        _ib_monitor["gateway_pid"] = result.get("pid")
-        _ib_monitor["port_open"] = result.get("port_open", False)
-        _ib_monitor["last_check"] = _time.strftime("%Y-%m-%d %H:%M:%S")
-        _ib_monitor["last_error"] = result.get("error")
-        _ib_monitor["check_count"] += 1
-    return jsonify(result)
+    except Exception as e:
+        return jsonify({"connected": None, "error": str(e)})
 
 
 @app.route("/api/cashcow/sms-test", methods=["POST"])
 def api_sms_test():
-    """Send a test SMS to verify the alert system works."""
+    """Proxy SMS test to CashCow's TraderWatcher."""
     try:
         data = request.json or {}
         message = data.get("message", "AJ Robotics test message")
-        ok, error = _send_sms_alert(message)
-        return jsonify({"ok": ok, "phone": SMS_PHONE, "message": message,
-                        "error": error, "gmail_user": GMAIL_USER or "(not set)"})
+        r = http_requests.post("http://192.168.1.91:5000/api/trader/sms-test",
+                               json={"message": message}, timeout=10)
+        return jsonify(r.json())
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 

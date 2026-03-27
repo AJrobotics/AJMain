@@ -7,6 +7,8 @@ Provides status, log tail, daily picks, portfolio, start/stop via REST API.
 import json
 import os
 import re
+import smtplib
+import socket
 import subprocess
 import sys
 import logging
@@ -14,6 +16,7 @@ import threading
 import time
 
 from datetime import datetime as _dt, timedelta
+from email.mime.text import MIMEText
 
 from flask import Blueprint, jsonify, request
 
@@ -33,6 +36,12 @@ IB_LIVE_PORT = 7496
 # Trader uses its own venv (has ib_insync, pandas, numpy)
 TRADER_VENV_PYTHON = os.path.expanduser("~/trader_venv/bin/python")
 
+# SMS Alert via Verizon email-to-SMS gateway
+SMS_PHONE = "6616180571"
+SMS_GATEWAY = f"{SMS_PHONE}@vtext.com"
+GMAIL_USER = os.environ.get("GMAIL_USER", "")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+
 
 class TraderModule:
     name = "trader"
@@ -40,6 +49,23 @@ class TraderModule:
     def __init__(self):
         self._portfolio_cache = {"data": None, "ts": 0}
         self._portfolio_lock = threading.Lock()
+
+        # ── TraderWatcher state ──
+        self._watcher_enabled = False
+        self._watcher_thread = None
+        self._watcher_lock = threading.Lock()
+        self._watcher_log = []  # recent events, max 100
+        self._watcher_state_file = os.path.join(TRADER_LOG_DIR, "watcher_state.json")
+        self._watcher_check_interval = 60  # seconds
+        self._max_restarts_per_day = 10
+        self._restart_cooldown = 300  # 5 minutes
+        self._last_restart_smart = 0  # timestamp
+        self._last_restart_day = 0
+        self._restart_count_today = 0
+        self._restart_date = ""
+        self._sms_sent_today = False
+        self._sms_date = ""
+        self._load_watcher_state()
 
     def _get_ib_portfolio(self, port: int = IB_PAPER_PORT) -> dict:
         """Connect to IB Gateway and fetch account + portfolio data."""
@@ -353,6 +379,222 @@ class TraderModule:
 
         return trades
 
+    # ── TraderWatcher methods ──
+
+    def _load_watcher_state(self):
+        """Load watcher state from disk."""
+        try:
+            if os.path.isfile(self._watcher_state_file):
+                with open(self._watcher_state_file, "r") as f:
+                    state = json.load(f)
+                self._watcher_enabled = state.get("enabled", False)
+                self._restart_count_today = state.get("restart_count_today", 0)
+                self._restart_date = state.get("restart_date", "")
+                self._last_restart_smart = state.get("last_restart_smart", 0)
+                self._last_restart_day = state.get("last_restart_day", 0)
+        except Exception:
+            pass
+
+    def _save_watcher_state(self):
+        """Persist watcher state to disk."""
+        try:
+            os.makedirs(os.path.dirname(self._watcher_state_file), exist_ok=True)
+            state = {
+                "enabled": self._watcher_enabled,
+                "restart_count_today": self._restart_count_today,
+                "restart_date": self._restart_date,
+                "last_restart_smart": self._last_restart_smart,
+                "last_restart_day": self._last_restart_day,
+            }
+            with open(self._watcher_state_file, "w") as f:
+                json.dump(state, f, indent=2)
+        except Exception as e:
+            logger.warning("Failed to save watcher state: %s", e)
+
+    def _check_ib_gateway(self, port: int = IB_PAPER_PORT) -> bool:
+        """Lightweight TCP check if IB Gateway is listening."""
+        try:
+            sock = socket.create_connection(("127.0.0.1", port), timeout=3)
+            sock.close()
+            return True
+        except (OSError, ConnectionRefusedError):
+            return False
+
+    def _watcher_event(self, msg: str, level: str = "info"):
+        """Log a watcher event to both logger and internal ring buffer."""
+        full_msg = f"TraderWatcher: {msg}"
+        if level == "warning":
+            logger.warning(full_msg)
+        else:
+            logger.info(full_msg)
+        with self._watcher_lock:
+            self._watcher_log.append({
+                "time": _dt.now().strftime("%H:%M:%S"),
+                "message": msg,
+                "level": level,
+            })
+            if len(self._watcher_log) > 100:
+                self._watcher_log = self._watcher_log[-100:]
+
+    def _send_sms_alert(self, message: str) -> bool:
+        """Send SMS via Verizon email-to-SMS gateway using Gmail SMTP."""
+        if not GMAIL_USER or not GMAIL_APP_PASSWORD:
+            self._watcher_event("SMS failed: Gmail credentials not set", "warning")
+            return False
+        try:
+            msg = MIMEText(message)
+            msg["From"] = GMAIL_USER
+            msg["To"] = SMS_GATEWAY
+            msg["Subject"] = ""
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+                server.sendmail(GMAIL_USER, [SMS_GATEWAY], msg.as_string())
+            self._watcher_event(f"SMS sent: {message}", "warning")
+            return True
+        except Exception as e:
+            self._watcher_event(f"SMS error: {e}", "warning")
+            return False
+
+    def _restart_trader(self, trader_type: str) -> bool:
+        """Restart a trader process. Returns True on success."""
+        try:
+            python_exec = TRADER_VENV_PYTHON if os.path.exists(TRADER_VENV_PYTHON) else sys.executable
+            cmd = [python_exec, TRADER_RUN_SCRIPT, "--auto", "--port", str(IB_PAPER_PORT)]
+            if trader_type == "day":
+                cmd.append("--day")
+                log_file = "day_trader_stdout.log"
+            else:
+                log_file = "trader_stdout.log"
+            subprocess.Popen(
+                cmd,
+                stdout=open(os.path.join(TRADER_LOG_DIR, log_file), "a"),
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            return True
+        except Exception as e:
+            self._watcher_event(f"Failed to restart {trader_type}: {e}", "warning")
+            return False
+
+    def _watcher_tick(self):
+        """Single watcher check cycle."""
+        now = time.time()
+        today_str = _dt.now().strftime("%Y-%m-%d")
+
+        # Reset daily counters if date changed
+        if self._restart_date != today_str:
+            self._restart_count_today = 0
+            self._restart_date = today_str
+        if self._sms_date != today_str:
+            self._sms_sent_today = False
+            self._sms_date = today_str
+
+        # Check IB Gateway
+        gw_up = self._check_ib_gateway()
+        if not gw_up:
+            self._watcher_event("IB Gateway not reachable, skipping restart check", "warning")
+            # SMS alert: 9:00-9:05 AM ET on weekdays if GW down
+            market = self._get_market_status()
+            if market.get("is_weekday") and not self._sms_sent_today:
+                try:
+                    from zoneinfo import ZoneInfo
+                    now_et = _dt.now(ZoneInfo("America/New_York"))
+                except ImportError:
+                    now_et = _dt.now()
+                if now_et.hour == 9 and 0 <= now_et.minute <= 5:
+                    if self._send_sms_alert(
+                        "AJ Alert: IB Gateway NOT connected on CashCow! "
+                        "Market opens in 30min. Check now."
+                    ):
+                        self._sms_sent_today = True
+            return
+
+        # Check market status
+        market = self._get_market_status()
+        market_status = market.get("market_status", "closed")
+
+        # Check running processes
+        proc = self._is_running()
+        smart_up = proc.get("smart_running", False)
+        day_up = proc.get("day_running", False)
+
+        # Day Trader: only restart during pre-market or trading
+        day_active_hours = market_status in ("pre-market", "open", "trading")
+
+        status_parts = []
+        status_parts.append(f"GW:UP Smart:{'UP' if smart_up else 'DOWN'} Day:{'UP' if day_up else 'DOWN'}")
+        status_parts.append(f"Market:{market_status}")
+
+        # Check daily cap
+        if self._restart_count_today >= self._max_restarts_per_day:
+            if not smart_up or (not day_up and day_active_hours):
+                self._watcher_event(
+                    f"Restart needed but daily limit reached ({self._restart_count_today}/{self._max_restarts_per_day})",
+                    "warning",
+                )
+            return
+
+        restarted = False
+
+        # Smart Trader: restart anytime
+        if not smart_up:
+            if now - self._last_restart_smart < self._restart_cooldown:
+                self._watcher_event("Smart Trader down, cooldown active", "info")
+            else:
+                self._watcher_event("Smart Trader down, restarting...", "warning")
+                if self._restart_trader("smart"):
+                    self._last_restart_smart = now
+                    self._restart_count_today += 1
+                    self._watcher_event("Smart Trader restarted successfully", "warning")
+                    restarted = True
+
+        # Day Trader: only during market hours
+        if not day_up and day_active_hours:
+            if now - self._last_restart_day < self._restart_cooldown:
+                self._watcher_event("Day Trader down, cooldown active", "info")
+            else:
+                self._watcher_event("Day Trader down, restarting...", "warning")
+                if self._restart_trader("day"):
+                    self._last_restart_day = now
+                    self._restart_count_today += 1
+                    self._watcher_event("Day Trader restarted successfully", "warning")
+                    restarted = True
+
+        if not restarted and smart_up and (day_up or not day_active_hours):
+            self._watcher_event(f"All OK | {' | '.join(status_parts)}")
+
+        self._save_watcher_state()
+
+    def _watcher_loop(self):
+        """Background thread loop."""
+        self._watcher_event("Watcher started")
+        while self._watcher_enabled:
+            try:
+                self._watcher_tick()
+            except Exception as e:
+                self._watcher_event(f"Error in tick: {e}", "warning")
+            time.sleep(self._watcher_check_interval)
+        self._watcher_event("Watcher stopped")
+
+    def _start_watcher(self):
+        """Enable watcher and start background thread."""
+        with self._watcher_lock:
+            self._watcher_enabled = True
+            self._save_watcher_state()
+            if self._watcher_thread is None or not self._watcher_thread.is_alive():
+                self._watcher_thread = threading.Thread(
+                    target=self._watcher_loop, daemon=True, name="trader-watcher"
+                )
+                self._watcher_thread.start()
+
+    def _stop_watcher(self):
+        """Disable watcher (thread exits on next loop)."""
+        self._watcher_enabled = False
+        self._save_watcher_state()
+
     def _get_market_status(self) -> dict:
         """Return current US market status based on Eastern Time."""
         try:
@@ -629,6 +871,7 @@ class TraderModule:
                     "max_positions": 5,
                     "max_trades_per_hour": 10,
                     "daily_loss_hard_limit": -2000,
+                    "short_stop_loss_pct": 2.0,
                 },
             }
             if request.method == "GET":
@@ -663,6 +906,41 @@ class TraderModule:
             days = request.args.get("days", 10, type=int)
             history = self._build_trade_history(days)
             return jsonify(history)
+
+        @bp.route("/api/trader/watcher", methods=["GET", "POST"])
+        def trader_watcher():
+            if request.method == "POST":
+                data = request.json or {}
+                enabled = data.get("enabled", False)
+                if enabled:
+                    self._start_watcher()
+                    self._watcher_event("Enabled by user")
+                else:
+                    self._stop_watcher()
+                    self._watcher_event("Disabled by user")
+                return jsonify({"success": True, "enabled": self._watcher_enabled})
+
+            # GET: return watcher status
+            gw_up = self._check_ib_gateway()
+            proc = self._is_running()
+            with self._watcher_lock:
+                events = list(self._watcher_log[-20:])
+            return jsonify({
+                "enabled": self._watcher_enabled,
+                "ib_gateway_up": gw_up,
+                "smart_running": proc.get("smart_running", False),
+                "day_running": proc.get("day_running", False),
+                "restart_count_today": self._restart_count_today,
+                "max_restarts_per_day": self._max_restarts_per_day,
+                "recent_events": events,
+            })
+
+        @bp.route("/api/trader/sms-test", methods=["POST"])
+        def sms_test():
+            data = request.json or {}
+            message = data.get("message", "AJ Robotics test message from CashCow")
+            ok = self._send_sms_alert(message)
+            return jsonify({"ok": ok, "phone": SMS_PHONE, "message": message})
 
         @bp.route("/api/trader/logs")
         def trader_logs():
@@ -805,6 +1083,11 @@ class TraderModule:
                 return jsonify({"articles": [], "total": 0, "error": str(e)})
 
         app.register_blueprint(bp)
+
+        # Auto-start TraderWatcher if previously enabled
+        if self._watcher_enabled:
+            self._start_watcher()
+            logger.info("TraderWatcher auto-started (persisted state)")
 
     # ── Log Parsing for Today's Trades ──────────────────────────
 
