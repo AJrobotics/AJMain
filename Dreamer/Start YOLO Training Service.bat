@@ -12,11 +12,11 @@ echo    Runs: runs\
 echo  ============================================
 echo.
 
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 echo  Starting Training Service...
 echo.
-python scripts\dreamer_training_service.py
+python Dreamer\training_service.py
 
 echo.
 echo  Service stopped. Press any key to close.

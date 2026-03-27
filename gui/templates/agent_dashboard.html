@@ -325,6 +325,9 @@
             <a href="/gamepad" id="nav-gamepad">Gamepad</a>
             <a href="//{{ request.host.split(':')[0] }}:5001/simulation" target="_blank" id="nav-xarm">XArm Sim</a>
             {% endif %}
+            {% if local_machine == 'Dreamer' %}
+            <a href="//{{ request.host.split(':')[0] }}:8080" target="_blank" id="nav-rosmaster">RosMaster</a>
+            {% endif %}
             {% if local_machine in ['Christy', 'CashCow'] %}
             <a href="/vision" id="nav-vision">Vision</a>
             {% endif %}

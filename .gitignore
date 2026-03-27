@@ -65,5 +65,9 @@ RosMaster/training/models/explore/explore_ppo_*0_steps.zip
 RosMaster/training/tb_logs/
 RosMaster/training/maps/*.npz
 
+# Route frames (large image sets)
+RosMaster/routes/*/frames/
+RosMaster/routes/*/*.npz
+
 # Temp files
 tmp_*

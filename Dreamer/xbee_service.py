@@ -8,9 +8,9 @@ the XBee Heartbeat Responder on COM18.
 Christy's main dashboard proxies /api/heartbeat/* calls here.
 
 Usage:
-    python scripts/dreamer_xbee_service.py
-    # or
-    python -m scripts.dreamer_xbee_service
+    python Dreamer/xbee_service.py
+    # or via batch file:
+    Dreamer\\Start XBee Responder.bat
 
 Runs on port 5001 so it doesn't conflict with other services.
 """

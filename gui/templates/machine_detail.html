@@ -871,7 +871,7 @@
                                 <h3 style="color:#7c4dff;">Robot Navigation</h3>
                                 <span id="gps-badge" style="background:#555;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">No Fix</span>
                             </div>
-                            <div id="gps-map" style="height:300px;margin-top:10px;border-radius:8px;background:#0a192f;"></div>
+                            <div id="gps-map" style="height:300px;width:100%;margin-top:10px;border-radius:8px;background:#0a192f;"></div>
                             <div id="gps-info" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px 16px;font-size:12px;color:#aaa;">
                                 <span>Lat: <span id="gps-lat" style="color:#e0e0e0;">--</span></span>
                                 <span>Lon: <span id="gps-lon" style="color:#e0e0e0;">--</span></span>
@@ -3280,7 +3280,10 @@
             // Trail polyline
             _gpsTrail = L.polyline([], {color: '#7c4dff', weight: 2, opacity: 0.7}).addTo(_gpsMap);
             // Fix map size after container becomes visible
-            setTimeout(() => _gpsMap.invalidateSize(), 200);
+            setTimeout(() => _gpsMap.invalidateSize(), 500);
+            setTimeout(() => _gpsMap.invalidateSize(), 1500);
+            // Also fix on window resize
+            window.addEventListener('resize', () => { if (_gpsMap) _gpsMap.invalidateSize(); });
         }
 
         function loadGpsStatus() {
@@ -3328,6 +3331,7 @@
                         const parts = d.timestamp.split(' ');
                         document.getElementById('gps-time').textContent = parts.length > 1 ? parts[1] : d.timestamp;
                     }
+                    _gpsMap.invalidateSize();
                 })
                 .catch(() => {});
         }

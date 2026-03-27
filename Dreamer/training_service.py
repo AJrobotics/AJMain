@@ -8,9 +8,9 @@ YOLO datasets, training runs, and trained models.
 Christy's main dashboard proxies /api/proxy/training/* calls here.
 
 Usage:
-    python scripts/dreamer_training_service.py
+    python Dreamer/training_service.py
     # or via batch file:
-    Start YOLO Training Service.bat
+    Dreamer\\Start YOLO Training Service.bat
 
 Runs on port 5002 so it doesn't conflict with other services.
 """
