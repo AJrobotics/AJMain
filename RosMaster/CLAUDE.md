@@ -28,8 +28,8 @@ Stable udev rules at `/etc/udev/rules.d/99-rosmaster.rules` based on physical US
 | `/dev/rplidar` | RPLidar S2 | CP210x (10c4:ea60) | `0:2.3` |
 | `/dev/rosmaster` | STM32 driver board | CH340 (1a86:7523) | `0:2.1.1` |
 | `/dev/xbee` | XBee module | FT231X (0403:6015) | `0:2.1.3` |
-| `/dev/gps` | U-Blox GPS | CDC-ACM (1546:01a7) | `0:2.1.4` |
-| `/dev/ch340aux` | Second CH340 | CH340 (1a86:7523) | `0:2.1.2` |
+| `/dev/gps` | U-Blox GPS | CDC-ACM (1546:01a7) | `0:2.1.2` |
+| `/dev/ch340aux` | Second CH340 | CH340 (1a86:7523) | `0:2.1.4` |
 
 ## Deployment
 - **Deploy all code:** `python deploy.py`
@@ -316,6 +316,136 @@ Training uses PPO (Proximal Policy Optimization) on Dreamer (RTX 4070) with Stab
 
 **IMU yaw vs heading:** With mecanum wheels, IMU yaw (body orientation) differs from movement direction during strafe. LiDAR is mounted on the body, so IMU yaw is the correct angle for scan-to-world transformation. SLAM mapping is unaffected by this distinction.
 
+## XBee Communication
+- **Module:** XBee PRO 900HP 10K (R3, MAC: 0013A20041BB8E1F)
+- **Library:** `digi-xbee` (installed system-wide via `sudo pip3 install digi-xbee`)
+- **Runs as thread** in server.py (not separate process) — low bandwidth, no GIL concern
+- **Auto-reconnect:** retries every 5s if `/dev/xbee` disappears
+- **All responses prefixed with `R3:`**
+- **Dashboard panel:** XBee/GPS panel with ON/OFF toggle, RX/TX counts, broadcast input
+
+**XBee Network:**
+| Node ID | MAC | Location |
+|---------|-----|----------|
+| R3 | 0013A20041BB8E1F | RosMaster |
+| Robot1 | 0013A20041BB8D5E | Christy |
+| DeskTop | 0013A20041741E51 | Desktop |
+
+**XBee Command Protocol:**
+| Command | Response | Type |
+|---------|----------|------|
+| `All Good?` / `status` | `R3: Fix=1 Sats=5 34.505N 118.328W 827m Bat=11.2V` | Query |
+| `gps` | `R3: No fix, 0 sats` | Query |
+| `battery` | `R3: Bat=11.2V` | Query |
+| `ping` | `R3: pong` | Query |
+| `move 0.1 0 0.5` | `R3: Move(0.10,0.00,0.50)` | Control |
+| `stop` / `!stop` | `R3: Stopped` | Control |
+| `explore start/stop/status` | `R3: Explore: ...` | Control |
+
+**Key files:** `jetson/xbee_comm.py`, `jetson/gps_reader.py`
+
+## GPS
+- **Module:** U-Blox 7 (UBX-G70xx, firmware 1.00, PROTVER 14.00)
+- **Port:** `/dev/gps` (ttyACM0, CDC-ACM), 9600 baud
+- **NMEA parsing:** Manual (GGA + RMC), no pynmea2 dependency
+- **Runs as thread** in server.py, retries every 5s if unplugged
+- **Antenna must face UP** (ceramic patch toward sky)
+- **Cold start:** 2-5 minutes for first fix outdoors
+- **No fix indoors** — GPS data always available but fix=false, never blocks
+
+## NN Navigation Training
+Training uses PPO (Proximal Policy Optimization) on Dreamer (RTX 4070) with Stable Baselines3.
+
+**Multiple task-specific models:**
+| Task | Obs Size | Extra Inputs | Reward Focus |
+|------|----------|-------------|--------------|
+| `explore` | 36 | LiDAR only | New cells, collision penalty |
+| `floor_plan` | 39 | + frontier angle/dist, coverage | Frontier approach, coverage milestones |
+| `wall_follow` | 39 | + side dist, target dist, front dist | Distance error, forward progress |
+
+**Observation:** 36 LiDAR bins (10° each, normalized [0,1]) + task-specific extras
+**Action:** 3 continuous values → (vx, vy, vz) motor commands
+**Models saved per task:** `training/models/<task>/<task>_policy.onnx` + `.pt`
+
+**Realism parameters (sim-to-real transfer):**
+| Parameter | Value | Reason |
+|-----------|-------|--------|
+| Robot radius | 150mm | Physical body size |
+| LiDAR noise | ±30mm Gaussian | RPLidar S2 measurement noise |
+| LiDAR dropout | 2% of rays | Random missing points |
+| Velocity noise | ±10% forward, ±15% lateral | Mecanum wheel slip |
+| Heading drift | ±0.3°/step | IMU noise accumulation |
+| Rear ignore zone | 140° | Cables/devices block rear LiDAR |
+| STOP distance | 100mm | Hard safety |
+| SLOW distance | 200mm | Reduce speed to 30% |
+| CAUTION distance | 300mm | Reduce speed to 70% |
+
+**Training pipeline (from mapping_debug.html Simulation mode):**
+1. Select Task (Explore / Floor Plan / Wall Follow)
+2. Generate Maps — create diverse training rooms
+3. Train NN — PPO training, 500K+ steps recommended
+4. Evaluate — compare NN vs rule-based
+5. Load in Sim — test ONNX model in browser simulation
+6. Deploy to Jetson — scp model to /home/jetson/RosMaster/models/
+
+**Local development server:** `python serve_local.py` on Dreamer (port 8080), proxies API calls to Jetson
+
+**Key files:**
+- `training/robot_env.py` — Gymnasium environment with task-specific obs/reward
+- `training/train.py` — PPO training script with `--task` parameter
+- `training/evaluate.py` — NN vs rule-based comparison
+- `training/map_generator.py` — Diverse room generator
+- `serve_local.py` — Local HTTP server for training UI on Dreamer
+- `jetson/nn_navigator.py` — Inference on Jetson (loads TorchScript model)
+
+## Self-Driving (Route Record + Replay)
+
+**Phase 1: Record Route** — physically push robot while sensors capture data.
+- Dashboard panel: route name input, Record/Stop buttons, live stats
+- Records at 5Hz: RGB keyframes (640x480), LiDAR 360° scans, GPS, IMU, collision sectors
+- Routes saved to `/home/jetson/RosMaster/routes/<name>/`
+- Route format: `waypoints.json` + `frames/` (keyframe JPEGs) + `features.npz` (ORB) + `segments/` (SLAM grids)
+- Segment transitions every 15m (grid shift, preserves IMU heading)
+
+**Phase 2: Behavior Cloning** — train NN from recorded routes.
+- **Input:** RGB frame (80x60 grayscale) + 36 LiDAR bins
+- **Output:** (vx, vy, vz) motor commands
+- **Training labels:** optical flow (RGB) → translation, IMU yaw delta → rotation
+- **Architecture:** CNN (3 conv layers) + LiDAR MLP (36→64) → combined head (192→128→64→3)
+- Supports multiple routes: `--route P2,P3` or `--route ALL`
+- Model: `training/models/route_nav/route_nav_policy.onnx` + `.pt`
+
+**Phase 3: Route Replay** (implemented, needs testing)
+- Waypoint following with multi-modal localization (SLAM + GPS + visual matching)
+- Visual place recognition: ORB features + FLANN matcher
+- GPS-SLAM fusion: weighted by environment (indoor vs outdoor)
+- Dashboard: route selector dropdown + Follow button + progress bar
+
+**Key files:**
+- `jetson/route_recorder.py` — records sensor data during manual push
+- `jetson/route_player.py` — autonomous waypoint following
+- `jetson/visual_matcher.py` — ORB feature matching
+- `jetson/gps_slam_fusion.py` — GPS + SLAM position fusion
+- `training/behavior_cloning.py` — imitation learning from recordings
+
+## Session Notes (March 26, 2026)
+
+### What was accomplished
+1. **XBee communication**: integrated into server.py as thread, auto-reconnect, handler registry, ON/OFF toggle on dashboard
+2. **GPS integration**: u-blox 7 reader thread, NMEA parsing, status on dashboard, udev rules updated (GPS now at 0:2.1.2)
+3. **NN training pipeline**: multi-task models (explore, floor_plan, complete_map, wall_follow), parallel training, per-task progress bars, reward info display
+4. **Simulation mode**: built map from recordings, test NN in browser, per-task ONNX model loading
+5. **Route recording**: dashboard panel, 5Hz sensor capture, keyframe extraction + ORB features
+6. **Behavior cloning**: train CNN+MLP from recorded routes using optical flow + IMU, trained on P2+P3 (272 samples, loss 0.0003)
+7. **Route replay**: waypoint follower with visual matching + GPS-SLAM fusion (implemented, not yet tested on robot)
+
+### Remaining work
+- Test behavior cloning model on real robot
+- Record more routes (different rooms, outdoors with GPS)
+- Add "Learn from Recording" button to training pipeline UI
+- Test route replay with visual matching
+- Deploy route_nav model to Jetson
+
 ## Known Issues
 - **STM32 USB intermittent**: sometimes only 1 CH340 appears instead of 2. The STM32 driver board's CH340 USB path can change between boots depending on expansion board power-up timing. Server `init_bot()` tests battery voltage > 1V to verify connection.
 - **Serial port conflict**: Only ONE process can open `/dev/rosmaster` at a time. The OLED `status_display.py` must NOT open it — only `server.py` should.
@@ -327,6 +457,7 @@ Training uses PPO (Proximal Policy Optimization) on Dreamer (RTX 4070) with Stab
 - **Server SIGTERM handling**: Ignores SIGTERM during first 10 seconds after startup (stale signal from systemctl restart). Uses `loop.add_callback_from_signal()` after grace period. Service uses `Restart=always` with `-u` (unbuffered) Python.
 - **Astra RGB not via OpenNI2**: Color stream fails via OpenNI2; use OpenCV `VideoCapture(0)` for the Astra RGB camera instead.
 - **GStreamer warnings**: Astra RGB camera shows GStreamer pipeline errors on first open but works with V4L2 backend fallback.
+- **Video timeupdate overrides frame selection**: In mapping_debug.html offline mode, the HTML5 video `timeupdate` event fires even when paused (with currentTime=0), resetting `selectedRecEntry` back to frame 0. Fix: guard with `if (video.paused) return;` so video only overrides frame selection during playback.
 
 ## SMS Boot Notification
 - Sends to 6616180571 (Verizon) via `dreamittogether@gmail.com`

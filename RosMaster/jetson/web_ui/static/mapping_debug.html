@@ -47,12 +47,12 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
 }
 
 #side-panel {
-    width: 280px; flex-shrink: 0; overflow-y: auto; border-left: 1px solid #333;
-    background: #0d0d20; padding: 8px; font-size: 11px;
+    width: 380px; flex-shrink: 0; overflow-y: auto; border-left: 1px solid #333;
+    background: #0d0d20; padding: 10px; font-size: 13px;
 }
-.sp-section { margin-bottom: 10px; }
-.sp-title { color: #00d4ff; font-size: 12px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px; }
-.sp-row { display: flex; justify-content: space-between; padding: 1px 0; }
+.sp-section { margin-bottom: 12px; }
+.sp-title { color: #00d4ff; font-size: 14px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
+.sp-row { display: flex; justify-content: space-between; padding: 2px 0; }
 .sp-row span:last-child { color: #0f8; }
 .sp-check { display: flex; align-items: center; gap: 6px; padding: 1px 0; cursor: pointer; }
 .sp-check input { cursor: pointer; }
@@ -177,9 +177,12 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
         <div class="sp-section" id="sim-panel" style="display:none;">
             <div class="sp-title">Simulation</div>
             <div class="sp-row"><span>Policy:</span>
-                <select id="sim-policy" onchange="simPolicy=this.value;simRunOnce();" style="background:#1a1a3a;color:#0f8;border:1px solid #333;font-size:11px;">
+                <select id="sim-policy" onchange="simPolicyChanged(this.value)" style="background:#1a1a3a;color:#0f8;border:1px solid #333;font-size:11px;">
                     <option value="rule">Rule-based</option>
-                    <option value="nn">Neural Network</option>
+                    <option value="nn:explore">NN: Explore</option>
+                    <option value="nn:floor_plan">NN: Floor Plan</option>
+                    <option value="nn:complete_map">NN: Complete Map</option>
+                    <option value="nn:wall_follow">NN: Wall Follow</option>
                 </select>
             </div>
             <div class="sp-row"><span>Robot:</span><span id="sim-pose-info">Click map to place</span></div>
@@ -211,12 +214,15 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
             <div style="display:flex;flex-direction:column;gap:4px;">
                 <div style="display:flex;align-items:center;gap:4px;">
                     <span style="font-size:10px;color:#0df;">Task:</span>
-                    <select id="train-task" style="flex:1;background:#0a0a1a;color:#ff0;border:1px solid #333;padding:2px;font-size:11px;">
+                    <select id="train-task" onchange="trainTaskChanged()" style="flex:1;background:#0a0a1a;color:#ff0;border:1px solid #333;padding:2px;font-size:11px;">
                         <option value="explore">Explore</option>
                         <option value="floor_plan">Floor Plan</option>
+                        <option value="complete_map">Complete Map</option>
                         <option value="wall_follow">Wall Follow</option>
                     </select>
                     <span id="train-task-status" style="font-size:9px;color:#666;white-space:nowrap;"></span>
+                </div>
+                <div id="train-reward-info" style="background:#0a0a15;border:1px solid #1a1a3a;padding:4px 6px;font-size:10px;color:#888;font-family:monospace;margin-bottom:2px;"></div>
                 </div>
                 <div style="display:flex;align-items:center;gap:4px;">
                     <button class="hdr-btn" onclick="trainStep('generate')" style="font-size:11px;width:100%;text-align:left;background:#1a2a1a;">
@@ -235,7 +241,7 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
                     <span id="train-model-status" style="font-size:10px;color:#888;white-space:nowrap;">no model</span>
                 </div>
                 <div style="display:flex;align-items:center;gap:4px;">
-                    <button class="hdr-btn" onclick="simLoadONNX();document.getElementById('sim-policy').value='nn';simPolicy='nn';" style="font-size:11px;width:100%;text-align:left;background:#1a2a2a;">
+                    <button class="hdr-btn" onclick="simLoadSelectedONNX()" style="font-size:11px;width:100%;text-align:left;background:#1a2a2a;">
                         4. Load in Sim</button>
                     <span id="train-onnx-status" style="font-size:10px;color:#888;white-space:nowrap;">-</span>
                 </div>
@@ -249,20 +255,8 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
                 <button class="hdr-btn danger" onclick="trainStep('stop')" style="font-size:11px;">Stop</button>
                 <span id="train-status-label" style="font-size:10px;color:#888;margin-left:4px;line-height:24px;">Idle</span>
             </div>
-            <div id="train-progress-wrap" style="display:none;margin-top:4px;">
-                <div style="display:flex;justify-content:space-between;font-size:10px;color:#0df;margin-bottom:2px;">
-                    <span id="train-progress-text">0 / 100,000 steps</span>
-                    <span id="train-progress-pct">0%</span>
-                </div>
-                <div style="width:100%;height:10px;background:#111;border:1px solid #333;border-radius:3px;overflow:hidden;">
-                    <div id="train-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#0af,#0f8);transition:width 0.3s;"></div>
-                </div>
-                <div style="display:flex;justify-content:space-between;font-size:9px;color:#666;margin-top:2px;">
-                    <span id="train-reward-text">Reward: -</span>
-                    <span id="train-eta-text">ETA: -</span>
-                </div>
-            </div>
-            <div id="train-log" style="margin-top:4px;max-height:150px;overflow-y:auto;background:#050510;border:1px solid #222;padding:4px;font-size:9px;color:#888;font-family:monospace;white-space:pre-wrap;word-break:break-all;">
+            <div id="train-progress-all" style="margin-top:6px;display:flex;flex-direction:column;gap:6px;"></div>
+            <div id="train-log" style="margin-top:6px;max-height:200px;overflow-y:auto;background:#050510;border:1px solid #222;padding:6px;font-size:12px;color:#aaa;font-family:monospace;white-space:pre-wrap;word-break:break-all;">
                 Ready. Click Step 1 to start.
             </div>
         </div>
@@ -337,6 +331,7 @@ let simAutoRunning = false;
 let simAutoTimer = null;
 let simOnnxSession = null;  // ONNX Runtime session for NN inference
 let simPolicy = 'rule';     // 'rule' or 'nn'
+let simNNTask = '';          // which task model is loaded ('explore', 'floor_plan', 'wall_follow')
 const SIM_STOP = 100, SIM_SLOW = 200, SIM_CAUTION = 300;
 const SIM_MAX_RANGE = 6000; // mm
 const SIM_IGNORE_ANGLE = 140; // rear degrees to ignore
@@ -1035,35 +1030,40 @@ async function openRecording(name, videoFile) {
         ).join('');
     } catch(e) { console.error(e); }
 
-    // Sync pose display + LiDAR with video time
+    // Sync pose display + LiDAR with video time (only when video is playing)
     video.addEventListener('timeupdate', () => {
-        if (!currentRecLog) return;
+        if (!currentRecLog || video.paused) return;  // only sync when playing
         const t = video.currentTime;
         const idx = Math.min(Math.floor(t), currentRecLog.length - 1);
         if (idx >= 0 && idx < currentRecLog.length) {
-            const entry = currentRecLog[idx];
-            document.getElementById('rec-pose-info').textContent =
-                'T+' + entry.t + 's  Pose: (' + entry.pose.join(', ') + ')  MinSec: ' + Math.min(...entry.sectors) + 'mm';
-            // Highlight row
-            document.querySelectorAll('#rec-log-body tr').forEach((tr, i) => {
-                tr.style.background = i === idx ? '#1a2a1a' : '';
-            });
-            // Draw LiDAR scan in side panel + main canvas
-            selectedRecEntry = entry;
-            drawRecLidar(entry);
-            needsRedraw = true;
+            seekRecording(idx);
         }
     });
 }
 
 function seekRecording(frameIdx) {
-    const video = document.getElementById('rec-video');
-    video.currentTime = frameIdx;  // 1 FPS so frame index = seconds
-    if (currentRecLog && frameIdx < currentRecLog.length) {
-        selectedRecEntry = currentRecLog[frameIdx];
-        drawRecLidar(selectedRecEntry);
-        needsRedraw = true;
-    }
+    if (!currentRecLog || frameIdx >= currentRecLog.length) return;
+    selectedRecEntry = currentRecLog[frameIdx];
+    const entry = selectedRecEntry;
+
+    // Update pose display
+    document.getElementById('rec-pose-info').textContent =
+        'T+' + entry.t + 's  Pose: (' + entry.pose.join(', ') + ')  MinSec: ' + Math.min(...entry.sectors) + 'mm  Scan: ' + (entry.scan ? entry.scan.length : 0) + 'pts';
+
+    // Highlight selected row
+    document.querySelectorAll('#rec-log-body tr').forEach((tr, i) => {
+        tr.style.background = i === frameIdx ? '#1a2a1a' : '';
+    });
+
+    // Sync video (don't let video errors affect frame selection)
+    try {
+        const video = document.getElementById('rec-video');
+        if (video.readyState >= 1) video.currentTime = frameIdx;
+    } catch(e) {}
+
+    // Draw side panel LiDAR + trigger main canvas redraw
+    drawRecLidar(entry);
+    needsRedraw = true;
 }
 
 function drawRecLidar(entry) {
@@ -1662,7 +1662,6 @@ function simRuleBasedAction() {
 // --- NN policy (ONNX inference) ---
 async function simNNAction() {
     if (!simOnnxSession) {
-        // Fallback to rule-based if no model loaded
         return simRuleBasedAction();
     }
     // Downsample 360 rays → 36 bins (min per 10°)
@@ -1676,20 +1675,76 @@ async function simNNAction() {
         bins[b] = Math.min(minD / SIM_MAX_RANGE, 1.0);
     }
 
+    // Build observation based on task type
+    let obs;
+    let inputName = 'observation';  // new models use 'observation'
+    if (simNNTask === 'floor_plan' || simNNTask === 'complete_map') {
+        // 39 inputs: 36 LiDAR + frontier_angle + frontier_dist + coverage
+        obs = new Float32Array(39);
+        obs.set(bins);
+        const frontier = simFindNearestFrontier();
+        obs[36] = (frontier.angle / Math.PI + 1.0) / 2.0;  // normalize to [0,1]
+        obs[37] = Math.min(frontier.dist / SIM_MAX_RANGE, 1.0);
+        obs[38] = simExplored.size / (simTotalFree || 1);
+    } else if (simNNTask === 'wall_follow') {
+        // 39 inputs: 36 LiDAR + side_dist + target_dist + front_dist
+        obs = new Float32Array(39);
+        obs.set(bins);
+        obs[36] = Math.min((simSectors[6] || 9999) / 3000.0, 1.0);  // left side
+        obs[37] = Math.min(150 / 3000.0, 1.0);  // target dist (150mm default)
+        obs[38] = Math.min((simSectors[0] || 9999) / 3000.0, 1.0);  // front
+    } else {
+        // explore: 36 inputs
+        obs = bins;
+        inputName = 'lidar_scan';  // legacy model uses 'lidar_scan'
+    }
+
     try {
-        const input = new ort.Tensor('float32', bins, [1, 36]);
-        const results = await simOnnxSession.run({ lidar_scan: input });
+        const input = new ort.Tensor('float32', obs, [1, obs.length]);
+        // Try both input names (new models use 'observation', old use 'lidar_scan')
+        let results;
+        try {
+            results = await simOnnxSession.run({ [inputName]: input });
+        } catch {
+            const altName = inputName === 'observation' ? 'lidar_scan' : 'observation';
+            results = await simOnnxSession.run({ [altName]: input });
+        }
         const action = results.action.data;
-        // Map [-1,1] → velocities (match robot_env.py ranges)
         return {
-            vx: action[0] * 0.10 + 0.05,   // [-0.05, 0.15]
-            vy: action[1] * 0.12,            // [-0.12, 0.12] mecanum strafe
-            vz: action[2] * 1.0              // [-1.0, 1.0]
+            vx: action[0] * 0.10 + 0.05,
+            vy: action[1] * 0.12,
+            vz: action[2] * 1.0
         };
     } catch (e) {
         console.error('NN inference error:', e);
         return simRuleBasedAction();
     }
+}
+
+function simFindNearestFrontier() {
+    // Find nearest unexplored free cell relative to robot
+    const rx = Math.floor(simPose[0] / CELL);
+    const ry = Math.floor(simPose[1] / CELL);
+    let bestDist = SIM_MAX_RANGE;
+    let bestAngle = 0;
+    if (!gridData) return { angle: 0, dist: SIM_MAX_RANGE };
+    // Sample every 5th cell for speed
+    for (let y = 0; y < GRID; y += 5) {
+        for (let x = 0; x < GRID; x += 5) {
+            const val = gridData[y * GRID + x];
+            if (val >= -0.5 || val > 0.8) continue;  // not free space
+            const key = y * GRID + x;
+            if (simExplored.has(key)) continue;
+            const dx = x - rx, dy = y - ry;
+            const dist = Math.sqrt(dx * dx + dy * dy) * CELL;
+            if (dist < bestDist) {
+                bestDist = dist;
+                const worldAngle = Math.atan2(dy, dx);
+                bestAngle = Math.atan2(Math.sin(worldAngle - simPose[2]), Math.cos(worldAngle - simPose[2]));
+            }
+        }
+    }
+    return { angle: bestAngle, dist: bestDist };
 }
 
 // --- Collision filter (same as collision_avoidance.py) ---
@@ -2006,6 +2061,59 @@ window.addEventListener('mouseup', (e) => {
 // ============================================================
 let trainPollTimer = null;
 let trainStartTime = null;
+let trainLastTask = null;  // track task switches to reset ETA
+
+const TASK_REWARDS = {
+    explore: [
+        ['New cell explored',  '+3.0'],
+        ['Collision',          '-10.0'],
+        ['Stalling',           '-0.5'],
+        ['Time penalty',       '-0.05/step'],
+        ['Obs: 36 LiDAR bins', ''],
+    ],
+    floor_plan: [
+        ['New cell explored',  '+2.0'],
+        ['Facing frontier',    '+0.1 max'],
+        ['Coverage 10%',       '+3.0 bonus'],
+        ['Collision',          '-20.0'],
+        ['Time penalty',       '-0.05/step'],
+        ['Obs: 36 LiDAR + frontier angle/dist + coverage', ''],
+    ],
+    complete_map: [
+        ['New cell explored',  '+2.0'],
+        ['Wall cell scanned',  '+1.5'],
+        ['Facing frontier',    '+0.3 max'],
+        ['Coverage 10%',       '+3.0 bonus'],
+        ['Wall complete 10%',  '+2.0 bonus'],
+        ['Collision',          '-15.0'],
+        ['Stalling',           '-0.3'],
+        ['Time penalty',       '-0.05/step'],
+        ['Obs: 36 LiDAR + frontier angle/dist + coverage', ''],
+    ],
+    wall_follow: [
+        ['Dist within 50mm',   '+1.0'],
+        ['Dist within 150mm',  '+0.3'],
+        ['Dist too far',       '-0.2'],
+        ['Forward progress',   '+0.1'],
+        ['Collision',          '-30.0'],
+        ['Time penalty',       '-0.05/step'],
+        ['Obs: 36 LiDAR + side dist + target dist + front dist', ''],
+    ],
+};
+
+function trainTaskChanged() {
+    const task = document.getElementById('train-task').value;
+    const infoEl = document.getElementById('train-reward-info');
+    if (infoEl && TASK_REWARDS[task]) {
+        infoEl.innerHTML = TASK_REWARDS[task].map(([label, val]) =>
+            val ? `<span style="color:#0df;">${label}</span> <span style="color:${val.startsWith('-')?'#f66':'#0f8'}">${val}</span>`
+                : `<span style="color:#666;font-style:italic;">${label}</span>`
+        ).join('<br>');
+    }
+    trainPollStatus();
+}
+// Initialize on load
+setTimeout(() => trainTaskChanged(), 500);
 
 function trainStep(action) {
     const logEl = document.getElementById('train-log');
@@ -2048,7 +2156,8 @@ function trainStep(action) {
             }).catch(e => logEl.textContent += 'Fetch error: ' + e + '\n');
 
     } else if (action === 'stop') {
-        fetch('/api/train/stop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' })
+        const stopTask = document.getElementById('train-task') ? document.getElementById('train-task').value : '';
+        fetch('/api/train/stop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({task: stopTask}) })
             .then(r => r.json()).then(d => {
                 logEl.textContent += (d.message || 'Stopped') + '\n';
             });
@@ -2061,7 +2170,12 @@ function trainStartPolling() {
 }
 
 function trainPollStatus() {
-    fetch('/api/train/status').then(r => r.json()).then(d => {
+    const selTask = document.getElementById('train-task') ? document.getElementById('train-task').value : 'explore';
+    if (selTask !== trainLastTask) {
+        trainStartTime = null;  // reset ETA on task switch
+        trainLastTask = selTask;
+    }
+    fetch('/api/train/status?task=' + selTask).then(r => r.json()).then(d => {
         const logEl = document.getElementById('train-log');
         const statusEl = document.getElementById('train-status-label');
         const mapsEl = document.getElementById('train-maps-count');
@@ -2096,56 +2210,107 @@ function trainPollStatus() {
             if (onnxEl) { onnxEl.textContent = d.onnx_ready ? 'ONNX ready' : '-'; onnxEl.style.color = d.onnx_ready ? '#0f8' : '#888'; }
         }
 
-        // Update status
-        if (d.running) {
-            statusEl.textContent = 'Running: ' + d.label;
+        // Update status based on selected task
+        const selTaskInfo = taskInfo || {};
+        const selTaskTraining = selTaskInfo.training || false;
+        const selTaskExit = selTaskInfo.train_exit;
+        if (selTaskTraining) {
+            statusEl.textContent = 'Training: ' + selTask;
             statusEl.style.color = '#ff0';
-        } else if (d.exit_code !== null) {
-            statusEl.textContent = d.exit_code === 0 ? 'Done: ' + d.label : 'Failed: ' + d.label;
-            statusEl.style.color = d.exit_code === 0 ? '#0f8' : '#f44';
-            // Stop polling when process ends
-            if (trainPollTimer) { clearInterval(trainPollTimer); trainPollTimer = null; }
+        } else if (selTaskExit !== null && selTaskExit !== undefined) {
+            statusEl.textContent = selTaskExit === 0 ? 'Done: ' + selTask : 'Failed: ' + selTask;
+            statusEl.style.color = selTaskExit === 0 ? '#0f8' : '#f44';
+        } else if (d.running && !selTaskTraining) {
+            // Other tasks are training, but not this one
+            const others = Object.entries(d.models).filter(([t,m]) => m.training).map(([t]) => t);
+            statusEl.textContent = 'Idle (' + others.join(', ') + ' training)';
+            statusEl.style.color = '#888';
         } else {
             statusEl.textContent = 'Idle';
             statusEl.style.color = '#888';
         }
+        // Only stop polling if nothing is training at all
+        const anyTraining = Object.values(d.models).some(m => m.training);
+        if (!anyTraining && !d.running && trainPollTimer) {
+            clearInterval(trainPollTimer); trainPollTimer = null;
+        }
 
-        // Update progress bar (during training)
-        const progWrap = document.getElementById('train-progress-wrap');
-        const progBar = document.getElementById('train-progress-bar');
-        const progText = document.getElementById('train-progress-text');
-        const progPct = document.getElementById('train-progress-pct');
-        const rewardText = document.getElementById('train-reward-text');
-        const etaText = document.getElementById('train-eta-text');
-        if (d.label === 'train' && d.train_target > 0) {
-            progWrap.style.display = 'block';
-            const cur = d.train_current || 0;
-            const tgt = d.train_target;
-            const pct = Math.min(100, (cur / tgt * 100));
-            progBar.style.width = pct.toFixed(1) + '%';
-            progText.textContent = cur.toLocaleString() + ' / ' + tgt.toLocaleString() + ' steps';
-            progPct.textContent = pct.toFixed(1) + '%';
-            if (d.train_reward) rewardText.textContent = 'Reward: ' + d.train_reward;
-            // ETA estimate
-            if (!trainStartTime && cur > 0) trainStartTime = Date.now();
-            if (trainStartTime && cur > 0 && pct < 100) {
-                const elapsed = (Date.now() - trainStartTime) / 1000;
-                const rate = cur / elapsed;  // steps/sec
-                const remaining = (tgt - cur) / rate;
-                const mins = Math.floor(remaining / 60);
-                const secs = Math.floor(remaining % 60);
-                etaText.textContent = 'ETA: ' + mins + 'm ' + secs + 's (' + rate.toFixed(0) + ' steps/s)';
-            }
-            if (!d.running) {
-                trainStartTime = null;
-                if (d.exit_code === 0) {
-                    progBar.style.width = '100%';
-                    progPct.textContent = '100%';
-                    etaText.textContent = 'Done!';
+        // Update per-task progress bars
+        const progAll = document.getElementById('train-progress-all');
+        if (progAll && d.models) {
+            const taskNames = Object.keys(d.models);
+            // Create/update bars for each task
+            for (const t of taskNames) {
+                const m = d.models[t];
+                let bar = document.getElementById('prog-' + t);
+                if (!bar) {
+                    // Create progress bar element
+                    bar = document.createElement('div');
+                    bar.id = 'prog-' + t;
+                    bar.innerHTML =
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">' +
+                        '  <span style="font-size:11px;font-weight:bold;" class="prog-label"></span>' +
+                        '  <span style="font-size:11px;" class="prog-pct"></span>' +
+                        '</div>' +
+                        '<div style="width:100%;height:8px;background:#111;border:1px solid #333;border-radius:3px;overflow:hidden;">' +
+                        '  <div class="prog-fill" style="height:100%;width:0%;transition:width 0.3s;border-radius:3px;"></div>' +
+                        '</div>' +
+                        '<div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-top:1px;">' +
+                        '  <span class="prog-reward"></span>' +
+                        '  <span class="prog-steps"></span>' +
+                        '</div>';
+                    progAll.appendChild(bar);
+                }
+                const label = bar.querySelector('.prog-label');
+                const pctEl = bar.querySelector('.prog-pct');
+                const fill = bar.querySelector('.prog-fill');
+                const rewardEl = bar.querySelector('.prog-reward');
+                const stepsEl = bar.querySelector('.prog-steps');
+                const cur = m.train_current || 0;
+                const tgt = m.train_target || 0;
+                const pct = tgt > 0 ? Math.min(100, cur / tgt * 100) : 0;
+
+                if (m.training) {
+                    label.textContent = t.replace('_', ' ');
+                    label.style.color = '#ff0';
+                    pctEl.textContent = pct.toFixed(1) + '%';
+                    pctEl.style.color = '#0df';
+                    fill.style.width = pct.toFixed(1) + '%';
+                    fill.style.background = 'linear-gradient(90deg, #0af, #0f8)';
+                    stepsEl.textContent = cur.toLocaleString() + ' / ' + tgt.toLocaleString();
+                    if (m.train_reward) rewardEl.textContent = 'Reward: ' + m.train_reward;
+                    bar.style.opacity = '1';
+                } else if (m.onnx || m.pt) {
+                    label.textContent = t.replace('_', ' ');
+                    label.style.color = '#0f8';
+                    pctEl.textContent = 'Ready';
+                    pctEl.style.color = '#0f8';
+                    fill.style.width = '100%';
+                    fill.style.background = '#1a3a1a';
+                    stepsEl.textContent = (m.onnx ? 'ONNX' : '') + (m.pt ? ' PT' : '');
+                    rewardEl.textContent = m.checkpoints + ' ckpt';
+                    bar.style.opacity = '0.6';
+                } else if (m.train_exit !== null && m.train_exit !== undefined) {
+                    label.textContent = t.replace('_', ' ');
+                    label.style.color = m.train_exit === 0 ? '#0f8' : '#f44';
+                    pctEl.textContent = m.train_exit === 0 ? 'Done' : 'Failed';
+                    pctEl.style.color = m.train_exit === 0 ? '#0f8' : '#f44';
+                    fill.style.width = pct.toFixed(1) + '%';
+                    fill.style.background = m.train_exit === 0 ? '#1a3a1a' : '#3a1a1a';
+                    stepsEl.textContent = cur.toLocaleString() + ' / ' + tgt.toLocaleString();
+                    if (m.train_reward) rewardEl.textContent = 'Reward: ' + m.train_reward;
+                    bar.style.opacity = '0.7';
+                } else {
+                    label.textContent = t.replace('_', ' ');
+                    label.style.color = '#555';
+                    pctEl.textContent = '';
+                    fill.style.width = '0%';
+                    fill.style.background = '#222';
+                    stepsEl.textContent = m.checkpoints > 0 ? m.checkpoints + ' ckpt' : 'not trained';
+                    rewardEl.textContent = '';
+                    bar.style.opacity = '0.4';
                 }
             }
-        } else if (!d.running) {
-            progWrap.style.display = 'none';
         }
 
         // Update log
@@ -2160,21 +2325,65 @@ function trainPollStatus() {
 function trainPanelVisibility(show) {
     const el = document.getElementById('train-panel');
     if (el) el.style.display = show ? 'block' : 'none';
-    if (show) trainPollStatus();  // initial status check
+    if (show) {
+        trainPollStatus();
+        trainStartPolling();  // keep polling for all progress bars
+    }
 }
 
 // --- Load ONNX model ---
-async function simLoadONNX() {
+async function simLoadONNX(task) {
     if (typeof ort === 'undefined') {
-        console.log('ONNX Runtime Web not loaded — NN policy unavailable');
-        return;
+        console.log('ONNX Runtime Web not loaded');
+        return false;
     }
-    try {
-        simOnnxSession = await ort.InferenceSession.create('/models/nav_policy.onnx');
-        console.log('ONNX model loaded successfully');
-    } catch (e) {
-        console.log('No ONNX model found (expected at /models/nav_policy.onnx):', e.message);
-        simOnnxSession = null;
+    // Task-specific model path: /models/<task>/<task>_policy.onnx
+    // Fallback to legacy path: /models/nav_policy.onnx
+    const paths = task
+        ? [`/models/${task}/${task}_policy.onnx`, '/models/nav_policy.onnx']
+        : ['/models/nav_policy.onnx'];
+
+    for (const path of paths) {
+        try {
+            simOnnxSession = await ort.InferenceSession.create(path);
+            simNNTask = task || 'explore';
+            console.log(`ONNX model loaded: ${path} (task=${simNNTask})`);
+            const statusEl = document.getElementById('train-onnx-status');
+            if (statusEl) { statusEl.textContent = simNNTask + ' loaded'; statusEl.style.color = '#0f8'; }
+            return true;
+        } catch (e) {
+            console.log(`ONNX not found at ${path}: ${e.message}`);
+        }
+    }
+    simOnnxSession = null;
+    simNNTask = '';
+    const statusEl = document.getElementById('train-onnx-status');
+    if (statusEl) { statusEl.textContent = 'not found'; statusEl.style.color = '#f44'; }
+    return false;
+}
+
+function simPolicyChanged(value) {
+    if (value === 'rule') {
+        simPolicy = 'rule';
+    } else if (value.startsWith('nn:')) {
+        const task = value.split(':')[1];
+        simPolicy = 'nn';
+        // Auto-load if different task or no session
+        if (!simOnnxSession || simNNTask !== task) {
+            simLoadONNX(task);
+        }
+    }
+}
+
+async function simLoadSelectedONNX() {
+    // Load ONNX for the task selected in the training dropdown
+    const task = document.getElementById('train-task') ? document.getElementById('train-task').value : 'explore';
+    const ok = await simLoadONNX(task);
+    if (ok) {
+        // Set the policy dropdown to match
+        const policySelect = document.getElementById('sim-policy');
+        if (policySelect) policySelect.value = 'nn:' + task;
+        simPolicy = 'nn';
     }
 }
 

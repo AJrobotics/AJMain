@@ -905,19 +905,101 @@ class Explorer:
             _log.error(f"Error reading LiDAR for NN: {e}")
             return None
 
+    # ================================================================
+    # Route following
+    # ================================================================
+
+    def start_route_follow(self, route_name, time_limit=None):
+        """Start following a recorded route autonomously."""
+        if self.state not in ("idle", "stopped"):
+            return {"error": f"Explorer busy: {self.state}"}
+
+        try:
+            from route_player import RoutePlayer
+            self._route_player = RoutePlayer(
+                route_name=route_name,
+                slam=self.slam,
+                lidar=self.lidar_reader,
+                collision=self.collision,
+                bot=self.bot,
+                gps=getattr(self, 'gps', None),
+                cam=getattr(self, 'cam', None),
+            )
+            if not self._route_player.load():
+                return {"error": f"Failed to load route: {route_name}"}
+        except Exception as e:
+            _log.error(f"Route player init error: {e}")
+            return {"error": str(e)}
+
+        if time_limit is not None:
+            self.time_limit = time_limit
+        self._abort = False
+        self.state = "following_route"
+        self._thread = threading.Thread(target=self._route_follow_loop, daemon=True)
+        self._thread.start()
+        _log.info("Route follow started: %s", route_name)
+        return {"ok": True}
+
+    def _route_follow_loop(self):
+        """Main loop for route following."""
+        start_time = time.time()
+        step_dt = 1.0 / EXPLORE_UPDATE_HZ
+
+        try:
+            self._route_player.start()
+
+            while not self._abort and self.state == "following_route":
+                elapsed = time.time() - start_time
+                if self.time_limit and elapsed > self.time_limit:
+                    _log.info("Route follow time limit (%.0fs)", elapsed)
+                    self.state = "arrived"
+                    return
+
+                self._route_player.step()
+
+                if self._route_player.state == "arrived":
+                    _log.info("Route completed!")
+                    self.state = "arrived"
+                    return
+
+                if self._route_player.state == "error":
+                    _log.error("Route player error")
+                    self.state = "stopped"
+                    return
+
+                time.sleep(step_dt)
+
+        except Exception as e:
+            _log.error(f"Route follow error: {e}", exc_info=True)
+        finally:
+            self._stop_motors()
+            if self.state == "following_route":
+                self.state = "idle"
+
+    def get_route_status(self):
+        """Get route following status."""
+        if hasattr(self, '_route_player') and self._route_player:
+            return self._route_player.get_status()
+        return {"state": "idle"}
+
     def stop(self):
         self._abort = True
+        if hasattr(self, '_route_player') and self._route_player:
+            self._route_player.stop()
         self._stop_motors()
         self.state = "stopped"
         return {"ok": True}
 
     def get_status(self):
         with self.lock:
-            return {
+            status = {
                 "state": self.state,
                 "target": self.target,
                 "num_frontiers": len(self.frontiers),
             }
+            if self.state == "following_route" and hasattr(self, '_route_player'):
+                status["route"] = self._route_player.get_status()
+            return status
 
     def get_frontiers(self):
         with self.lock:

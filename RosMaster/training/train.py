@@ -277,4 +277,5 @@ if __name__ == "__main__":
                         help="Switch map every N episodes")
     args = parser.parse_args()
 
+    print(f"CLI args: task={args.task}, timesteps={args.timesteps}, resume={args.resume}")
     train(args)

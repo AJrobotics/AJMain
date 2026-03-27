@@ -46,9 +46,10 @@ DT = 0.2  # seconds per step (5 Hz, matches explorer)
 
 # Task types and their observation sizes
 TASK_TYPES = {
-    "explore":    {"obs_size": NUM_BINS,     "desc": "General exploration"},
-    "floor_plan": {"obs_size": NUM_BINS + 3, "desc": "Complete map coverage"},  # +frontier_angle, frontier_dist, coverage
-    "wall_follow":{"obs_size": NUM_BINS + 3, "desc": "Wall following"},         # +side_dist, target_dist, forward_dist
+    "explore":      {"obs_size": NUM_BINS,     "desc": "General exploration"},
+    "floor_plan":   {"obs_size": NUM_BINS + 3, "desc": "Complete map coverage"},      # +frontier_angle, frontier_dist, coverage
+    "complete_map": {"obs_size": NUM_BINS + 3, "desc": "Map + wall completeness"},    # +frontier_angle, frontier_dist, coverage (with wall rewards)
+    "wall_follow":  {"obs_size": NUM_BINS + 3, "desc": "Wall following"},             # +side_dist, target_dist, forward_dist
 }
 
 # Episode limits
@@ -386,21 +387,20 @@ class RobotNavEnv(gym.Env):
         """Mark cells visible from current position as explored.
 
         Uses the ray-cast results to determine which cells the robot can see.
+        Also tracks wall cells that have been scanned (for wall completeness).
         """
         ox = int(self.pose[0] / CELL_SIZE_MM)
         oy = int(self.pose[1] / CELL_SIZE_MM)
 
-        # Mark cells in a radius around robot as explored
-        # (simulating what the LiDAR would reveal)
         vis_radius = int(MAX_RANGE_MM / CELL_SIZE_MM)
         newly_explored = 0
+        newly_scanned_walls = 0
 
         for i in range(NUM_RAYS):
             angle = self.pose[2] + math.radians(i)
             dx = math.cos(angle)
             dy = math.sin(angle)
 
-            # Step along ray until wall or max range
             for step in range(1, vis_radius):
                 cx = ox + int(dx * step)
                 cy = oy + int(dy * step)
@@ -408,6 +408,11 @@ class RobotNavEnv(gym.Env):
                 if cx < 0 or cx >= GRID_SIZE or cy < 0 or cy >= GRID_SIZE:
                     break
                 if self.wall_mask[cy, cx]:
+                    # Wall hit — track it for wall completeness
+                    wall_cell = (cx, cy)
+                    if wall_cell not in self.scanned_walls:
+                        self.scanned_walls.add(wall_cell)
+                        newly_scanned_walls += 1
                     break
 
                 cell = (cx, cy)
@@ -415,7 +420,7 @@ class RobotNavEnv(gym.Env):
                     self.explored_cells.add(cell)
                     newly_explored += 1
 
-        return newly_explored
+        return newly_explored, newly_scanned_walls
 
     # ================================================================
     # Gymnasium interface
@@ -434,9 +439,12 @@ class RobotNavEnv(gym.Env):
 
         self.step_count = 0
         self.explored_cells = set()
+        self.scanned_walls = set()
+        self.total_walls = int(np.sum(self.wall_mask))
         self.total_reward = 0.0
         self._collision_count = 0
         self._last_milestone = 0
+        self._last_wall_milestone = 0
 
         # Update wall mask
         self.wall_mask = self.grid > 0.8
@@ -532,12 +540,13 @@ class RobotNavEnv(gym.Env):
         self.pose[0] = np.clip(self.pose[0], CELL_SIZE_MM, MAP_SIZE_MM - CELL_SIZE_MM)
         self.pose[1] = np.clip(self.pose[1], CELL_SIZE_MM, MAP_SIZE_MM - CELL_SIZE_MM)
 
-        # Mark newly explored cells
-        newly_explored = self._mark_explored()
+        # Mark newly explored cells and scanned walls
+        newly_explored, newly_scanned_walls = self._mark_explored()
 
         # Compute task-specific reward
         collision = in_wall or was_blocked
-        reward = self._compute_reward(newly_explored, collision, distances)
+        reward = self._compute_reward(newly_explored, collision, distances,
+                                      newly_scanned_walls=newly_scanned_walls)
 
         self.step_count += 1
         self.total_reward += reward
@@ -566,11 +575,15 @@ class RobotNavEnv(gym.Env):
         self._last_distances = distances
         obs = self._build_obs(distances)
 
+        wall_coverage = len(self.scanned_walls) / max(self.total_walls, 1)
         info = {
             "pose": self.pose.tolist(),
             "coverage": coverage,
+            "wall_coverage": wall_coverage,
             "explored": len(self.explored_cells),
             "total_free": self.total_free,
+            "scanned_walls": len(self.scanned_walls),
+            "total_walls": self.total_walls,
             "sectors": self._compute_sectors(distances).tolist(),
             "step": self.step_count,
             "was_blocked": was_blocked,
@@ -590,7 +603,7 @@ class RobotNavEnv(gym.Env):
         if self.task == "explore":
             return lidar_bins
 
-        elif self.task == "floor_plan":
+        elif self.task in ("floor_plan", "complete_map"):
             # Add: frontier_angle (normalized), frontier_dist (normalized), coverage
             frontier_angle, frontier_dist = self._find_nearest_frontier()
             coverage = len(self.explored_cells) / self.total_free
@@ -618,37 +631,72 @@ class RobotNavEnv(gym.Env):
 
         return lidar_bins
 
-    def _compute_reward(self, newly_explored, collision, distances):
+    def _compute_reward(self, newly_explored, collision, distances,
+                        newly_scanned_walls=0):
         """Compute task-specific reward."""
         if self.task == "explore":
-            reward = -0.1  # time penalty
-            reward += newly_explored * 1.0
+            # Primary goal: maximize explored area
+            reward = newly_explored * 3.0
+            reward -= 0.05
             if collision:
-                reward += -50.0
+                reward -= 10.0
+            # Penalize spinning in place
+            speed = math.sqrt(
+                (self.pose[0] - getattr(self, '_prev_x', self.pose[0]))**2 +
+                (self.pose[1] - getattr(self, '_prev_y', self.pose[1]))**2)
+            if speed < 5 and newly_explored == 0:
+                reward -= 0.5
+            self._prev_x, self._prev_y = self.pose[0], self.pose[1]
             return reward
 
         elif self.task == "floor_plan":
-            reward = -0.05  # smaller time penalty (floor plan takes longer)
-            reward += newly_explored * 2.0  # stronger exploration reward
+            reward = -0.05
+            reward += newly_explored * 2.0
 
-            # Reward for moving toward frontiers
             frontier_angle, frontier_dist = self._find_nearest_frontier()
             if frontier_dist < MAX_RANGE_MM:
-                # Small reward for facing the frontier
-                facing_reward = math.cos(frontier_angle) * 0.1  # max 0.1 if facing frontier
-                reward += max(0, facing_reward)
+                reward += max(0, math.cos(frontier_angle) * 0.1)
 
-            # Coverage milestone bonuses
             coverage = len(self.explored_cells) / self.total_free
-            if not hasattr(self, '_last_milestone'):
-                self._last_milestone = 0
-            milestone = int(coverage * 10)  # every 10%
+            milestone = int(coverage * 10)
             if milestone > self._last_milestone:
                 reward += 3.0 * (milestone - self._last_milestone)
                 self._last_milestone = milestone
 
             if collision:
-                reward += -20.0  # lighter collision penalty (need to explore tight spaces)
+                reward -= 20.0
+            return reward
+
+        elif self.task == "complete_map":
+            reward = -0.05
+            reward += newly_explored * 2.0
+            reward += newly_scanned_walls * 1.5
+
+            frontier_angle, frontier_dist = self._find_nearest_frontier()
+            if frontier_dist < MAX_RANGE_MM:
+                reward += max(0, math.cos(frontier_angle) * 0.3)
+
+            coverage = len(self.explored_cells) / self.total_free
+            milestone = int(coverage * 10)
+            if milestone > self._last_milestone:
+                reward += 3.0 * (milestone - self._last_milestone)
+                self._last_milestone = milestone
+
+            wall_coverage = len(self.scanned_walls) / max(self.total_walls, 1)
+            wall_milestone = int(wall_coverage * 10)
+            if wall_milestone > self._last_wall_milestone:
+                reward += 2.0 * (wall_milestone - self._last_wall_milestone)
+                self._last_wall_milestone = wall_milestone
+
+            if collision:
+                reward -= 15.0
+
+            speed = math.sqrt(
+                (self.pose[0] - getattr(self, '_prev_x', self.pose[0]))**2 +
+                (self.pose[1] - getattr(self, '_prev_y', self.pose[1]))**2)
+            if speed < 5 and newly_explored == 0 and newly_scanned_walls == 0:
+                reward -= 0.3
+            self._prev_x, self._prev_y = self.pose[0], self.pose[1]
             return reward
 
         elif self.task == "wall_follow":

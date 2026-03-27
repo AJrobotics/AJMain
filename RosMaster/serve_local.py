@@ -39,18 +39,20 @@ TRAINING_DIR = os.path.join(ROOT_DIR, "training")
 MODELS_DIR = os.path.join(TRAINING_DIR, "models")
 MAPS_DIR = os.path.join(TRAINING_DIR, "maps")
 
-# Track running subprocess
+# Track running subprocesses
+# General process (generate, evaluate, deploy) — single at a time
 _process = None        # subprocess.Popen
 _process_log = []      # captured output lines
-_process_label = ""    # "generate" / "train" / "evaluate" / "deploy"
+_process_label = ""    # "generate" / "evaluate" / "deploy"
 _process_lock = threading.Lock()
-_train_target = 0      # target timesteps for training
-_train_current = 0     # current timesteps (parsed from PPO output)
-_train_reward = ""     # latest ep_rew_mean
+
+# Per-task training processes (can run in parallel)
+_train_processes = {}  # task_name -> {process, log, target, current, reward}
+_train_lock = threading.Lock()
 
 
 def _run_async(label, cmd, cwd=None):
-    """Run a command in a background thread, capture output."""
+    """Run a non-training command in a background thread, capture output."""
     global _process, _process_log, _process_label
 
     with _process_lock:
@@ -60,7 +62,7 @@ def _run_async(label, cmd, cwd=None):
         _process_label = label
 
     def _worker():
-        global _process, _train_current, _train_reward
+        global _process
         try:
             env = os.environ.copy()
             env['PYTHONIOENCODING'] = 'utf-8'
@@ -72,19 +74,6 @@ def _run_async(label, cmd, cwd=None):
             for line in _process.stdout:
                 line = line.rstrip()
                 _process_log.append(line)
-                # Parse PPO progress: "| time/total_timesteps  | 2048  |"
-                if 'total_timesteps' in line and '|' in line:
-                    try:
-                        _train_current = int(line.split('|')[2].strip())
-                    except (IndexError, ValueError):
-                        pass
-                # Parse reward: "| rollout/ep_rew_mean   | 12.5  |"
-                if 'ep_rew_mean' in line and '|' in line:
-                    try:
-                        _train_reward = line.split('|')[2].strip()
-                    except (IndexError, ValueError):
-                        pass
-                # Keep only last 200 lines
                 if len(_process_log) > 200:
                     _process_log.pop(0)
             _process.wait()
@@ -96,8 +85,60 @@ def _run_async(label, cmd, cwd=None):
     return True, "Started"
 
 
-def _get_status():
-    """Get current process status + log."""
+def _run_train_async(task, cmd, target_steps, cwd=None):
+    """Run a training process for a specific task. Multiple tasks can train in parallel."""
+    with _train_lock:
+        if task in _train_processes:
+            tp = _train_processes[task]
+            if tp["process"] and tp["process"].poll() is None:
+                return False, f"Already training: {task}"
+
+        _train_processes[task] = {
+            "process": None,
+            "log": [],
+            "target": target_steps,
+            "current": 0,
+            "reward": "",
+        }
+
+    def _worker():
+        tp = _train_processes[task]
+        try:
+            env = os.environ.copy()
+            env['PYTHONIOENCODING'] = 'utf-8'
+            tp["process"] = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                cwd=cwd or ROOT_DIR, text=True, bufsize=1,
+                encoding='utf-8', errors='replace', env=env
+            )
+            for line in tp["process"].stdout:
+                line = line.rstrip()
+                tp["log"].append(line)
+                if 'total_timesteps' in line and '|' in line:
+                    try:
+                        tp["current"] = int(line.split('|')[2].strip())
+                    except (IndexError, ValueError):
+                        pass
+                if 'ep_rew_mean' in line and '|' in line:
+                    try:
+                        tp["reward"] = line.split('|')[2].strip()
+                    except (IndexError, ValueError):
+                        pass
+                if len(tp["log"]) > 200:
+                    tp["log"].pop(0)
+            tp["process"].wait()
+        except Exception as e:
+            tp["log"].append(f"ERROR: {e}")
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    return True, "Started"
+
+
+def _get_status(task=None):
+    """Get current process status + log.
+    If task is specified, return that task's training status.
+    """
     running = _process is not None and _process.poll() is None
     exit_code = None if running else (_process.returncode if _process else None)
 
@@ -105,14 +146,24 @@ def _get_status():
     n_maps = len(glob.glob(os.path.join(MAPS_DIR, "*.npz")))
 
     # Check models per task
-    tasks = ["explore", "floor_plan", "wall_follow"]
+    tasks = ["explore", "floor_plan", "complete_map", "wall_follow"]
     models_info = {}
     for t in tasks:
         task_dir = os.path.join(MODELS_DIR, t)
+        tp = _train_processes.get(t)
+        tp_running = tp and tp["process"] and tp["process"].poll() is None if tp else False
+        tp_exit = None
+        if tp and tp["process"] and not tp_running:
+            tp_exit = tp["process"].returncode
         models_info[t] = {
             "onnx": os.path.exists(os.path.join(task_dir, f"{t}_policy.onnx")),
             "pt": os.path.exists(os.path.join(task_dir, f"{t}_policy.pt")),
             "checkpoints": len(glob.glob(os.path.join(task_dir, f"{t}_ppo_*_steps.zip"))),
+            "training": tp_running,
+            "train_target": tp["target"] if tp else 0,
+            "train_current": tp["current"] if tp else 0,
+            "train_reward": tp["reward"] if tp else "",
+            "train_exit": tp_exit,
         }
 
     # Legacy check (old single-model files)
@@ -120,19 +171,33 @@ def _get_status():
     pt_exists = os.path.exists(os.path.join(MODELS_DIR, "nav_policy.pt"))
     n_checkpoints = sum(m["checkpoints"] for m in models_info.values())
 
+    # Per-task log and progress (for the selected task or first running)
+    sel_task = task
+    if not sel_task:
+        for t in tasks:
+            if models_info[t]["training"]:
+                sel_task = t
+                break
+    tp = _train_processes.get(sel_task) if sel_task else None
+    train_log = tp["log"][-30:] if tp else []
+    train_target = tp["target"] if tp else 0
+    train_current = tp["current"] if tp else 0
+    train_reward = tp["reward"] if tp else ""
+    any_training = any(m["training"] for m in models_info.values())
+
     return {
-        "running": running,
-        "label": _process_label,
-        "exit_code": exit_code,
-        "log": _process_log[-30:],
+        "running": running or any_training,
+        "label": _process_label if running else (f"train:{sel_task}" if any_training else _process_label),
+        "exit_code": exit_code if running or not any_training else None,
+        "log": train_log if any_training else _process_log[-30:],
         "maps_count": n_maps,
         "checkpoints": n_checkpoints,
         "onnx_ready": onnx_exists or any(m["onnx"] for m in models_info.values()),
         "pt_ready": pt_exists or any(m["pt"] for m in models_info.values()),
         "models": models_info,
-        "train_target": _train_target,
-        "train_current": _train_current,
-        "train_reward": _train_reward,
+        "train_target": train_target,
+        "train_current": train_current,
+        "train_reward": train_reward,
     }
 
 
@@ -149,8 +214,14 @@ class LocalHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         # Training status API
-        if self.path == '/api/train/status':
-            self._json_response(_get_status())
+        if self.path.startswith('/api/train/status'):
+            # Parse ?task=floor_plan from query string
+            task_param = None
+            if '?' in self.path:
+                from urllib.parse import parse_qs, urlparse
+                qs = parse_qs(urlparse(self.path).query)
+                task_param = qs.get('task', [None])[0]
+            self._json_response(_get_status(task=task_param))
             return
 
         # Comm test: proxy to agent APIs (Dreamer/Christy)
@@ -249,15 +320,11 @@ class LocalHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         if self.path == '/api/train/train':
-            global _train_target, _train_current, _train_reward
             content_len = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(content_len)) if content_len else {}
             timesteps = body.get('timesteps', 100000)
             task = body.get('task', 'explore')
             fresh = body.get('fresh', False)
-            _train_target = timesteps
-            _train_current = 0
-            _train_reward = ""
             cmd = [
                 sys.executable, os.path.join(TRAINING_DIR, "train.py"),
                 "--task", task,
@@ -273,7 +340,7 @@ class LocalHandler(http.server.SimpleHTTPRequestHandler):
                 if checkpoints:
                     latest = checkpoints[-1].replace(".zip", "")
                     cmd.extend(["--resume", latest])
-            ok, msg = _run_async("train", cmd)
+            ok, msg = _run_train_async(task, cmd, timesteps)
             self._json_response({"ok": ok, "message": msg})
             return
 
@@ -324,11 +391,31 @@ class LocalHandler(http.server.SimpleHTTPRequestHandler):
 
         if self.path == '/api/train/stop':
             global _process
-            if _process and _process.poll() is None:
+            content_len = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(content_len)) if content_len else {}
+            stop_task = body.get('task', None)
+
+            if stop_task and stop_task in _train_processes:
+                tp = _train_processes[stop_task]
+                if tp["process"] and tp["process"].poll() is None:
+                    tp["process"].terminate()
+                    self._json_response({"ok": True, "message": f"Stopped {stop_task}"})
+                else:
+                    self._json_response({"ok": False, "message": f"{stop_task} not running"})
+            elif _process and _process.poll() is None:
                 _process.terminate()
                 self._json_response({"ok": True, "message": f"Stopped {_process_label}"})
             else:
-                self._json_response({"ok": False, "message": "Nothing running"})
+                # Stop all running training
+                stopped = []
+                for t, tp in _train_processes.items():
+                    if tp["process"] and tp["process"].poll() is None:
+                        tp["process"].terminate()
+                        stopped.append(t)
+                if stopped:
+                    self._json_response({"ok": True, "message": f"Stopped {', '.join(stopped)}"})
+                else:
+                    self._json_response({"ok": False, "message": "Nothing running"})
             return
 
         # Proxy other POST API calls to Jetson

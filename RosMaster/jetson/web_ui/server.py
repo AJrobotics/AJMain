@@ -30,6 +30,7 @@ from slam_engine import SLAMEngine, CELL_SIZE_MM, GRID_SIZE
 from explorer import Explorer
 from gps_reader import GpsReader
 from xbee_comm import XBeeComm
+from route_recorder import RouteRecorder, ROUTE_DIR
 
 PORT = 8080
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -52,6 +53,7 @@ explorer = Explorer(slam=slam, ignore_angle=120)
 slam_clients = set()
 gps = GpsReader()
 xbee = XBeeComm(gps_reader=gps)
+route_rec = None  # active RouteRecorder
 
 # Persistent Rosmaster instance for status (uses CH340 on ttyUSB1/ttyUSB2, not ttyUSB0)
 bot = None
@@ -409,6 +411,15 @@ class ExplorerHandler(tornado.web.RequestHandler):
                 time_limit = int(data.get("time_limit", 300))
                 result = explorer.start_nn_explore(time_limit=time_limit)
                 _start_recording()
+            elif action == "route_follow":
+                route_name = data.get("route_name", "")
+                time_limit = int(data.get("time_limit", 600))
+                if not route_name:
+                    result = {"error": "No route name specified"}
+                else:
+                    explorer.gps = gps
+                    explorer.cam = cam_primary
+                    result = explorer.start_route_follow(route_name, time_limit=time_limit)
             elif action == "stop":
                 result = explorer.stop()
                 _stop_recording()
@@ -516,6 +527,61 @@ class XBeeStatusHandler(tornado.web.RequestHandler):
             self.write(json.dumps({"ok": True}))
         else:
             self.write(json.dumps({"ok": False, "error": "no action or message"}))
+
+
+class RouteHandler(tornado.web.RequestHandler):
+    def get(self):
+        action = self.get_argument("action", "list")
+        if action == "list":
+            routes = []
+            if os.path.exists(ROUTE_DIR):
+                for name in sorted(os.listdir(ROUTE_DIR)):
+                    meta_path = os.path.join(ROUTE_DIR, name, "meta.json")
+                    if os.path.exists(meta_path):
+                        with open(meta_path) as f:
+                            routes.append(json.load(f))
+            self.write(json.dumps({"routes": routes}))
+        elif action == "status":
+            global route_rec
+            if route_rec and route_rec.recording:
+                self.write(json.dumps(route_rec.get_status()))
+            else:
+                self.write(json.dumps({"recording": False}))
+        elif action == "detail":
+            name = self.get_argument("name", "")
+            meta_path = os.path.join(ROUTE_DIR, name, "meta.json")
+            if os.path.exists(meta_path):
+                with open(meta_path) as f:
+                    self.write(f.read())
+            else:
+                self.write(json.dumps({"error": "not found"}))
+
+    def post(self):
+        global route_rec
+        data = json.loads(self.request.body)
+        action = data.get("action", "")
+
+        if action == "start":
+            name = data.get("name", time.strftime("route_%Y%m%d_%H%M%S"))
+            if route_rec and route_rec.recording:
+                self.write(json.dumps({"ok": False, "error": "Already recording"}))
+                return
+            route_rec = RouteRecorder(
+                name=name, slam=slam, lidar=lidar, depth=depth,
+                cam=cam_primary, gps=gps, collision=collision)
+            self.write(json.dumps({"ok": True, "name": name}))
+
+        elif action == "stop":
+            if route_rec and route_rec.recording:
+                route_rec.stop()
+                status = route_rec.get_status()
+                route_rec = None
+                self.write(json.dumps({"ok": True, "status": status}))
+            else:
+                self.write(json.dumps({"ok": False, "error": "Not recording"}))
+
+        else:
+            self.write(json.dumps({"ok": False, "error": "Unknown action"}))
 
 
 class ShutdownHandler(tornado.web.RequestHandler):
@@ -796,6 +862,12 @@ def _tick_recording():
         # Auto-stop recording when explorer/scan test finishes
         if explorer.state in ("idle", "stopped", "arrived") and _recorder.frame_idx > 5:
             _stop_recording()
+    # Route recorder tick (5Hz from its own callback)
+
+
+def _tick_route_recording():
+    if route_rec and route_rec.recording:
+        route_rec.tick()
 
 
 def broadcast_lidar():
@@ -1080,6 +1152,7 @@ def make_app():
         (r"/api/gps", GpsHandler),
         (r"/api/gps/test_receive", GpsTestReceiveHandler),
         (r"/api/xbee", XBeeStatusHandler),
+        (r"/api/route", RouteHandler),
         (r"/ws/slam", SlamWSHandler),
         (r"/ws/status", StatusWSHandler),
         (r"/ws/debug", DebugWSHandler),
@@ -1146,6 +1219,8 @@ def main():
 
     # Exploration video recording at 1 FPS
     tornado.ioloop.PeriodicCallback(_tick_recording, 1000).start()
+    # Route recording at 5Hz
+    tornado.ioloop.PeriodicCallback(_tick_route_recording, 200).start()
     # LiDAR at ~10 Hz
     tornado.ioloop.PeriodicCallback(broadcast_lidar, 1000).start()  # 1 Hz
     # Depth at ~5 Hz

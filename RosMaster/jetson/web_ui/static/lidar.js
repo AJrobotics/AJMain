@@ -863,6 +863,155 @@ function toggleLandmarks(enabled) {
 }
 window.toggleLandmarks = toggleLandmarks;
 
+// --- Route Recording ---
+let _routePollTimer = null;
+
+function routeStart() {
+    const name = document.getElementById('route-name').value.trim() || 'route_' + Date.now();
+    document.getElementById('route-status').textContent = 'Starting...';
+    document.getElementById('route-status').style.color = '#ff0';
+    fetch('/api/route', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'start', name: name}),
+    }).then(r => r.json()).then(d => {
+        if (d.ok) {
+            document.getElementById('route-start-btn').style.display = 'none';
+            document.getElementById('route-stop-btn').style.display = '';
+            document.getElementById('route-status').textContent = 'RECORDING';
+            document.getElementById('route-status').style.color = '#f44';
+            if (!_routePollTimer) _routePollTimer = setInterval(routePollStatus, 1000);
+            routePollStatus();
+        } else {
+            document.getElementById('route-status').textContent = d.error || 'Failed';
+            document.getElementById('route-status').style.color = '#f44';
+        }
+    }).catch(e => {
+        document.getElementById('route-status').textContent = 'Error: ' + e.message;
+        document.getElementById('route-status').style.color = '#f44';
+    });
+}
+
+function routeStop() {
+    fetch('/api/route', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'stop'}),
+    }).then(r => r.json()).then(d => {
+        document.getElementById('route-start-btn').style.display = '';
+        document.getElementById('route-stop-btn').style.display = 'none';
+        document.getElementById('route-status').textContent = 'Saved';
+        document.getElementById('route-status').style.color = '#0f8';
+        if (_routePollTimer) { clearInterval(_routePollTimer); _routePollTimer = null; }
+        routeLoadList();
+    });
+}
+
+function routePollStatus() {
+    fetch('/api/route?action=status').then(r => r.json()).then(d => {
+        if (d.recording) {
+            document.getElementById('route-waypoints').textContent = d.waypoints;
+            document.getElementById('route-keyframes').textContent = d.keyframes;
+            document.getElementById('route-distance').textContent = d.distance_m + 'm';
+            document.getElementById('route-gps').textContent = d.has_gps ? 'Fix' : 'No fix';
+            document.getElementById('route-gps').style.color = d.has_gps ? '#0f8' : '#f44';
+            document.getElementById('route-status').textContent = 'Recording ' + d.elapsed + 's';
+        } else {
+            if (_routePollTimer) { clearInterval(_routePollTimer); _routePollTimer = null; }
+            document.getElementById('route-start-btn').style.display = '';
+            document.getElementById('route-stop-btn').style.display = 'none';
+        }
+    }).catch(() => {});
+}
+
+function routeLoadList() {
+    fetch('/api/route?action=list').then(r => r.json()).then(d => {
+        const el = document.getElementById('route-list');
+        if (el && d.routes) {
+            el.innerHTML = d.routes.map(r =>
+                '<div style="color:#0df;padding:1px 0;">' + r.name +
+                ' <span style="color:#666;">' + r.distance_m + 'm, ' + r.waypoints + ' pts</span></div>'
+            ).join('');
+        }
+    }).catch(() => {});
+}
+setTimeout(() => { routeLoadList(); routeLoadSelect(); }, 500);
+
+function routeFollow() {
+    const sel = document.getElementById('route-select');
+    const name = sel ? sel.value : '';
+    if (!name) { alert('Select a route first'); return; }
+    fetch('/api/explorer', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'route_follow', route_name: name, time_limit: 600}),
+    }).then(r => r.json()).then(d => {
+        if (d.ok) {
+            document.getElementById('route-play-status').textContent = 'Following: ' + name;
+            document.getElementById('route-play-status').style.color = '#ff0';
+            document.getElementById('route-progress-bar').style.display = 'block';
+            if (!_routePollTimer) _routePollTimer = setInterval(routePollPlayback, 1000);
+        } else {
+            document.getElementById('route-play-status').textContent = d.error || 'Failed';
+            document.getElementById('route-play-status').style.color = '#f44';
+        }
+    });
+}
+
+function routeLoadSelect() {
+    fetch('/api/route?action=list').then(r => r.json()).then(d => {
+        const sel = document.getElementById('route-select');
+        if (sel && d.routes && d.routes.length > 0) {
+            sel.innerHTML = d.routes.map(r =>
+                '<option value="' + r.name + '">' + r.name + ' (' + r.distance_m + 'm, ' + r.waypoints + ' pts)</option>'
+            ).join('');
+        } else if (sel) {
+            sel.innerHTML = '<option value="">No routes saved</option>';
+        }
+    }).catch(e => {
+        const sel = document.getElementById('route-select');
+        if (sel) sel.innerHTML = '<option value="">Error loading</option>';
+    });
+}
+
+function routePollPlayback() {
+    fetch('/api/explorer').then(r => r.json()).then(d => {
+        const statusEl = document.getElementById('route-play-status');
+        const progressEl = document.getElementById('route-progress-fill');
+        const barEl = document.getElementById('route-progress-bar');
+        if (d.state === 'following_route' && d.route) {
+            const r = d.route;
+            statusEl.textContent = 'Following: ' + r.route + ' (' + r.progress + '%) conf=' + r.confidence + ' [' + r.source + ']';
+            statusEl.style.color = '#ff0';
+            progressEl.style.width = r.progress + '%';
+            barEl.style.display = 'block';
+        } else if (d.state === 'arrived') {
+            statusEl.textContent = 'Route complete!';
+            statusEl.style.color = '#0f8';
+            progressEl.style.width = '100%';
+            if (_routePollTimer) { clearInterval(_routePollTimer); _routePollTimer = null; }
+        } else if (d.state === 'stopped') {
+            statusEl.textContent = 'Stopped';
+            statusEl.style.color = '#888';
+            if (_routePollTimer) { clearInterval(_routePollTimer); _routePollTimer = null; }
+        }
+    }).catch(() => {});
+}
+window.routeFollow = routeFollow;
+
+// Check if recording is already in progress on page load
+fetch('/api/route?action=status').then(r => r.json()).then(d => {
+    if (d.recording) {
+        document.getElementById('route-start-btn').style.display = 'none';
+        document.getElementById('route-stop-btn').style.display = '';
+        document.getElementById('route-status').textContent = 'RECORDING';
+        document.getElementById('route-status').style.color = '#f44';
+        if (!_routePollTimer) _routePollTimer = setInterval(routePollStatus, 1000);
+    }
+}).catch(() => {});
+window.routeStart = routeStart;
+window.routeStop = routeStop;
+
 // --- XBee / GPS panel ---
 let _xbeePollTimer = null;
 function pollXBeeStatus() {
@@ -878,16 +1027,17 @@ _xbeePollTimer = setInterval(pollXBeeStatus, 3000);
 pollXBeeStatus();
 
 function xbeeToggle() {
-    fetch('/api/xbee').then(r => r.json()).then(d => {
-        const action = d.enabled ? 'disable' : 'enable';
-        fetch('/api/xbee', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({action}),
-        }).then(r => r.json()).then(r => {
-            updateXbeeToggleBtn(r.enabled);
-        });
-    });
+    const btn = document.getElementById('xbee-toggle');
+    const currentlyOn = btn && btn.textContent.trim() === 'ON';
+    const action = currentlyOn ? 'disable' : 'enable';
+    fetch('/api/xbee', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: action}),
+    }).then(r => r.json()).then(r => {
+        if (r.enabled !== undefined) updateXbeeToggleBtn(r.enabled);
+        else updateXbeeToggleBtn(!currentlyOn);
+    }).catch(e => console.error('XBee toggle error:', e));
 }
 function updateXbeeToggleBtn(enabled) {
     const btn = document.getElementById('xbee-toggle');
