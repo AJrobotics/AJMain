@@ -28,6 +28,11 @@ import glob
 PORT = 8080
 JETSON_HOST = "192.168.1.99:8080"  # Robot's Tornado server for live data/recordings
 
+# Use Python 3.12 for training (has torch/sb3 installed)
+TRAIN_PYTHON = os.environ.get("TRAIN_PYTHON", r"C:\Users\Dream\AppData\Local\Programs\Python\Python312\python.exe")
+if not os.path.exists(TRAIN_PYTHON):
+    TRAIN_PYTHON = sys.executable  # fallback to default
+
 # Agent hosts for comm test proxy
 AGENT_HOSTS = {
     "dreamer": ["localhost:5000", "localhost:5001"],  # agent, then standalone xbee service
@@ -204,6 +209,13 @@ def _get_status(task=None):
 class LocalHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=BASE_DIR, **kwargs)
+
+    def end_headers(self):
+        # Disable caching for all responses
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
+        super().end_headers()
 
     def do_GET(self):
         # Root redirect
@@ -418,7 +430,7 @@ class LocalHandler(http.server.SimpleHTTPRequestHandler):
                          and os.path.exists(os.path.join(routes_dir, d, 'waypoints.json'))]
             route_arg = ','.join(all_routes) if all_routes else route
             cmd = [
-                sys.executable, os.path.join(TRAINING_DIR, "behavior_cloning.py"),
+                TRAIN_PYTHON, os.path.join(TRAINING_DIR, "behavior_cloning.py"),
                 "--route", route_arg,
                 "--routes-dir", routes_dir,
                 "--epochs", "200",
@@ -436,7 +448,7 @@ class LocalHandler(http.server.SimpleHTTPRequestHandler):
             count = body.get('count', 30)
             seed = body.get('seed', 42)
             ok, msg = _run_async("generate", [
-                sys.executable, os.path.join(TRAINING_DIR, "map_generator.py"),
+                TRAIN_PYTHON, os.path.join(TRAINING_DIR, "map_generator.py"),
                 "--output", MAPS_DIR,
                 "--count", str(count),
                 "--seed", str(seed),
@@ -451,7 +463,7 @@ class LocalHandler(http.server.SimpleHTTPRequestHandler):
             task = body.get('task', 'explore')
             fresh = body.get('fresh', False)
             cmd = [
-                sys.executable, os.path.join(TRAINING_DIR, "train.py"),
+                TRAIN_PYTHON, os.path.join(TRAINING_DIR, "train.py"),
                 "--task", task,
                 "--timesteps", str(timesteps),
                 "--maps", MAPS_DIR,
@@ -475,7 +487,7 @@ class LocalHandler(http.server.SimpleHTTPRequestHandler):
                 self._json_response({"ok": False, "message": "No trained model found. Train first."})
                 return
             ok, msg = _run_async("evaluate", [
-                sys.executable, os.path.join(TRAINING_DIR, "evaluate.py"),
+                TRAIN_PYTHON, os.path.join(TRAINING_DIR, "evaluate.py"),
                 "--model", model_path,
                 "--maps", MAPS_DIR,
                 "--episodes", "5",

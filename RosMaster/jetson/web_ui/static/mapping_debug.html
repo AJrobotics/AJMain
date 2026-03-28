@@ -182,6 +182,8 @@ body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', mono
             <div class="sp-row"><span>Policy:</span>
                 <select id="sim-policy" onchange="simPolicyChanged(this.value)" style="background:#1a1a3a;color:#0f8;border:1px solid #333;font-size:11px;">
                     <option value="rule">Rule-based</option>
+                    <option value="wall_follow_r">Wall Follow (right)</option>
+                    <option value="wall_follow_l">Wall Follow (left)</option>
                     <option value="nn:explore">NN: Explore</option>
                     <option value="nn:floor_plan">NN: Floor Plan</option>
                     <option value="nn:complete_map">NN: Complete Map</option>
@@ -1558,23 +1560,39 @@ function simComputeSectors() {
     else simLevel = 'CLEAR';
 }
 
-// --- Find frontiers (free cells adjacent to unknown) ---
+// --- Find frontiers (explored free cells adjacent to unexplored free cells) ---
 function simFindFrontiers() {
     if (!gridData) { simFrontiers = []; return; }
     simFrontiers = [];
-    // Scan grid — free cell (< -1.5) with unknown neighbor (|v| < 0.5)
-    for (let y = 1; y < GRID - 1; y++) {
-        for (let x = 1; x < GRID - 1; x++) {
-            const v = gridData[y * GRID + x];
-            if (v >= -0.5) continue; // not clearly free
-            // Check neighbors for unknown
-            const up = gridData[(y - 1) * GRID + x];
-            const dn = gridData[(y + 1) * GRID + x];
-            const lt = gridData[y * GRID + (x - 1)];
-            const rt = gridData[y * GRID + (x + 1)];
-            const isUnk = (v2) => v2 > -0.5 && v2 < 0.5;
-            if (isUnk(up) || isUnk(dn) || isUnk(lt) || isUnk(rt)) {
-                simFrontiers.push({ x: x * CELL, y: y * CELL });
+
+    if (appMode === 'simulation') {
+        // In simulation: frontier = explored free cell with an unexplored free neighbor
+        for (const key of simExplored) {
+            const [cx, cy] = key.split(',').map(Number);
+            const neighbors = [[cx-1,cy],[cx+1,cy],[cx,cy-1],[cx,cy+1]];
+            for (const [nx, ny] of neighbors) {
+                if (nx < 0 || nx >= GRID || ny < 0 || ny >= GRID) continue;
+                const nk = nx + ',' + ny;
+                if (!simExplored.has(nk) && gridData[ny * GRID + nx] < -0.5) {
+                    simFrontiers.push({ x: nx * CELL, y: ny * CELL });
+                    break; // one frontier per explored cell is enough
+                }
+            }
+        }
+    } else {
+        // Live/Offline: free cell (< -1.5) with unknown neighbor (|v| < 0.5)
+        for (let y = 1; y < GRID - 1; y++) {
+            for (let x = 1; x < GRID - 1; x++) {
+                const v = gridData[y * GRID + x];
+                if (v >= -0.5) continue;
+                const up = gridData[(y - 1) * GRID + x];
+                const dn = gridData[(y + 1) * GRID + x];
+                const lt = gridData[y * GRID + (x - 1)];
+                const rt = gridData[y * GRID + (x + 1)];
+                const isUnk = (v2) => v2 > -0.5 && v2 < 0.5;
+                if (isUnk(up) || isUnk(dn) || isUnk(lt) || isUnk(rt)) {
+                    simFrontiers.push({ x: x * CELL, y: y * CELL });
+                }
             }
         }
     }
@@ -1658,6 +1676,120 @@ function simMarkExplored() {
         }
     }
     return newCells;
+}
+
+// --- Wall-follow policy (rotation-based, no strafe) ---
+let simWallFollowDir = 'right';
+let simWallFollowState = 'find_wall';  // find_wall | follow | corner | doorway
+let simWallFollowPrevWallDist = 9999;
+let simWallFollowDoorwaySteps = 0;     // committed turn steps remaining in doorway state
+let simWallFollowCornerSteps = 0;      // steps spent turning at corner
+let simWallFollowDoorCooldown = 0;     // cooldown after doorway attempt (prevents re-trigger)
+
+function simWallFollowAction() {
+    // Sectors: 0=front, 1=front-right, 2=right, 3=rear-right, 4=rear, 5=rear-left, 6=left, 7=front-left
+    const isRight = simWallFollowDir === 'right';
+    const wallSector = isRight ? 2 : 6;
+    const wallFrontSector = isRight ? 1 : 7;
+    const wallRearSector = isRight ? 3 : 5;
+    const frontDist = simSectors[0];
+    const wallDist = simSectors[wallSector];
+    const wallFrontDist = simSectors[wallFrontSector];
+    const wallRearDist = simSectors[wallRearSector];
+    const targetDist = 400;
+
+    if (simWallFollowDoorCooldown > 0) simWallFollowDoorCooldown--;
+
+    // Phase 1: Find a wall — drive forward until close to something
+    if (simWallFollowState === 'find_wall') {
+        if (frontDist < 600 || wallDist < 600 || wallFrontDist < 500) {
+            simWallFollowState = 'follow';
+            simWallFollowPrevWallDist = wallDist;
+        } else {
+            return { vx: 0.12, vy: 0, vz: 0 };
+        }
+    }
+
+    // Doorway state: turn ~60° into opening (10 steps × 0.5 rad/s × 0.2s = 1.0 rad ≈ 57°)
+    if (simWallFollowState === 'doorway') {
+        simWallFollowDoorwaySteps--;
+        const turnDir = isRight ? -1 : 1;
+        // Wall reappeared — entered corridor (wide threshold for wide corridors)
+        // Wait at least 2 steps before checking to avoid false exit
+        if (wallDist < 2000 && simWallFollowDoorwaySteps < 8) {
+            simWallFollowState = 'follow';
+            simWallFollowPrevWallDist = wallDist;
+            simWallFollowDoorCooldown = 20;
+            return { vx: 0.06, vy: 0, vz: 0 };
+        }
+        // Timeout: doorway attempt failed — drive forward past the opening
+        if (simWallFollowDoorwaySteps <= 0) {
+            simWallFollowState = 'follow';
+            simWallFollowPrevWallDist = 9999;
+            simWallFollowDoorCooldown = 40;
+        }
+        return { vx: 0.04, vy: 0, vz: 0.5 * turnDir };
+    }
+
+    // Corner state: turning away from wall ahead, with timeout
+    if (simWallFollowState === 'corner') {
+        simWallFollowCornerSteps--;
+        const turnDir = isRight ? 1 : -1;
+        // Done turning: front is clear
+        if (frontDist > 600 && wallFrontDist > 500) {
+            simWallFollowState = 'follow';
+            simWallFollowPrevWallDist = wallDist;
+        }
+        // Timeout
+        if (simWallFollowCornerSteps <= 0) {
+            simWallFollowState = 'follow';
+            simWallFollowPrevWallDist = wallDist;
+        }
+        const backUp = frontDist < 200 ? -0.04 : 0;
+        return { vx: backUp, vy: 0, vz: 0.6 * turnDir };
+    }
+
+    // --- follow state ---
+
+    // Detect doorway/corridor entrance: wall suddenly disappeared
+    // (wallDist jumped from close to far, and rear-wall is also far = real opening, not corner)
+    if (simWallFollowDoorCooldown === 0 && wallDist > 1000 && simWallFollowPrevWallDist < 700 && wallRearDist > 800) {
+        simWallFollowState = 'doorway';
+        simWallFollowDoorwaySteps = 10;  // ~57° turn (10 × 0.5 × 0.2)
+        const turnDir = isRight ? -1 : 1;
+        return { vx: 0.04, vy: 0, vz: 0.5 * turnDir };
+    }
+
+    // Also detect lost wall if it's been far for a while (gradual opening)
+    if (simWallFollowDoorCooldown === 0 && wallDist > 1200 && frontDist > 600) {
+        simWallFollowState = 'doorway';
+        simWallFollowDoorwaySteps = 10;
+        const turnDir = isRight ? -1 : 1;
+        return { vx: 0.04, vy: 0, vz: 0.5 * turnDir };
+    }
+
+    // Corner: wall ahead — turn away from wall side
+    if (frontDist < 500 || wallFrontDist < 400) {
+        simWallFollowState = 'corner';
+        simWallFollowCornerSteps = 20;
+        const turnDir = isRight ? 1 : -1;
+        const backUp = frontDist < 200 ? -0.04 : 0;
+        return { vx: backUp, vy: 0, vz: 0.6 * turnDir };
+    }
+
+    // Normal follow: proportional steering to maintain wall distance
+    simWallFollowPrevWallDist = wallDist;
+    const error = wallDist - targetDist;
+    const steerGain = 0.002;
+    let vz = error * steerGain * (isRight ? -1 : 1);
+    vz = Math.max(-0.5, Math.min(0.5, vz));
+
+    let vx = 0.08;
+    if (frontDist < 600) vx = 0.04;
+    if (wallDist < 250) vx = 0.03;
+    if (Math.abs(vz) > 0.3) vx *= 0.5;
+
+    return { vx, vy: 0, vz };
 }
 
 // --- Rule-based policy ---
@@ -1789,9 +1921,7 @@ function simCollisionFilter(vx, vy, vz) {
     const speed = Math.sqrt(vx * vx + vy * vy);
     if (speed < 0.001) return { vx, vy, vz };
 
-    const gMin = Math.min(...simSectors);
-    if (gMin < SIM_STOP) return { vx: 0, vy: 0, vz };
-
+    // Find which sectors the robot is moving toward
     const moveAngle = ((Math.atan2(-vy, vx) * 180 / Math.PI) % 360 + 360) % 360;
     const target = Math.floor(((moveAngle + SIM_SECTOR_SIZE / 2) % 360) / SIM_SECTOR_SIZE) % 8;
     let dirMin = 9999;
@@ -1800,11 +1930,20 @@ function simCollisionFilter(vx, vy, vz) {
         if (simSectors[s] < dirMin) dirMin = simSectors[s];
     }
 
-    const checkMin = Math.min(gMin, dirMin);
+    // Hard STOP: if obstacle in movement direction is too close, block translation
+    // But allow movement AWAY from obstacles (e.g. reversing when front is blocked)
+    const gMin = Math.min(...simSectors);
+    if (dirMin < SIM_STOP) {
+        return { vx: 0, vy: 0, vz };  // blocked in movement direction
+    }
+    if (gMin < SIM_STOP && dirMin >= SIM_SLOW) {
+        // Something is close but not in our movement direction — allow at reduced speed
+        return { vx: vx * 0.3, vy: vy * 0.3, vz };
+    }
+
     let scale;
-    if (checkMin < SIM_STOP) scale = 0;
-    else if (checkMin < SIM_SLOW) scale = 0.3;
-    else if (checkMin < SIM_CAUTION) scale = 0.7;
+    if (dirMin < SIM_SLOW) scale = 0.3;
+    else if (dirMin < SIM_CAUTION) scale = 0.7;
     else scale = 1.0;
 
     return { vx: vx * scale, vy: vy * scale, vz };
@@ -1826,6 +1965,8 @@ async function simStepOnce() {
     let action;
     if (simPolicy === 'nn') {
         action = await simNNAction();
+    } else if (simPolicy === 'wall_follow') {
+        action = simWallFollowAction();
     } else {
         action = simRuleBasedAction();
     }
@@ -2425,6 +2566,14 @@ async function simLoadONNX(task) {
 function simPolicyChanged(value) {
     if (value === 'rule') {
         simPolicy = 'rule';
+    } else if (value === 'wall_follow_r' || value === 'wall_follow_l') {
+        simPolicy = 'wall_follow';
+        simWallFollowDir = value === 'wall_follow_r' ? 'right' : 'left';
+        simWallFollowState = 'find_wall';
+        simWallFollowPrevWallDist = 9999;
+        simWallFollowDoorwaySteps = 0;
+        simWallFollowCornerSteps = 0;
+        simWallFollowDoorCooldown = 0;
     } else if (value.startsWith('nn:')) {
         const task = value.split(':')[1];
         simPolicy = 'nn';
