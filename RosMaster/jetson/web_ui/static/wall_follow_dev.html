@@ -1,0 +1,1128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wall-Follow Development</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1a; color: #ccc; font-family: 'Consolas', 'Monaco', monospace; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+#header {
+    background: #12122a; border-bottom: 1px solid #333; padding: 6px 16px;
+    display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+}
+#header h1 { color: #00d4ff; font-size: 15px; white-space: nowrap; }
+.tab-btn {
+    background: #1a1a3a; color: #888; border: 1px solid #333;
+    padding: 4px 14px; cursor: pointer; font-family: inherit; font-size: 12px;
+    border-radius: 3px;
+}
+.tab-btn:hover { background: #252550; color: #aaa; }
+.tab-btn.active { background: #0a0a1a; color: #0f8; border-color: #0f8; }
+#status { margin-left: auto; font-size: 11px; color: #888; }
+
+#main { display: flex; flex: 1; overflow: hidden; }
+
+/* Left: map canvas */
+#map-panel { flex: 1; position: relative; background: #050510; }
+#map-canvas { width: 100%; height: 100%; }
+
+/* Right: controls + debug */
+#side-panel {
+    width: 380px; background: #0d0d20; border-left: 1px solid #222;
+    overflow-y: auto; padding: 8px; font-size: 11px;
+}
+.sp-title { color: #00d4ff; font-size: 12px; font-weight: bold; margin: 10px 0 4px; }
+.sp-title:first-child { margin-top: 0; }
+.sp-row { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; }
+.sp-row span:first-child { color: #888; }
+.sp-row span:last-child { color: #0f8; }
+
+select, input[type=number] { background: #1a1a3a; color: #0f8; border: 1px solid #333; font-family: inherit; font-size: 11px; padding: 2px 4px; }
+button { background: #1a3a1a; color: #0f8; border: 1px solid #0a4a0a; padding: 4px 10px; cursor: pointer; font-family: inherit; font-size: 11px; border-radius: 3px; }
+button:hover { background: #1a4a1a; }
+button.danger { background: #3a1a1a; color: #f88; border-color: #4a0a0a; }
+
+/* Debug charts */
+.chart-container { background: #080815; border: 1px solid #222; border-radius: 3px; margin: 4px 0; }
+canvas.debug-chart { width: 100%; height: 80px; }
+canvas.radar-chart { width: 120px; height: 120px; }
+canvas.compass-chart { width: 100px; height: 100px; }
+
+/* State indicator */
+.state-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 3px; font-weight: bold; font-size: 11px;
+}
+.state-find_wall { background: #334; color: #88f; }
+.state-follow { background: #143; color: #0f8; }
+.state-corner { background: #431; color: #f80; }
+.state-doorway_advance { background: #440; color: #ff0; }
+.state-doorway_turn { background: #430; color: #fa0; }
+.state-doorway_enter { background: #404; color: #f0f; }
+
+/* Transition log */
+#transition-log {
+    max-height: 150px; overflow-y: auto; font-size: 10px; background: #080810;
+    border: 1px solid #222; padding: 4px; border-radius: 3px;
+}
+.log-entry { padding: 1px 0; border-bottom: 1px solid #111; }
+.log-entry .from { color: #f88; }
+.log-entry .to { color: #8f8; }
+.log-entry .reason { color: #888; }
+
+/* Route viewer */
+#route-controls { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+#route-slider { flex: 1; min-width: 100px; }
+
+/* Bottom bar */
+#bottom-bar {
+    background: #12122a; border-top: 1px solid #333; padding: 4px 16px;
+    font-size: 10px; color: #666; display: flex; gap: 16px;
+}
+</style>
+</head>
+<body>
+<div id="header">
+    <h1>WALL-FOLLOW DEV</h1>
+    <button class="tab-btn active" onclick="setTab('sim')" id="tab-sim">Simulation</button>
+    <button class="tab-btn" onclick="setTab('route')" id="tab-route">Route Replay</button>
+    <span id="status">Ready</span>
+</div>
+
+<div id="main">
+    <div id="map-panel">
+        <canvas id="map-canvas"></canvas>
+    </div>
+
+    <div id="side-panel">
+        <!-- Mode: Simulation -->
+        <div id="sim-controls">
+            <div class="sp-title">MAP</div>
+            <div class="sp-row">
+                <select id="map-select" onchange="loadSelectedMap()">
+                    <option value="room_corridor">Room + Corridor</option>
+                    <option value="l_shape">L-Shape</option>
+                    <option value="multi_door">Multi-Doorway</option>
+                    <option value="maze">Corridor Maze</option>
+                </select>
+                <button onclick="loadSelectedMap()">Load</button>
+            </div>
+
+            <div class="sp-title">WALL-FOLLOW</div>
+            <div class="sp-row"><span>Direction:</span>
+                <select id="wf-dir" onchange="wfSetDirection(this.value)">
+                    <option value="right">Right</option>
+                    <option value="left">Left</option>
+                </select>
+            </div>
+            <div class="sp-row"><span>Target Dist:</span><input id="wf-target" type="number" value="400" min="200" max="800" step="50" style="width:60px"> mm</div>
+            <div class="sp-row">
+                <button onclick="wfReset()">Reset</button>
+                <button onclick="wfStep()">Step</button>
+                <button onclick="wfAutoToggle()" id="btn-auto">Auto &#9654;</button>
+                <select id="speed-select">
+                    <option value="200">Slow</option>
+                    <option value="50" selected>Normal</option>
+                    <option value="10">Fast</option>
+                    <option value="1">Max</option>
+                </select>
+            </div>
+
+            <div class="sp-title">STATE</div>
+            <div class="sp-row"><span>State:</span><span id="wf-state-badge" class="state-badge state-find_wall">find_wall</span></div>
+            <div class="sp-row"><span>Steps in state:</span><span id="wf-steps-in-state">0</span></div>
+            <div class="sp-row"><span>Step:</span><span id="wf-step">0</span></div>
+            <div class="sp-row"><span>Coverage:</span><span id="wf-coverage">0%</span></div>
+            <div class="sp-row"><span>Collisions:</span><span id="wf-collisions">0</span></div>
+
+            <div class="sp-title">SENSORS</div>
+            <div class="sp-row"><span>Robot:</span><span id="wf-pose">-</span></div>
+            <div class="sp-row"><span>Wall dist:</span><span id="wf-wall-dist">-</span></div>
+            <div class="sp-row"><span>Front dist:</span><span id="wf-front-dist">-</span></div>
+            <div class="sp-row"><span>Level:</span><span id="wf-level">-</span></div>
+            <div class="sp-row"><span>Sectors:</span><span id="wf-sectors" style="font-size:9px">-</span></div>
+
+            <div class="sp-title">HEADING</div>
+            <div style="display:flex; gap:8px; align-items:flex-start;">
+                <canvas id="compass-canvas" class="compass-chart" width="100" height="100"></canvas>
+                <canvas id="radar-canvas" class="radar-chart" width="120" height="120"></canvas>
+            </div>
+
+            <div class="sp-title">WALL DISTANCE (last 100 steps)</div>
+            <div class="chart-container">
+                <canvas id="dist-chart" class="debug-chart" width="360" height="80"></canvas>
+            </div>
+
+            <div class="sp-title">TRANSITIONS</div>
+            <div id="transition-log">No transitions yet</div>
+        </div>
+
+        <!-- Mode: Route Replay -->
+        <div id="route-controls-panel" style="display:none;">
+            <div class="sp-title">ROUTE</div>
+            <div class="sp-row">
+                <select id="route-select">
+                    <option value="">Select route...</option>
+                    <option value="O1">O1</option>
+                    <option value="P2">P2</option>
+                    <option value="P3">P3</option>
+                    <option value="P4">P4</option>
+                    <option value="P6">P6</option>
+                    <option value="P7">P7</option>
+                </select>
+                <button onclick="loadRoute()">Load</button>
+            </div>
+            <div class="sp-row"><span>Frames:</span><span id="rt-frames">-</span></div>
+            <div class="sp-row"><span>Duration:</span><span id="rt-duration">-</span></div>
+            <div id="route-controls" style="margin:6px 0;">
+                <button onclick="rtPrev()">&#9664;</button>
+                <input type="range" id="route-slider" min="0" max="0" value="0" oninput="rtSeek(this.value)">
+                <button onclick="rtNext()">&#9654;</button>
+                <button onclick="rtPlayToggle()" id="btn-rt-play">Play</button>
+            </div>
+            <div class="sp-row"><span>Frame:</span><span id="rt-frame-num">0</span></div>
+            <div class="sp-row"><span>Pose:</span><span id="rt-pose">-</span></div>
+            <div class="sp-row"><span>Sectors:</span><span id="rt-sectors" style="font-size:9px">-</span></div>
+
+            <div class="sp-title">WALL-FOLLOW ANALYSIS</div>
+            <div class="sp-row"><span>WF would command:</span><span id="rt-wf-cmd">-</span></div>
+            <div class="sp-row"><span>WF state:</span><span id="rt-wf-state" class="state-badge">-</span></div>
+
+            <div class="sp-title">SECTOR DISTANCES</div>
+            <div style="display:flex; gap:8px; align-items:flex-start;">
+                <canvas id="rt-compass" class="compass-chart" width="100" height="100"></canvas>
+                <canvas id="rt-radar" class="radar-chart" width="120" height="120"></canvas>
+            </div>
+
+            <div class="sp-title">SECTOR TIMELINE</div>
+            <div class="chart-container">
+                <canvas id="rt-timeline" class="debug-chart" width="360" height="80"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="bottom-bar">
+    <span id="bottom-info">Click map to place robot. Drag to set heading.</span>
+</div>
+
+<script>
+// ============================================================
+// Constants
+// ============================================================
+const GRID = 600, CELL = 50;
+const SIM_STOP = 100, SIM_SLOW = 200, SIM_CAUTION = 300;
+const SIM_MAX_RANGE = 6000;
+const SIM_IGNORE_ANGLE = 140;
+const SIM_DT = 0.2;
+const SIM_SECTOR_SIZE = 45;
+const ROBOT_RADIUS = 150; // mm
+
+// ============================================================
+// State
+// ============================================================
+let gridData = null;        // Float32Array (600x600)
+let currentTab = 'sim';     // 'sim' or 'route'
+
+// Simulation state
+let sim = {
+    x: 15000, y: 15000, theta: 0,
+    scan: [],               // [{angle, dist}]
+    sectors: new Float32Array(8).fill(9999),
+    level: 'CLEAR',
+    step: 0,
+    collisions: 0,
+    explored: new Set(),
+    totalFree: 0,
+    autoRunning: false,
+    autoTimer: null,
+    trail: [],              // [{x, y, state, theta}]
+};
+
+// Wall-follow state
+let wf = {
+    state: 'find_wall',     // find_wall | follow | corner | doorway_advance | doorway_turn | doorway_enter
+    dir: 'right',
+    targetDist: 400,
+    prevWallDist: 9999,
+    startHeading: 0,        // heading when entering turn state
+    targetHeading: 0,       // target heading for turn completion
+    stepsInState: 0,
+    wallLostFrames: 0,      // consecutive frames with wall > threshold
+    doorAdvanceSteps: 0,    // steps remaining in doorway_advance
+    transitions: [],        // [{step, from, to, pos, heading, reason}]
+};
+
+// Route replay state
+let route = {
+    data: null,             // array of waypoint objects
+    frameIdx: 0,
+    playing: false,
+    playTimer: null,
+};
+
+// Canvas state
+let canvas, ctx;
+let zoom = 1.0, panX = 0, panY = 0;
+let dragging = false, dragStart = null;
+let placing = false, placeStart = null;
+
+// History for charts
+let distHistory = [];       // [{wallDist, frontDist, state}] last 100
+
+// ============================================================
+// Initialization
+// ============================================================
+function init() {
+    canvas = document.getElementById('map-canvas');
+    ctx = canvas.getContext('2d');
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Mouse events for pan/zoom/place
+    canvas.addEventListener('wheel', onWheel);
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('mouseup', onMouseUp);
+
+    // Load default map
+    loadSelectedMap();
+
+    // Start render loop
+    requestAnimationFrame(renderLoop);
+}
+
+function resizeCanvas() {
+    const r = canvas.parentElement.getBoundingClientRect();
+    canvas.width = r.width;
+    canvas.height = r.height;
+}
+
+// ============================================================
+// Map Generation
+// ============================================================
+function generateMap(type) {
+    gridData = new Float32Array(GRID * GRID).fill(0);
+    // Fill everything as unknown (0)
+    // Then carve rooms as free (-2) and set walls (3)
+
+    function setCell(gx, gy, val) {
+        if (gx >= 0 && gx < GRID && gy >= 0 && gy < GRID)
+            gridData[gy * GRID + gx] = val;
+    }
+    function fillRect(x1, y1, x2, y2, val) {
+        for (let y = y1; y <= y2; y++)
+            for (let x = x1; x <= x2; x++) setCell(x, y, val);
+    }
+    function wallRect(x1, y1, x2, y2) {
+        for (let x = x1; x <= x2; x++) { setCell(x, y1, 3); setCell(x, y2, 3); }
+        for (let y = y1; y <= y2; y++) { setCell(x1, y, 3); setCell(x2, y, 3); }
+    }
+    function clearDoor(x1, y1, x2, y2) {
+        fillRect(x1, y1, x2, y2, -2);
+    }
+
+    const cx = 300, cy = 300; // grid center
+
+    if (type === 'room_corridor') {
+        // Main room: 120x80 cells (6m x 4m)
+        fillRect(cx - 60, cy - 60, cx + 60, cy - 60 + 80, -2);
+        wallRect(cx - 60, cy - 60, cx + 60, cy - 60 + 80);
+        // Corridor: 30 wide x 80 long downward
+        fillRect(cx - 15, cy + 21, cx + 15, cy + 100, -2);
+        wallRect(cx - 15, cy + 21, cx + 15, cy + 100);
+        // Door between room and corridor
+        clearDoor(cx - 14, cy + 20, cx + 14, cy + 22);
+        // Bottom room: 80x60
+        fillRect(cx - 40, cy + 100, cx + 40, cy + 160, -2);
+        wallRect(cx - 40, cy + 100, cx + 40, cy + 160);
+        // Door between corridor and bottom room
+        clearDoor(cx - 14, cy + 99, cx + 14, cy + 101);
+        // Obstacle in main room
+        fillRect(cx + 10, cy - 35, cx + 25, cy - 25, 3);
+    } else if (type === 'l_shape') {
+        // Horizontal arm: 120x60
+        fillRect(cx - 60, cy - 30, cx + 60, cy + 30, -2);
+        wallRect(cx - 60, cy - 30, cx + 60, cy + 30);
+        // Vertical arm going down from right side: 60x100
+        fillRect(cx + 20, cy + 30, cx + 60, cy + 100, -2);
+        wallRect(cx + 20, cy + 30, cx + 60, cy + 100);
+        // Open the connection
+        clearDoor(cx + 21, cy + 29, cx + 59, cy + 31);
+    } else if (type === 'multi_door') {
+        // Central room: 100x80
+        fillRect(cx - 50, cy - 40, cx + 50, cy + 40, -2);
+        wallRect(cx - 50, cy - 40, cx + 50, cy + 40);
+        // Left room: 50x50
+        fillRect(cx - 100, cy - 25, cx - 50, cy + 25, -2);
+        wallRect(cx - 100, cy - 25, cx - 50, cy + 25);
+        clearDoor(cx - 51, cy - 8, cx - 49, cy + 8);
+        // Right room: 50x50
+        fillRect(cx + 50, cy - 25, cx + 100, cy + 25, -2);
+        wallRect(cx + 50, cy - 25, cx + 100, cy + 25);
+        clearDoor(cx + 49, cy - 8, cx + 51, cy + 8);
+        // Top room via corridor
+        fillRect(cx - 15, cy - 80, cx + 15, cy - 40, -2);
+        wallRect(cx - 15, cy - 80, cx + 15, cy - 40);
+        clearDoor(cx - 14, cy - 41, cx + 14, cy - 39);
+    } else if (type === 'maze') {
+        // Corridor maze: outer boundary
+        fillRect(cx - 80, cy - 60, cx + 80, cy + 60, -2);
+        wallRect(cx - 80, cy - 60, cx + 80, cy + 60);
+        // Internal walls with gaps
+        // Horizontal wall 1
+        fillRect(cx - 40, cy - 20, cx + 30, cy - 18, 3);
+        // Horizontal wall 2
+        fillRect(cx - 30, cy + 18, cx + 40, cy + 20, 3);
+        // Vertical wall 1
+        fillRect(cx - 20, cy - 59, cx - 18, cy - 5, 3);
+        // Vertical wall 2
+        fillRect(cx + 18, cy + 5, cx + 20, cy + 59, 3);
+    }
+
+    // Count free cells
+    sim.totalFree = 0;
+    for (let i = 0; i < GRID * GRID; i++) {
+        if (gridData[i] < -0.5) sim.totalFree++;
+    }
+}
+
+function loadSelectedMap() {
+    const type = document.getElementById('map-select').value;
+    generateMap(type);
+    wfReset();
+}
+
+// ============================================================
+// Raycasting (DDA)
+// ============================================================
+function raycast(ox, oy, angleDeg) {
+    const rad = angleDeg * Math.PI / 180;
+    const dx = Math.cos(rad), dy = -Math.sin(rad); // y inverted for grid
+    const gx0 = ox / CELL, gy0 = oy / CELL;
+    let gx = Math.floor(gx0), gy = Math.floor(gy0);
+
+    const stepX = dx > 0 ? 1 : -1, stepY = dy > 0 ? -1 : 1;
+    const tDeltaX = dx !== 0 ? Math.abs(CELL / dx) : 1e9;
+    const tDeltaY = dy !== 0 ? Math.abs(CELL / dy) : 1e9;
+
+    let tMaxX = dx > 0 ? ((gx + 1) * CELL - ox) / dx : (gx * CELL - ox) / dx;
+    let tMaxY = dy > 0 ? (gy * CELL - oy) / -dy : ((gy + 1) * CELL - oy) / -dy;
+    if (dx === 0) tMaxX = 1e9;
+    if (dy === 0) tMaxY = 1e9;
+
+    const maxCells = 120;
+    for (let i = 0; i < maxCells; i++) {
+        if (gx < 0 || gx >= GRID || gy < 0 || gy >= GRID) break;
+        if (gridData[gy * GRID + gx] > 0.8) {
+            const dist = Math.min(tMaxX, tMaxY);
+            return Math.max(dist - ROBOT_RADIUS, 25);
+        }
+        if (tMaxX < tMaxY) { gx += stepX; tMaxX += tDeltaX; }
+        else { gy += stepY; tMaxY += tDeltaY; }
+    }
+    return SIM_MAX_RANGE;
+}
+
+function updateSensors() {
+    // Full 360 raycast
+    sim.scan = [];
+    for (let a = 0; a < 360; a++) {
+        const worldAngle = (a + sim.theta * 180 / Math.PI + 360) % 360;
+        const dist = raycast(sim.x, sim.y, worldAngle);
+        sim.scan.push({ angle: a, dist });
+    }
+
+    // Compute 8 sectors
+    sim.sectors.fill(9999);
+    for (const { angle, dist } of sim.scan) {
+        // Check ignore zone (rear)
+        if (angle > (180 - SIM_IGNORE_ANGLE / 2) && angle < (180 + SIM_IGNORE_ANGLE / 2)) continue;
+        const sector = Math.floor(((angle + SIM_SECTOR_SIZE / 2) % 360) / SIM_SECTOR_SIZE) % 8;
+        if (dist < sim.sectors[sector]) sim.sectors[sector] = dist;
+    }
+
+    // Safety level
+    const minDist = Math.min(...sim.sectors);
+    if (minDist < SIM_STOP) sim.level = 'STOP';
+    else if (minDist < SIM_SLOW) sim.level = 'SLOW';
+    else if (minDist < SIM_CAUTION) sim.level = 'CAUTION';
+    else sim.level = 'CLEAR';
+}
+
+// ============================================================
+// Collision Filter (directional)
+// ============================================================
+function collisionFilter(vx, vy, vz) {
+    const speed = Math.sqrt(vx * vx + vy * vy);
+    if (speed < 0.001) return { vx, vy, vz };
+    const moveAngle = ((Math.atan2(-vy, vx) * 180 / Math.PI) % 360 + 360) % 360;
+    const target = Math.floor(((moveAngle + SIM_SECTOR_SIZE / 2) % 360) / SIM_SECTOR_SIZE) % 8;
+    let dirMin = 9999;
+    for (let d = -2; d <= 2; d++) {
+        const s = ((target + d) % 8 + 8) % 8;
+        if (sim.sectors[s] < dirMin) dirMin = sim.sectors[s];
+    }
+    if (dirMin < SIM_STOP) return { vx: 0, vy: 0, vz };
+    let scale = dirMin < SIM_SLOW ? 0.3 : dirMin < SIM_CAUTION ? 0.7 : 1.0;
+    return { vx: vx * scale, vy: vy * scale, vz };
+}
+
+// ============================================================
+// Heading Turn Helper
+// ============================================================
+function headingTurn(current, target, turnSpeed) {
+    const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+    if (Math.abs(delta) < 0.15) return { done: true, vz: 0, delta };
+    const vz = Math.sign(delta) * Math.min(Math.abs(delta) * 2, turnSpeed);
+    return { done: false, vz, delta };
+}
+
+// ============================================================
+// Wall-Follow State Machine (heading-tracked)
+// ============================================================
+function wfAction() {
+    const isR = wf.dir === 'right';
+    const wallSec = isR ? 2 : 6;
+    const wallFrontSec = isR ? 1 : 7;
+    const wallRearSec = isR ? 3 : 5;
+    const fD = sim.sectors[0];
+    const wD = sim.sectors[wallSec];
+    const wFD = sim.sectors[wallFrontSec];
+    const wRD = sim.sectors[wallRearSec];
+    const target = wf.targetDist;
+
+    wf.stepsInState++;
+
+    // --- find_wall: drive forward until wall detected ---
+    if (wf.state === 'find_wall') {
+        if (fD < 600 || wD < 600 || wFD < 500) {
+            wfTransition('follow', 'wall found');
+            wf.prevWallDist = wD;
+        } else {
+            return { vx: 0.12, vy: 0, vz: 0 };
+        }
+    }
+
+    // --- corner: heading-tracked turn away from wall ---
+    if (wf.state === 'corner') {
+        const turn = headingTurn(sim.theta, wf.targetHeading, 0.6);
+        if (turn.done && fD > 500) {
+            wfTransition('follow', 'corner cleared');
+            wf.prevWallDist = wD;
+        }
+        const backUp = fD < 200 ? -0.04 : 0;
+        return { vx: backUp, vy: 0, vz: turn.vz };
+    }
+
+    // --- doorway_advance: drive forward to clear doorjamb ---
+    if (wf.state === 'doorway_advance') {
+        wf.doorAdvanceSteps--;
+        if (wf.doorAdvanceSteps <= 0) {
+            // Start the turn
+            const turnDir = isR ? -1 : 1;
+            wf.targetHeading = sim.theta + turnDir * Math.PI / 2;
+            wfTransition('doorway_turn', 'advance done, turning');
+        }
+        return { vx: 0.06, vy: 0, vz: 0 };
+    }
+
+    // --- doorway_turn: heading-tracked 90 turn into corridor ---
+    if (wf.state === 'doorway_turn') {
+        const turn = headingTurn(sim.theta, wf.targetHeading, 0.5);
+        if (turn.done) {
+            wfTransition('doorway_enter', 'turn complete');
+        }
+        return { vx: 0.02, vy: 0, vz: turn.vz };
+    }
+
+    // --- doorway_enter: drive into corridor, confirm walls ---
+    if (wf.state === 'doorway_enter') {
+        if (wD < 1500 && wFD < 1200) {
+            wfTransition('follow', 'corridor confirmed');
+            wf.prevWallDist = wD;
+            wf.wallLostFrames = 0;
+        }
+        if (wf.stepsInState > 30) {
+            // Timeout: no corridor found, go back to follow
+            wfTransition('follow', 'enter timeout');
+            wf.prevWallDist = wD;
+            wf.wallLostFrames = 0;
+        }
+        return { vx: 0.06, vy: 0, vz: 0 };
+    }
+
+    // --- follow: proportional wall tracking ---
+
+    // Detect corner: wall ahead
+    if (fD < 500 || wFD < 400) {
+        const turnDir = isR ? 1 : -1;
+        wf.targetHeading = sim.theta + turnDir * Math.PI / 2;
+        wfTransition('corner', 'wall ahead f=' + Math.round(fD) + ' wf=' + Math.round(wFD));
+        return { vx: fD < 200 ? -0.04 : 0, vy: 0, vz: 0.6 * turnDir };
+    }
+
+    // Detect doorway: wall suddenly disappeared (3-frame confirmation)
+    if (wD > 1000 && wf.prevWallDist < 900) {
+        wf.wallLostFrames++;
+    } else if (wD > 1500) {
+        wf.wallLostFrames++;
+    } else {
+        wf.wallLostFrames = 0;
+    }
+
+    if (wf.wallLostFrames >= 3 && wRD > 800) {
+        wf.doorAdvanceSteps = 4; // advance ~4 steps to clear jamb
+        wfTransition('doorway_advance', 'wall lost 3 frames, wD=' + Math.round(wD));
+        return { vx: 0.06, vy: 0, vz: 0 };
+    }
+
+    // Normal proportional follow
+    wf.prevWallDist = wD;
+    const error = wD - target;
+    const steerGain = 0.002;
+    let vz = error * steerGain * (isR ? -1 : 1);
+    vz = Math.max(-0.5, Math.min(0.5, vz));
+    let vx = 0.08;
+    if (fD < 600) vx = 0.04;
+    if (wD < 250) vx = 0.03;
+    if (Math.abs(vz) > 0.3) vx *= 0.5;
+
+    return { vx, vy: 0, vz };
+}
+
+function wfTransition(newState, reason) {
+    const entry = {
+        step: sim.step,
+        from: wf.state,
+        to: newState,
+        pos: [Math.round(sim.x), Math.round(sim.y)],
+        heading: Math.round(sim.theta * 180 / Math.PI),
+        reason,
+    };
+    wf.transitions.push(entry);
+    if (wf.transitions.length > 50) wf.transitions.shift();
+    wf.state = newState;
+    wf.stepsInState = 0;
+    updateTransitionLog();
+}
+
+// ============================================================
+// Simulation Step
+// ============================================================
+function simStep() {
+    if (!gridData) return;
+
+    updateSensors();
+    const action = wfAction();
+    const filtered = collisionFilter(action.vx, action.vy, action.vz);
+
+    // Apply motion (world frame)
+    const cosH = Math.cos(sim.theta), sinH = Math.sin(sim.theta);
+    const dx = (filtered.vx * cosH - filtered.vy * sinH) * SIM_DT * 1000;
+    const dy = -(filtered.vx * sinH + filtered.vy * cosH) * SIM_DT * 1000;
+
+    const nx = sim.x + dx, ny = sim.y + dy;
+    const gx = Math.floor(nx / CELL), gy = Math.floor(ny / CELL);
+
+    // Wall collision check
+    if (gx >= 2 && gx < GRID - 2 && gy >= 2 && gy < GRID - 2) {
+        let blocked = false;
+        for (let dy2 = -2; dy2 <= 2; dy2++) {
+            for (let dx2 = -2; dx2 <= 2; dx2++) {
+                if (gridData[(gy + dy2) * GRID + (gx + dx2)] > 0.8) blocked = true;
+            }
+        }
+        if (!blocked) { sim.x = nx; sim.y = ny; }
+        else sim.collisions++;
+    }
+
+    sim.theta += filtered.vz * SIM_DT;
+    sim.theta = Math.atan2(Math.sin(sim.theta), Math.cos(sim.theta));
+    sim.step++;
+
+    // Mark explored
+    markExplored();
+
+    // Record trail
+    sim.trail.push({ x: sim.x, y: sim.y, state: wf.state, theta: sim.theta });
+    if (sim.trail.length > 5000) sim.trail.shift();
+
+    // Record distance history
+    const isR = wf.dir === 'right';
+    distHistory.push({
+        wallDist: sim.sectors[isR ? 2 : 6],
+        frontDist: sim.sectors[0],
+        state: wf.state,
+    });
+    if (distHistory.length > 100) distHistory.shift();
+
+    updateUI();
+}
+
+function markExplored() {
+    for (let a = 0; a < 360; a += 3) {
+        const rad = (a + sim.theta * 180 / Math.PI) * Math.PI / 180;
+        const cos = Math.cos(rad), sin = -Math.sin(rad);
+        for (let d = 0; d < SIM_MAX_RANGE; d += CELL) {
+            const wx = sim.x + cos * d, wy = sim.y + sin * d;
+            const gx = Math.floor(wx / CELL), gy = Math.floor(wy / CELL);
+            if (gx < 0 || gx >= GRID || gy < 0 || gy >= GRID) break;
+            if (gridData[gy * GRID + gx] > 0.8) break; // hit wall
+            if (gridData[gy * GRID + gx] < -0.5) {
+                sim.explored.add(gx + ',' + gy);
+            }
+        }
+    }
+}
+
+// ============================================================
+// Auto-run
+// ============================================================
+function wfAutoToggle() {
+    sim.autoRunning = !sim.autoRunning;
+    const btn = document.getElementById('btn-auto');
+    if (sim.autoRunning) {
+        btn.textContent = 'Auto \u23F8';
+        runAutoLoop();
+    } else {
+        btn.textContent = 'Auto \u25B6';
+        if (sim.autoTimer) { clearTimeout(sim.autoTimer); sim.autoTimer = null; }
+    }
+}
+
+function runAutoLoop() {
+    if (!sim.autoRunning) return;
+    simStep();
+    const delay = parseInt(document.getElementById('speed-select').value) || 50;
+    sim.autoTimer = setTimeout(runAutoLoop, delay);
+}
+
+function wfStep() { simStep(); }
+function wfReset() {
+    sim.x = 15000; sim.y = 15000; sim.theta = 0;
+    sim.step = 0; sim.collisions = 0;
+    sim.explored = new Set(); sim.trail = [];
+    wf.state = 'find_wall'; wf.stepsInState = 0;
+    wf.prevWallDist = 9999; wf.wallLostFrames = 0;
+    wf.transitions = [];
+    distHistory = [];
+    wf.targetDist = parseInt(document.getElementById('wf-target').value) || 400;
+    updateSensors();
+    updateUI();
+    document.getElementById('transition-log').innerHTML = 'No transitions yet';
+}
+function wfSetDirection(dir) { wf.dir = dir; }
+
+// ============================================================
+// Route Replay
+// ============================================================
+async function loadRoute() {
+    const name = document.getElementById('route-select').value;
+    if (!name) return;
+    document.getElementById('status').textContent = 'Loading ' + name + '...';
+    try {
+        const r = await fetch('/routes/' + name + '/waypoints.json');
+        route.data = await r.json();
+        route.frameIdx = 0;
+        document.getElementById('route-slider').max = route.data.length - 1;
+        document.getElementById('route-slider').value = 0;
+        document.getElementById('rt-frames').textContent = route.data.length;
+        const dur = route.data[route.data.length - 1].t;
+        document.getElementById('rt-duration').textContent = dur.toFixed(1) + 's';
+        document.getElementById('status').textContent = name + ' loaded (' + route.data.length + ' frames)';
+        rtSeek(0);
+    } catch (e) {
+        document.getElementById('status').textContent = 'Error: ' + e.message;
+    }
+}
+
+function rtSeek(idx) {
+    idx = parseInt(idx);
+    if (!route.data || idx < 0 || idx >= route.data.length) return;
+    route.frameIdx = idx;
+    const f = route.data[idx];
+    document.getElementById('route-slider').value = idx;
+    document.getElementById('rt-frame-num').textContent = idx + '/' + (route.data.length - 1);
+    document.getElementById('rt-pose').textContent = '(' + f.pose[0] + ', ' + f.pose[1] + ') @ ' + f.pose[2] + '\u00B0';
+    document.getElementById('rt-sectors').textContent = f.sectors.map(s => s === 9999 ? '-' : s).join(' ');
+
+    // Run wall-follow on this frame's sectors
+    // (simplified: just show what state/command would be)
+    // TODO: full offline replay
+}
+function rtPrev() { rtSeek(route.frameIdx - 1); }
+function rtNext() { rtSeek(route.frameIdx + 1); }
+function rtPlayToggle() {
+    route.playing = !route.playing;
+    document.getElementById('btn-rt-play').textContent = route.playing ? 'Stop' : 'Play';
+    if (route.playing) rtPlayLoop();
+    else if (route.playTimer) clearInterval(route.playTimer);
+}
+function rtPlayLoop() {
+    route.playTimer = setInterval(function() {
+        if (route.frameIdx < route.data.length - 1) rtSeek(route.frameIdx + 1);
+        else { route.playing = false; document.getElementById('btn-rt-play').textContent = 'Play'; clearInterval(route.playTimer); }
+    }, 200);
+}
+
+// ============================================================
+// UI Updates
+// ============================================================
+function updateUI() {
+    const el = id => document.getElementById(id);
+    const isR = wf.dir === 'right';
+
+    // State badge
+    const badge = el('wf-state-badge');
+    badge.textContent = wf.state;
+    badge.className = 'state-badge state-' + wf.state;
+
+    el('wf-steps-in-state').textContent = wf.stepsInState;
+    el('wf-step').textContent = sim.step;
+    const covPct = sim.totalFree > 0 ? (sim.explored.size / sim.totalFree * 100).toFixed(1) : '0';
+    el('wf-coverage').textContent = sim.explored.size + ' / ' + sim.totalFree + ' (' + covPct + '%)';
+    el('wf-collisions').textContent = sim.collisions;
+    el('wf-pose').textContent = '(' + Math.round(sim.x) + ', ' + Math.round(sim.y) + ') @ ' + Math.round(sim.theta * 180 / Math.PI) + '\u00B0';
+    el('wf-wall-dist').textContent = Math.round(sim.sectors[isR ? 2 : 6]) + ' mm';
+    el('wf-front-dist').textContent = Math.round(sim.sectors[0]) + ' mm';
+    el('wf-level').textContent = sim.level;
+    el('wf-level').style.color = sim.level === 'STOP' ? '#f00' : sim.level === 'SLOW' ? '#f80' : sim.level === 'CAUTION' ? '#ff0' : '#0f8';
+    el('wf-sectors').textContent = Array.from(sim.sectors).map(s => s >= 9999 ? '-' : Math.round(s)).join(' ');
+
+    drawCompass('compass-canvas');
+    drawRadar('radar-canvas');
+    drawDistChart();
+}
+
+function updateTransitionLog() {
+    const log = document.getElementById('transition-log');
+    const entries = wf.transitions.slice(-10).reverse();
+    log.innerHTML = entries.map(e =>
+        '<div class="log-entry">#' + e.step +
+        ' <span class="from">' + e.from + '</span> \u2192 <span class="to">' + e.to + '</span>' +
+        ' @ (' + e.pos[0] + ',' + e.pos[1] + ') ' + e.heading + '\u00B0' +
+        ' <span class="reason">' + e.reason + '</span></div>'
+    ).join('');
+}
+
+// ============================================================
+// Debug Visualizations
+// ============================================================
+function drawCompass(canvasId) {
+    const c = document.getElementById(canvasId);
+    const ctx2 = c.getContext('2d');
+    const cx = 50, cy = 50, r = 40;
+    ctx2.clearRect(0, 0, 100, 100);
+
+    // Background circle
+    ctx2.beginPath(); ctx2.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx2.strokeStyle = '#333'; ctx2.lineWidth = 1; ctx2.stroke();
+
+    // Cardinal marks
+    ctx2.fillStyle = '#555'; ctx2.font = '9px monospace'; ctx2.textAlign = 'center';
+    ctx2.fillText('N', cx, cy - r - 2);
+    ctx2.fillText('S', cx, cy + r + 9);
+    ctx2.fillText('E', cx + r + 6, cy + 3);
+    ctx2.fillText('W', cx - r - 6, cy + 3);
+
+    // Current heading arrow
+    const h = -sim.theta; // negate for display (CCW positive in math, CW on screen)
+    ctx2.beginPath();
+    ctx2.moveTo(cx + Math.sin(h) * (r - 5), cy - Math.cos(h) * (r - 5));
+    ctx2.lineTo(cx, cy);
+    ctx2.strokeStyle = '#0f8'; ctx2.lineWidth = 2; ctx2.stroke();
+
+    // Target heading (if in turn state)
+    if (wf.state === 'corner' || wf.state === 'doorway_turn') {
+        const th = -wf.targetHeading;
+        ctx2.beginPath();
+        ctx2.moveTo(cx + Math.sin(th) * (r - 5), cy - Math.cos(th) * (r - 5));
+        ctx2.lineTo(cx, cy);
+        ctx2.strokeStyle = '#f80'; ctx2.lineWidth = 1; ctx2.setLineDash([3, 3]); ctx2.stroke();
+        ctx2.setLineDash([]);
+    }
+
+    // Heading text
+    ctx2.fillStyle = '#0f8'; ctx2.font = '10px monospace';
+    ctx2.fillText(Math.round(sim.theta * 180 / Math.PI) + '\u00B0', cx, cy + r + 18);
+}
+
+function drawRadar(canvasId) {
+    const c = document.getElementById(canvasId);
+    const ctx2 = c.getContext('2d');
+    const cx = 60, cy = 60, maxR = 50;
+    ctx2.clearRect(0, 0, 120, 120);
+
+    // Threshold rings
+    [SIM_CAUTION, SIM_SLOW, SIM_STOP].forEach((thresh, i) => {
+        const r = (thresh / SIM_MAX_RANGE) * maxR;
+        ctx2.beginPath(); ctx2.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx2.strokeStyle = ['#440', '#430', '#400'][i]; ctx2.lineWidth = 1; ctx2.stroke();
+    });
+
+    // Outer ring
+    ctx2.beginPath(); ctx2.arc(cx, cy, maxR, 0, Math.PI * 2);
+    ctx2.strokeStyle = '#333'; ctx2.lineWidth = 1; ctx2.stroke();
+
+    // Sector distances
+    for (let i = 0; i < 8; i++) {
+        const angle = -(i * 45) * Math.PI / 180 + Math.PI / 2; // 0=front=up
+        const dist = Math.min(sim.sectors[i], SIM_MAX_RANGE);
+        const r = (dist / SIM_MAX_RANGE) * maxR;
+        const x = cx + Math.cos(angle) * r, y = cy - Math.sin(angle) * r;
+
+        ctx2.beginPath(); ctx2.arc(x, y, 3, 0, Math.PI * 2);
+        const color = dist < SIM_STOP ? '#f00' : dist < SIM_SLOW ? '#f80' : dist < SIM_CAUTION ? '#ff0' : '#0f8';
+        ctx2.fillStyle = color; ctx2.fill();
+
+        // Line from center
+        ctx2.beginPath(); ctx2.moveTo(cx, cy); ctx2.lineTo(x, y);
+        ctx2.strokeStyle = color; ctx2.globalAlpha = 0.3; ctx2.stroke();
+        ctx2.globalAlpha = 1;
+    }
+
+    // Wall-follow side indicator
+    const isR = wf.dir === 'right';
+    const sideAngle = -(isR ? 90 : 270) * Math.PI / 180 + Math.PI / 2;
+    ctx2.beginPath();
+    ctx2.moveTo(cx + Math.cos(sideAngle) * 15, cy - Math.sin(sideAngle) * 15);
+    ctx2.lineTo(cx + Math.cos(sideAngle) * maxR, cy - Math.sin(sideAngle) * maxR);
+    ctx2.strokeStyle = '#0ff'; ctx2.lineWidth = 2; ctx2.setLineDash([4, 2]); ctx2.stroke();
+    ctx2.setLineDash([]);
+}
+
+function drawDistChart() {
+    const c = document.getElementById('dist-chart');
+    const ctx2 = c.getContext('2d');
+    const w = c.width, h = c.height;
+    ctx2.clearRect(0, 0, w, h);
+
+    if (distHistory.length < 2) return;
+
+    // Y axis: 0 to 3000mm
+    const maxY = 3000;
+
+    // Target line
+    ctx2.beginPath();
+    ctx2.moveTo(0, h - (wf.targetDist / maxY) * h);
+    ctx2.lineTo(w, h - (wf.targetDist / maxY) * h);
+    ctx2.strokeStyle = '#333'; ctx2.lineWidth = 1; ctx2.setLineDash([4, 4]); ctx2.stroke();
+    ctx2.setLineDash([]);
+
+    // STOP threshold
+    ctx2.beginPath();
+    ctx2.moveTo(0, h - (SIM_STOP / maxY) * h);
+    ctx2.lineTo(w, h - (SIM_STOP / maxY) * h);
+    ctx2.strokeStyle = '#400'; ctx2.lineWidth = 1; ctx2.stroke();
+
+    // Wall distance line
+    ctx2.beginPath();
+    distHistory.forEach((d, i) => {
+        const x = (i / 100) * w;
+        const y = h - (Math.min(d.wallDist, maxY) / maxY) * h;
+        i === 0 ? ctx2.moveTo(x, y) : ctx2.lineTo(x, y);
+    });
+    ctx2.strokeStyle = '#0f8'; ctx2.lineWidth = 1.5; ctx2.stroke();
+
+    // Front distance line
+    ctx2.beginPath();
+    distHistory.forEach((d, i) => {
+        const x = (i / 100) * w;
+        const y = h - (Math.min(d.frontDist, maxY) / maxY) * h;
+        i === 0 ? ctx2.moveTo(x, y) : ctx2.lineTo(x, y);
+    });
+    ctx2.strokeStyle = '#f80'; ctx2.lineWidth = 1; ctx2.stroke();
+
+    // State color bar at bottom
+    distHistory.forEach((d, i) => {
+        const x = (i / 100) * w;
+        const colors = { find_wall: '#88f', follow: '#0f8', corner: '#f80', doorway_advance: '#ff0', doorway_turn: '#fa0', doorway_enter: '#f0f' };
+        ctx2.fillStyle = colors[d.state] || '#888';
+        ctx2.fillRect(x, h - 4, w / 100 + 1, 4);
+    });
+
+    // Legend
+    ctx2.fillStyle = '#0f8'; ctx2.font = '9px monospace'; ctx2.fillText('wall', 2, 10);
+    ctx2.fillStyle = '#f80'; ctx2.fillText('front', 30, 10);
+}
+
+// ============================================================
+// Map Rendering
+// ============================================================
+const STATE_COLORS = {
+    find_wall: '#4466aa', follow: '#00cc66', corner: '#ff8800',
+    doorway_advance: '#cccc00', doorway_turn: '#ffaa00', doorway_enter: '#cc00cc'
+};
+
+function renderLoop() {
+    drawMap();
+    requestAnimationFrame(renderLoop);
+}
+
+function drawMap() {
+    if (!gridData) return;
+    const w = canvas.width, h = canvas.height;
+    ctx.fillStyle = '#050510';
+    ctx.fillRect(0, 0, w, h);
+
+    // Compute transform: fit grid in canvas with pan/zoom
+    const gridPx = GRID * CELL; // 30000mm
+    const scale = Math.min(w, h) / gridPx * zoom;
+    const ox = w / 2 + panX - GRID * CELL * scale / 2;
+    const oy = h / 2 + panY - GRID * CELL * scale / 2;
+
+    function worldToScreen(wx, wy) {
+        return [ox + wx * scale, oy + wy * scale];
+    }
+
+    // Draw grid cells
+    const cellPx = CELL * scale;
+    if (cellPx > 0.5) {
+        for (let gy = 0; gy < GRID; gy++) {
+            for (let gx = 0; gx < GRID; gx++) {
+                const v = gridData[gy * GRID + gx];
+                if (v === 0) continue; // unknown: skip (background)
+                let color;
+                if (v > 0.8) color = '#cc2222';       // wall
+                else if (v < -0.5) color = '#1a3a1a';  // free
+                else continue;
+                const [sx, sy] = worldToScreen(gx * CELL, gy * CELL);
+                ctx.fillStyle = color;
+                ctx.fillRect(sx, sy, cellPx + 0.5, cellPx + 0.5);
+            }
+        }
+    }
+
+    // Draw explored overlay
+    if (sim.explored.size > 0) {
+        ctx.fillStyle = 'rgba(0, 200, 0, 0.15)';
+        for (const key of sim.explored) {
+            const [gx, gy] = key.split(',').map(Number);
+            const [sx, sy] = worldToScreen(gx * CELL, gy * CELL);
+            ctx.fillRect(sx, sy, cellPx + 0.5, cellPx + 0.5);
+        }
+    }
+
+    // Draw trail (colored by state)
+    if (sim.trail.length > 1) {
+        for (let i = 1; i < sim.trail.length; i++) {
+            const p0 = sim.trail[i - 1], p1 = sim.trail[i];
+            const [x0, y0] = worldToScreen(p0.x, p0.y);
+            const [x1, y1] = worldToScreen(p1.x, p1.y);
+            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+            ctx.strokeStyle = STATE_COLORS[p1.state] || '#888';
+            ctx.lineWidth = 1.5; ctx.globalAlpha = 0.6; ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    // Draw robot
+    const [rx, ry] = worldToScreen(sim.x, sim.y);
+    const rr = Math.max(ROBOT_RADIUS * scale, 4);
+    ctx.beginPath(); ctx.arc(rx, ry, rr, 0, Math.PI * 2);
+    ctx.fillStyle = '#f44'; ctx.fill();
+
+    // Heading arrow
+    const hx = rx + Math.cos(-sim.theta) * rr * 2;
+    const hy = ry + Math.sin(-sim.theta) * rr * 2;
+    ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(hx, hy);
+    ctx.strokeStyle = '#ff0'; ctx.lineWidth = 2; ctx.stroke();
+
+    // Wall-follow side indicator
+    const isR = wf.dir === 'right';
+    const sideAngle = sim.theta + (isR ? -Math.PI / 2 : Math.PI / 2);
+    const sx2 = rx + Math.cos(-sideAngle) * rr * 3;
+    const sy2 = ry + Math.sin(-sideAngle) * rr * 3;
+    ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(sx2, sy2);
+    ctx.strokeStyle = '#0ff'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // LiDAR scan dots (every 5th ray)
+    if (sim.scan.length > 0) {
+        ctx.fillStyle = 'rgba(0, 255, 128, 0.3)';
+        for (let i = 0; i < sim.scan.length; i += 5) {
+            const { angle, dist } = sim.scan[i];
+            if (dist >= SIM_MAX_RANGE) continue;
+            const rad = (angle + sim.theta * 180 / Math.PI) * Math.PI / 180;
+            const px = sim.x + Math.cos(rad) * dist;
+            const py = sim.y - Math.sin(rad) * dist;
+            const [spx, spy] = worldToScreen(px, py);
+            ctx.fillRect(spx - 1, spy - 1, 2, 2);
+        }
+    }
+
+    // Doorway trigger markers
+    wf.transitions.forEach(t => {
+        if (t.to.startsWith('doorway')) {
+            const [mx, my] = worldToScreen(t.pos[0], t.pos[1]);
+            ctx.beginPath(); ctx.arc(mx, my, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#fa0'; ctx.globalAlpha = 0.6; ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+    });
+}
+
+// ============================================================
+// Mouse events (pan/zoom/place)
+// ============================================================
+function onWheel(e) {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    zoom *= factor;
+    zoom = Math.max(0.2, Math.min(10, zoom));
+}
+function onMouseDown(e) {
+    if (e.button === 0 && e.shiftKey) {
+        // Place robot
+        placing = true;
+        placeStart = { x: e.offsetX, y: e.offsetY };
+    } else {
+        dragging = true;
+        dragStart = { x: e.offsetX - panX, y: e.offsetY - panY };
+    }
+}
+function onMouseMove(e) {
+    if (dragging) {
+        panX = e.offsetX - dragStart.x;
+        panY = e.offsetY - dragStart.y;
+    }
+}
+function onMouseUp(e) {
+    if (placing) {
+        // Convert screen to world
+        const gridPx = GRID * CELL;
+        const scale = Math.min(canvas.width, canvas.height) / gridPx * zoom;
+        const ox = canvas.width / 2 + panX - GRID * CELL * scale / 2;
+        const oy = canvas.height / 2 + panY - GRID * CELL * scale / 2;
+        sim.x = (placeStart.x - ox) / scale;
+        sim.y = (placeStart.y - oy) / scale;
+        if (e.offsetX !== placeStart.x || e.offsetY !== placeStart.y) {
+            sim.theta = Math.atan2(-(e.offsetY - placeStart.y), e.offsetX - placeStart.x);
+        }
+        placing = false;
+        updateSensors();
+        updateUI();
+    }
+    dragging = false;
+}
+
+// ============================================================
+// Tab switching
+// ============================================================
+function setTab(tab) {
+    currentTab = tab;
+    document.getElementById('tab-sim').className = 'tab-btn' + (tab === 'sim' ? ' active' : '');
+    document.getElementById('tab-route').className = 'tab-btn' + (tab === 'route' ? ' active' : '');
+    document.getElementById('sim-controls').style.display = tab === 'sim' ? '' : 'none';
+    document.getElementById('route-controls-panel').style.display = tab === 'route' ? '' : 'none';
+}
+
+// ============================================================
+// Start
+// ============================================================
+window.addEventListener('load', init);
+</script>
+</body>
+</html>

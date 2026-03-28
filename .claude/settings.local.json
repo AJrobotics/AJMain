@@ -32,7 +32,18 @@
       "Bash(ssh dongchul@192.168.1.91 \"pkill -f ''python.*app.py'' || true\")",
       "Bash(ssh dongchul@192.168.1.91 \"pkill -f ''python3.*app.py'' 2>/dev/null; true\")",
       "Bash(ssh dongchul@192.168.1.91 \"ps aux | grep app.py | grep -v grep\")",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(schtasks /Query /FO LIST /V)",
+      "Bash(schtasks /Query /FO LIST)",
+      "Bash(powershell -NoProfile -Command \"Get-WinEvent -FilterHashtable @{LogName=''Security'';Id=4688} -MaxEvents 20 -ErrorAction SilentlyContinue | Select-Object TimeCreated, @{N=''Process'';E={\\($_.Properties[5].Value\\)}} | Format-Table -AutoSize | Out-String\")",
+      "Bash(powershell -NoProfile -Command \"Get-WinEvent -LogName ''Microsoft-Windows-TaskScheduler/Operational'' -MaxEvents 30 -ErrorAction SilentlyContinue | Where-Object { $_.TimeCreated -gt \\(Get-Date\\).AddMinutes\\(-5\\) } | Select-Object TimeCreated, Id, Message | Format-List | Out-String\")",
+      "Bash(powershell -NoProfile -Command 'Get-WinEvent -LogName \"\"Microsoft-Windows-TaskScheduler/Operational\"\" -MaxEvents 30 2>$null | Where-Object { $_.TimeCreated -gt \\(Get-Date\\).AddMinutes\\(-5\\) } | Format-List TimeCreated, Id, Message')",
+      "Bash(grep -v \"^--$\")",
+      "Bash(powershell.exe -NoProfile -Command 'schtasks.exe /Query /TN \"\"AJMain_GitSync\"\" /FO LIST /V')",
+      "Bash(powershell.exe -NoProfile -Command 'schtasks.exe /Delete /TN \"\"AJMain_GitSync\"\" /F')",
+      "Bash(powershell.exe -NoProfile -Command 'Start-Process schtasks.exe -ArgumentList \"\"/Delete\"\",\"\"/TN\"\",\"\"AJMain_GitSync\"\",\"\"/F\"\" -Verb RunAs -Wait')",
+      "Bash(powershell.exe -NoProfile -Command 'schtasks.exe /Query /TN \"\"AJMain_GitSync\"\" 2>&1')",
+      "Bash(git pull:*)"
     ]
   }
 }
