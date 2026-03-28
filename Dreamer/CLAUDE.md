@@ -1,7 +1,7 @@
 # Dreamer Machine Notes
 
 ## Overview
-- **Host**: 192.168.1.30 (was 192.168.1.44, DHCP changed)
+- **Host**: 192.168.1.44 (ethernet), 192.168.1.30 (WiFi when connected)
 - **OS**: Windows 11
 - **Role**: Development PC, XBee heartbeat responder, GPU training
 - **GPU**: RTX 4070 (used for YOLO + RL training)
